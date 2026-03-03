@@ -38,11 +38,16 @@ const SHIFT_END = { M: 14.2, P: 20.2, D: 20.2, N: 8.2 }; // next day for N
 const SHIFT_START = { M: 8, P: 14, D: 8, N: 20 };
 
 // Forbidden next-day transitions (from → [forbidden nexts])
+// Note: After N must come S (smonto), then 2x R (riposo) - N→S→R→R pattern
+// S (smonto) is NOT a rest day - it's recovery after night
+// After S must come R (first rest day)
+// After R that follows S, must come another R (second rest day)
+// After R, any shift is allowed including N (allows patterns like D→R→N)
 const FORBIDDEN_NEXT = {
   P: ['M', 'D'],
   D: ['M', 'P', 'D'],
   N: ['M', 'P', 'D', 'R', 'N'], // after N must be S
-  S: ['M', 'P', 'D', 'N'],       // after S must be R (or at least not work)
+  S: ['M', 'P', 'D', 'N', 'S'], // after S must be R (first rest day)
 };
 
 // ---------------------------------------------------------------------------
@@ -192,7 +197,13 @@ function solve(config) {
   }
 
   // -------------------------------------------------------------------------
-  // Phase 2 — Distribute night shifts (N-S-R blocks)
+  // Phase 2 — Distribute night shifts (N-S-R-R blocks)
+  // The pattern is N-S-R-R where:
+  //   N = Notte (night shift)
+  //   S = Smonto (recovery day after night - NOT a rest day)
+  //   R = Riposo (first rest day)
+  //   R = Riposo (second rest day)
+  // This ensures 2 REAL rest days after each night shift (S is NOT counted as rest)
   // -------------------------------------------------------------------------
   progress(20, 'Distribuzione turni notturni...');
 
@@ -204,40 +215,93 @@ function solve(config) {
 
   const targetNights = rules.targetNights ?? 4;
   const maxNights = rules.maxNights ?? 7;
+  const minCovN = rules.minCoverageN ?? 2;
 
   // Count how many nights each nurse gets
   const nightCount = new Array(numNurses).fill(0);
+  
+  // Helper: check if nurse can do night on day d
+  function canDoNight(n, d) {
+    if (schedule[n][d] !== null) return false;
+    if (nightCount[n] >= maxNights) return false;
+    
+    // Check if S day (d+1) is free (if within month)
+    if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
+    
+    // Check if first R day (d+2) is free (if within month)
+    if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
+    
+    // Check if second R day (d+3) is free (if within month)
+    if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+    
+    // Don't put N right after S
+    if (d > 0 && schedule[n][d - 1] === 'S') return false;
+    
+    // Don't put N right after first R (only 1 R after S)
+    if (d > 1 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'S') return false;
+    
+    // Check we're not breaking an N-S-R-R pattern (need 2 R's after S before new N)
+    if (d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') {
+      // Only 1 R after S-R, need another R
+      return false;
+    }
+    
+    return true;
+  }
+  
+  // Helper: assign night block to nurse n on day d
+  function assignNightBlock(n, d) {
+    schedule[n][d] = 'N';
+    if (d + 1 < numDays) schedule[n][d + 1] = 'S';
+    if (d + 2 < numDays) schedule[n][d + 2] = 'R';
+    if (d + 3 < numDays) schedule[n][d + 3] = 'R';
+    nightCount[n]++;
+  }
 
-  // Build a list of candidate night-start days (avoiding last 2 days to fit S-R)
-  // A night block occupies days: d (N), d+1 (S), d+2 (R)
-  const nightStartCandidates = [];
-  for (let d = 0; d < numDays - 2; d++) nightStartCandidates.push(d);
-
-  // Shuffle nurses for fairness
-  const nightOrder = shuffle([...nightEligible]);
-
-  for (const n of nightOrder) {
-    const target = targetNights;
-    const candidates = shuffle([...nightStartCandidates]);
-
-    for (const d of candidates) {
-      if (nightCount[n] >= target) break;
-      // Check the block days are free
-      if (schedule[n][d] !== null || schedule[n][d + 1] !== null || schedule[n][d + 2] !== null) continue;
-      // Don't put N right after N block's S/R tail of a previous block
-      if (d > 0 && schedule[n][d - 1] === 'S') continue;
-      // Don't exceed per-nurse max
-      if (nightCount[n] >= maxNights) break;
-
-      schedule[n][d] = 'N';
-      schedule[n][d + 1] = 'S';
-      schedule[n][d + 2] = 'R';
-      nightCount[n]++;
+  // STEP 1: Ensure minimum coverage on ALL days first (coverage-first approach)
+  for (let d = 0; d < numDays; d++) {
+    // Count current night coverage for this day
+    let nightCov = 0;
+    for (let n = 0; n < numNurses; n++) {
+      if (schedule[n][d] === 'N') nightCov++;
+    }
+    
+    // Assign nights until we reach minimum coverage
+    while (nightCov < minCovN) {
+      // Find eligible nurses sorted by night count (prefer nurses with fewer nights for fairness)
+      const candidates = [...nightEligible]
+        .filter(n => canDoNight(n, d))
+        .sort((a, b) => nightCount[a] - nightCount[b]);
+      
+      if (candidates.length === 0) break; // No more eligible nurses
+      
+      // Assign to nurse with fewest nights
+      assignNightBlock(candidates[0], d);
+      nightCov++;
     }
   }
 
-  // Handle last-day N blocks (can't fit full N-S-R)
-  // We skip them for simplicity (no night on last 2 days)
+  // STEP 2: Distribute remaining nights fairly to reach target
+  const nightOrder = shuffle([...nightEligible]);
+  
+  for (const n of nightOrder) {
+    if (nightCount[n] >= targetNights) continue;
+    
+    // Find available days for this nurse, sorted randomly
+    const availableDays = [];
+    for (let d = 0; d < numDays; d++) {
+      if (canDoNight(n, d)) availableDays.push(d);
+    }
+    
+    shuffle(availableDays);
+    
+    for (const d of availableDays) {
+      if (nightCount[n] >= targetNights) break;
+      if (!canDoNight(n, d)) continue; // Re-check in case state changed
+      
+      assignNightBlock(n, d);
+    }
+  }
 
   progress(40, 'Assegnazione turni diurni...');
 
@@ -252,7 +316,7 @@ function solve(config) {
   const maxCovP = rules.maxCoverageP ?? 7;
   const minCovD = rules.minCoverageD ?? 0;
   const maxCovD = rules.maxCoverageD ?? 4;
-  const minCovN = rules.minCoverageN ?? 2;
+  // minCovN already declared in Phase 2
   const maxCovN = rules.maxCoverageN ?? 4;
   const preferDiurni = rules.preferDiurni ?? false;
 
@@ -301,10 +365,15 @@ function solve(config) {
     if (s === 'D' && nurseProps[n].noDiurni) return false;
     const prev = d > 0 ? schedule[n][d - 1] : null;
     if (!transitionOk(prev, s, rules)) return false;
-    // Also check if assigning N here allows S the next day
+    // For night shifts, check if we have room for the S-R-R sequence
+    // N-S-R-R pattern requires checking d+1 (S), d+2 (R), d+3 (R)
     if (s === 'N') {
-      if (d + 2 >= numDays) return false; // no room for S-R
-      if (schedule[n][d + 1] !== null || schedule[n][d + 2] !== null) return false;
+      // Check if d+1 is available for S (if within month)
+      if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
+      // Check if d+2 is available for first R (if within month)  
+      if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
+      // Check if d+3 is available for second R (if within month)
+      if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
     }
     return true;
   }
@@ -391,10 +460,102 @@ function solve(config) {
   }
 
   // -------------------------------------------------------------------------
+  // Phase 4.5 — Ensure minimum 2 rest days (R) per week for ALL nurses
+  // For nurses with no_notti tag, they don't get S (smonto) days, so they need explicit R days
+  // For nurses who do nights, the N-S-R pattern already provides rest days
+  // -------------------------------------------------------------------------
+  progress(78, 'Verifica riposi settimanali...');
+  
+  const minRPerWeek = rules.minRPerWeek ?? 2;
+  
+  if (minRPerWeek > 0) {
+    // Helper: get week index for a day (0-indexed day in month)
+    function getWeekIndex(d) {
+      // Week starts on Monday. Get the day of week for day 0 (first of month)
+      const firstDow = dayOfWeek(year, month, 1); // 0=Sun, 1=Mon, ...
+      // Adjust so Monday = 0
+      const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1;
+      // Day d is (d + adjustedFirstDow) from Monday of first week
+      return Math.floor((d + adjustedFirstDow) / 7);
+    }
+    
+    // Calculate number of weeks in the month
+    const numWeeks = getWeekIndex(numDays - 1) + 1;
+    
+    for (let n = 0; n < numNurses; n++) {
+      // For each week, count R days (real rest, not S which is smonto)
+      for (let week = 0; week < numWeeks; week++) {
+        let restCount = 0;
+        const weekDays = [];
+        
+        for (let d = 0; d < numDays; d++) {
+          if (getWeekIndex(d) === week) {
+            weekDays.push(d);
+            if (schedule[n][d] === 'R') restCount++;
+          }
+        }
+        
+        // If not enough rest days, try to convert some work days to R
+        while (restCount < minRPerWeek && weekDays.length > 0) {
+          let converted = false;
+          
+          // Try to convert M or P shifts to R (prefer days with excess coverage)
+          for (const d of weekDays) {
+            const s = schedule[n][d];
+            if (s !== 'M' && s !== 'P') continue;
+            
+            const cov = dayCoverage(d);
+            const slotMin = s === 'M' ? minCovM : minCovP;
+            const slotCurrent = s === 'M' ? cov.M : cov.P;
+            
+            // Only convert if coverage remains above minimum
+            if (slotCurrent > slotMin) {
+              // Check transitions are valid
+              const prev = d > 0 ? schedule[n][d - 1] : null;
+              const next = d < numDays - 1 ? schedule[n][d + 1] : null;
+              if (transitionOk(prev, 'R', rules) && transitionOk('R', next, rules)) {
+                schedule[n][d] = 'R';
+                restCount++;
+                converted = true;
+                break;
+              }
+            }
+          }
+          
+          if (!converted) break; // No more conversions possible
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Phase 5 — Equity pass: try to balance hours
   // -------------------------------------------------------------------------
   // Simple swap pass: if nurse A has much more hours than nurse B,
   // and both have an R on the same day, swap one R→M (or R→P)
+  // Now also respects minimum rest days per week
+  
+  // Helper to count R days in a week for a nurse
+  function countWeekRestDays(n, weekIdx) {
+    let count = 0;
+    for (let d = 0; d < numDays; d++) {
+      const firstDow = dayOfWeek(year, month, 1);
+      const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1;
+      const dayWeek = Math.floor((d + adjustedFirstDow) / 7);
+      if (dayWeek === weekIdx && schedule[n][d] === 'R') {
+        count++;
+      }
+    }
+    return count;
+  }
+  
+  // Helper to get week index for a day
+  function getDayWeek(d) {
+    const firstDow = dayOfWeek(year, month, 1);
+    const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1;
+    return Math.floor((d + adjustedFirstDow) / 7);
+  }
+  
   const maxPasses = 3;
   for (let pass = 0; pass < maxPasses; pass++) {
     let changed = false;
@@ -427,8 +588,15 @@ function solve(config) {
         }
       } else if (hours[n] < avgHours - 8) {
         // Nurse has too few hours — try adding M shifts on R days
+        // But respect minimum rest days per week
         for (let d = 0; d < numDays; d++) {
           if (schedule[n][d] !== 'R') continue;
+          
+          // Check if we can remove this R without going below minimum rest days per week
+          const weekIdx = getDayWeek(d);
+          const weekRestCount = countWeekRestDays(n, weekIdx);
+          if (minRPerWeek > 0 && weekRestCount <= minRPerWeek) continue; // Can't remove this R
+          
           const cov = dayCoverage(d);
           if (cov.M >= maxCovM) continue;
           if (!nurseEligible(n, d, 'M')) continue;
@@ -466,10 +634,50 @@ function solve(config) {
         violations.push({ nurse: n, day: d, type: 'transition', msg: `Infermiere ${n + 1}, giorno ${d + 1}-${d + 2}: transizione vietata ${cur}→${nxt}` });
       }
     }
-    // Check N must be followed by S
+    // Check N must be followed by S (except on last day of month)
     for (let d = 0; d < numDays - 1; d++) {
       if (schedule[n][d] === 'N' && schedule[n][d + 1] !== 'S') {
         violations.push({ nurse: n, day: d, type: 'N_no_S', msg: `Infermiere ${n + 1}, giorno ${d + 1}: N non seguito da S` });
+      }
+    }
+    // Check S must be followed by R (first rest day after smonto)
+    for (let d = 0; d < numDays - 1; d++) {
+      if (schedule[n][d] === 'S' && schedule[n][d + 1] !== 'R') {
+        violations.push({ nurse: n, day: d, type: 'S_no_R', msg: `Infermiere ${n + 1}, giorno ${d + 1}: S non seguito da R (primo riposo dopo smonto)` });
+      }
+    }
+    // Check that after N-S-R there must be another R (2 rest days after night, smonto doesn't count)
+    for (let d = 0; d < numDays - 3; d++) {
+      if (schedule[n][d] === 'N' && schedule[n][d + 1] === 'S' && schedule[n][d + 2] === 'R') {
+        if (schedule[n][d + 3] !== 'R') {
+          violations.push({ nurse: n, day: d, type: 'need_2R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)` });
+        }
+      }
+    }
+  }
+  
+  // Validate minimum rest days per week
+  if (minRPerWeek > 0) {
+    // Helper: get week index for a day (0-indexed day in month)
+    function getWeekIndexValidation(d) {
+      const firstDow = dayOfWeek(year, month, 1);
+      const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1;
+      return Math.floor((d + adjustedFirstDow) / 7);
+    }
+    
+    const numWeeksValidation = getWeekIndexValidation(numDays - 1) + 1;
+    
+    for (let n = 0; n < numNurses; n++) {
+      for (let week = 0; week < numWeeksValidation; week++) {
+        let restCount = 0;
+        for (let d = 0; d < numDays; d++) {
+          if (getWeekIndexValidation(d) === week && schedule[n][d] === 'R') {
+            restCount++;
+          }
+        }
+        if (restCount < minRPerWeek) {
+          violations.push({ nurse: n, week, type: 'min_R_week', msg: `Infermiere ${n + 1}, settimana ${week + 1}: solo ${restCount} riposi (minimo ${minRPerWeek})` });
+        }
       }
     }
   }
