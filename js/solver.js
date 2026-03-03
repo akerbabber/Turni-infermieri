@@ -1225,13 +1225,21 @@ function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
 
 const MILP_MIN_TIME_PER_SOLUTION = 1;
 const MILP_MAX_TIME_PER_SOLUTION = 8;
-const MILP_TOTAL_TIME_BUDGET     = 30;
+const MILP_DEFAULT_TOTAL_TIME_BUDGET = 30;
+
+// Safety cap to prevent indefinite runs in zero-violations mode (10 minutes)
+const UNTIL_ZERO_MAX_TIME = 600;
 
 /**
  * Multi-solution solver using HiGHS MILP + fallback to greedy.
+ * @param {object} config
+ * @param {number} numSolutions
+ * @param {number} timeBudget  – total seconds allocated; 0 or undefined = default 30s
+ * @param {boolean} untilZeroViolations – keep generating until a 0-violation solution is found
  */
-function solve(config, numSolutions) {
+function solve(config, numSolutions, timeBudget, untilZeroViolations) {
   numSolutions = Math.max(1, Math.min(numSolutions || 1, 20));
+  const totalBudget = (timeBudget && timeBudget > 0) ? timeBudget : MILP_DEFAULT_TOTAL_TIME_BUDGET;
   const ctx = buildContext(config);
   const solutions = [];
 
@@ -1255,49 +1263,72 @@ function solve(config, numSolutions) {
     milpAvailable = false;
   }
 
-  if (milpAvailable) {
-    progress(5, 'Solver MILP caricato, generazione soluzioni…');
+  /** Generate one batch of solutions */
+  function generateBatch(batchSolutions, batchLabel, seedOffset) {
     const timePerSolution = Math.max(MILP_MIN_TIME_PER_SOLUTION,
-      Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(MILP_TOTAL_TIME_BUDGET / numSolutions)));
+      Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions)));
 
     for (let i = 0; i < numSolutions; i++) {
-      progress(5 + Math.floor(i * 80 / numSolutions),
-               `MILP: soluzione ${i + 1}/${numSolutions}…`);
-      try {
-        const schedule = solveOneMILP(highs, ctx, i, timePerSolution);
-        if (schedule) {
-          // Post-process with a short local search to polish
-          const polished = localSearch(schedule, ctx, 1000);
-          const violations = collectViolations(polished, ctx);
-          const stats = computeStats(polished, ctx);
-          const score = computeScore(polished, ctx);
-          solutions.push({ schedule: polished, violations, stats, score: score.total });
-        }
-      } catch (e) {
-        // MILP failed for this seed, use greedy fallback
-        progress(5 + Math.floor(i * 80 / numSolutions),
-                 `Fallback euristica ${i + 1}/${numSolutions}…`);
-        const schedule = construct(ctx);
-        const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS);
-        const violations = collectViolations(improved, ctx);
-        const stats = computeStats(improved, ctx);
-        const score = computeScore(improved, ctx);
-        solutions.push({ schedule: improved, violations, stats, score: score.total });
+      const pctBase = 5 + Math.floor(i * 80 / numSolutions);
+      if (milpAvailable) {
+        progress(pctBase, `${batchLabel}MILP: soluzione ${i + 1}/${numSolutions}…`);
+        try {
+          const seed = seedOffset + i;
+          const schedule = solveOneMILP(highs, ctx, seed, timePerSolution);
+          if (schedule) {
+            // ~200 polish iterations per second of time budget per solution
+            const polishIters = Math.max(1000, Math.floor((totalBudget / numSolutions) * 200));
+            const polished = localSearch(schedule, ctx, polishIters);
+            const violations = collectViolations(polished, ctx);
+            const stats = computeStats(polished, ctx);
+            const score = computeScore(polished, ctx);
+            batchSolutions.push({ schedule: polished, violations, stats, score: score.total });
+            continue;
+          }
+        } catch (_e) { /* fall through to greedy */ }
       }
-    }
-  } else {
-    // Full greedy fallback
-    progress(5, 'MILP non disponibile, euristica classica…');
-    for (let i = 0; i < numSolutions; i++) {
-      progress(5 + Math.floor(i * 80 / numSolutions),
-               `Euristica ${i + 1}/${numSolutions}…`);
+      // Greedy fallback
+      progress(pctBase,
+               `${batchLabel}${milpAvailable ? 'Fallback euristica' : 'Euristica'} ${i + 1}/${numSolutions}…`);
+      // ~500 greedy iterations per second of time budget per solution
+      const greedyIters = Math.max(LOCAL_SEARCH_ITERS, Math.floor((totalBudget / numSolutions) * 500));
       const schedule = construct(ctx);
-      const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS);
+      const improved = localSearch(schedule, ctx, greedyIters);
       const violations = collectViolations(improved, ctx);
       const stats = computeStats(improved, ctx);
       const score = computeScore(improved, ctx);
-      solutions.push({ schedule: improved, violations, stats, score: score.total });
+      batchSolutions.push({ schedule: improved, violations, stats, score: score.total });
     }
+  }
+
+  if (!milpAvailable) {
+    progress(5, 'MILP non disponibile, euristica classica…');
+  } else {
+    progress(5, 'Solver MILP caricato, generazione soluzioni…');
+  }
+
+  if (untilZeroViolations) {
+    // Run in a loop until we find a solution with 0 violations or safety time expires
+    const startTime = Date.now();
+    let round = 1;
+    let foundZero = false;
+    while (!foundZero) {
+      const elapsed = (Date.now() - startTime) / 1000;
+      if (elapsed >= UNTIL_ZERO_MAX_TIME) {
+        progress(90, `Tempo massimo raggiunto (${Math.round(elapsed)}s). Uso miglior soluzione trovata.`);
+        break;
+      }
+      const prevLen = solutions.length;
+      progress(5, `Tentativo #${round} — ricerca soluzione senza violazioni…`);
+      generateBatch(solutions, `[#${round}] `, (round - 1) * numSolutions);
+      // Check only newly added solutions from this batch
+      for (let j = prevLen; j < solutions.length; j++) {
+        if (solutions[j].violations.length === 0) { foundZero = true; break; }
+      }
+      round++;
+    }
+  } else {
+    generateBatch(solutions, '', 0);
   }
 
   // Sort by score (best first)
@@ -1317,7 +1348,9 @@ self.onmessage = function (e) {
   if (e.data.type === 'solve') {
     try {
       const numSolutions = e.data.numSolutions || 1;
-      const solutions = solve(e.data.config, numSolutions);
+      const timeBudget = e.data.timeBudget || 0;
+      const untilZeroViolations = !!e.data.untilZeroViolations;
+      const solutions = solve(e.data.config, numSolutions, timeBudget, untilZeroViolations);
       // Send all solutions; first one is the best
       const best = solutions[0] || {};
       self.postMessage({
