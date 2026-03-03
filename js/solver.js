@@ -566,6 +566,15 @@ function construct(ctx) {
     }
 
     // Alternate M/P assignment: assign one at a time to the most-needed slot
+    // Pre-compute M/P counts per nurse for balance sorting
+    const mpCount = new Array(numNurses);
+    for (let n = 0; n < numNurses; n++) {
+      let mc = 0, pc = 0;
+      for (let dd = 0; dd < numDays; dd++) {
+        if (schedule[n][dd] === 'M') mc++; else if (schedule[n][dd] === 'P') pc++;
+      }
+      mpCount[n] = { m: mc, p: pc };
+    }
     while (cov.M < maxCovM || cov.P < maxCovP) {
       let assigned = false;
       const mGap = Math.max(0, minCovM - cov.M);
@@ -581,20 +590,14 @@ function construct(ctx) {
         const candidates = avail().filter(n => eligible(n, d, s) && (belowMin || hasWeekBudget(n, d)));
         // Sort candidates: prefer nurses who need this shift type for personal M/P balance
         candidates.sort((a, b) => {
-          let aMc = 0, aPc = 0, bMc = 0, bPc = 0;
-          for (let dd = 0; dd < numDays; dd++) {
-            if (schedule[a][dd] === 'M') aMc++; else if (schedule[a][dd] === 'P') aPc++;
-            if (schedule[b][dd] === 'M') bMc++; else if (schedule[b][dd] === 'P') bPc++;
-          }
-          // Prefer the nurse who has fewer of this shift type relative to the other
-          const aBal = s === 'M' ? (aMc - aPc) : (aPc - aMc);
-          const bBal = s === 'M' ? (bMc - bPc) : (bPc - bMc);
+          const aBal = s === 'M' ? (mpCount[a].m - mpCount[a].p) : (mpCount[a].p - mpCount[a].m);
+          const bBal = s === 'M' ? (mpCount[b].m - mpCount[b].p) : (mpCount[b].p - mpCount[b].m);
           return aBal - bBal;
         });
         if (candidates.length > 0) {
           const n = candidates[0];
           schedule[n][d] = s;
-          if (s === 'M') cov.M++; else cov.P++;
+          if (s === 'M') { cov.M++; mpCount[n].m++; } else { cov.P++; mpCount[n].p++; }
           assigned = true;
           break;
         }

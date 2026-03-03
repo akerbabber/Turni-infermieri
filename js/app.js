@@ -1028,7 +1028,7 @@ function revalidate() {
     if (state.rules.consente2DiurniConsecutivi) {
       for (let d = 1; d < numDays - 1; d++) {
         if (state.schedule[n][d-1] === 'D' && state.schedule[n][d] === 'D' && state.schedule[n][d+1] !== 'R')
-          violations.push({ nurse: n, day: d, type: 'DD_no_R', msg: `Inf. ${n + 1}, gg ${d + 1}: dopo D-D serve R` });
+          violations.push({ nurse: n, day: d + 1, type: 'DD_no_R', msg: `Inf. ${n + 1}, gg ${d + 2}: dopo D-D serve R` });
       }
       for (let d = 2; d < numDays; d++) {
         if (state.schedule[n][d-2] === 'D' && state.schedule[n][d-1] === 'D' && state.schedule[n][d] === 'D')
