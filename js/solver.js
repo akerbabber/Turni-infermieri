@@ -119,6 +119,25 @@ function solve(config) {
   const schedule = Array.from({ length: numNurses }, () => new Array(numDays).fill(null));
 
   progress(5, 'Costruzione vincoli...');
+  
+  // Pre-calculate week-related constants (used throughout the solver)
+  const firstDow = dayOfWeek(year, month, 1); // 0=Sun, 1=Mon, ...
+  const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1; // Adjust so Monday = 0
+  
+  // Helper: get week index for a day (0-indexed day in month)
+  function getWeekIndex(d) {
+    return Math.floor((d + adjustedFirstDow) / 7);
+  }
+  
+  // Helper: calculate required rest days for a week based on its length
+  function calculateRequiredRest(weekDaysCount, minRPerWeek) {
+    if (weekDaysCount >= 7) return minRPerWeek;
+    if (weekDaysCount <= 2) return 0;
+    return Math.max(1, Math.ceil(weekDaysCount * minRPerWeek / 7));
+  }
+  
+  // Calculate number of weeks in the month
+  const numWeeks = getWeekIndex(numDays - 1) + 1;
 
   // Helper to check if a date (day of month, 1-based) falls within an absence period
   function isDateInAbsencePeriod(day1Based, absencePeriod) {
@@ -260,15 +279,6 @@ function solve(config) {
   
   // Track how many N-S-R-R blocks start on each day (to avoid clustering)
   const nightStartsPerDay = new Array(numDays).fill(0);
-  
-  // Helper to count R days on a specific day
-  function countRestOnDay(d) {
-    let count = 0;
-    for (let n = 0; n < numNurses; n++) {
-      if (schedule[n][d] === 'R' || schedule[n][d] === 'S') count++;
-    }
-    return count;
-  }
 
   // STEP 1: Ensure minimum coverage on ALL days first (coverage-first approach)
   // Process days in an order that spreads out night blocks
@@ -317,14 +327,15 @@ function solve(config) {
       if (canDoNight(n, d)) availableDays.push(d);
     }
     
+    // Shuffle first for variety, then sort by preference
+    shuffle(availableDays);
+    
     // Sort by preference: days where fewer N blocks start (to spread R days)
+    // Use stable sort by only sorting when values differ
     availableDays.sort((a, b) => {
-      // Prefer days with fewer night starts
       const startsA = nightStartsPerDay[a] || 0;
       const startsB = nightStartsPerDay[b] || 0;
-      if (startsA !== startsB) return startsA - startsB;
-      // Add some randomness for variety
-      return Math.random() - 0.5;
+      return startsA - startsB;
     });
     
     for (const d of availableDays) {
@@ -503,19 +514,6 @@ function solve(config) {
   const minRPerWeek = rules.minRPerWeek ?? 2;
   
   if (minRPerWeek > 0) {
-    // Helper: get week index for a day (0-indexed day in month)
-    function getWeekIndex(d) {
-      // Week starts on Monday. Get the day of week for day 0 (first of month)
-      const firstDow = dayOfWeek(year, month, 1); // 0=Sun, 1=Mon, ...
-      // Adjust so Monday = 0
-      const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1;
-      // Day d is (d + adjustedFirstDow) from Monday of first week
-      return Math.floor((d + adjustedFirstDow) / 7);
-    }
-    
-    // Calculate number of weeks in the month
-    const numWeeks = getWeekIndex(numDays - 1) + 1;
-    
     for (let n = 0; n < numNurses; n++) {
       // For each week, count R days (real rest, not S which is smonto)
       for (let week = 0; week < numWeeks; week++) {
@@ -529,15 +527,8 @@ function solve(config) {
           }
         }
         
-        // For partial weeks (< 7 days), adjust the minimum rest requirement proportionally
-        // A full week needs 2 R, so partial weeks need: ceil(weekDays.length * 2 / 7)
-        // But minimum 1 if the week has 4+ days
-        let requiredRest = minRPerWeek;
-        if (weekDays.length < 7) {
-          requiredRest = Math.max(1, Math.ceil(weekDays.length * minRPerWeek / 7));
-          // If week has only 1-2 days, no rest required
-          if (weekDays.length <= 2) requiredRest = 0;
-        }
+        // Use shared helper for proportional rest calculation
+        const requiredRest = calculateRequiredRest(weekDays.length, minRPerWeek);
         
         // If not enough rest days, try to convert some work days to R
         while (restCount < requiredRest && weekDays.length > 0) {
@@ -579,25 +570,15 @@ function solve(config) {
   // and both have an R on the same day, swap one R→M (or R→P)
   // Now also respects minimum rest days per week
   
-  // Helper to count R days in a week for a nurse
+  // Helper to count R days in a week for a nurse (uses shared getWeekIndex)
   function countWeekRestDays(n, weekIdx) {
     let count = 0;
     for (let d = 0; d < numDays; d++) {
-      const firstDow = dayOfWeek(year, month, 1);
-      const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1;
-      const dayWeek = Math.floor((d + adjustedFirstDow) / 7);
-      if (dayWeek === weekIdx && schedule[n][d] === 'R') {
+      if (getWeekIndex(d) === weekIdx && schedule[n][d] === 'R') {
         count++;
       }
     }
     return count;
-  }
-  
-  // Helper to get week index for a day
-  function getDayWeek(d) {
-    const firstDow = dayOfWeek(year, month, 1);
-    const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1;
-    return Math.floor((d + adjustedFirstDow) / 7);
   }
   
   const maxPasses = 3;
@@ -637,7 +618,7 @@ function solve(config) {
           if (schedule[n][d] !== 'R') continue;
           
           // Check if we can remove this R without going below minimum rest days per week
-          const weekIdx = getDayWeek(d);
+          const weekIdx = getWeekIndex(d);
           const weekRestCount = countWeekRestDays(n, weekIdx);
           if (minRPerWeek > 0 && weekRestCount <= minRPerWeek) continue; // Can't remove this R
           
@@ -702,32 +683,19 @@ function solve(config) {
   
   // Validate minimum rest days per week (with proportional adjustment for partial weeks)
   if (minRPerWeek > 0) {
-    // Helper: get week index for a day (0-indexed day in month)
-    function getWeekIndexValidation(d) {
-      const firstDow = dayOfWeek(year, month, 1);
-      const adjustedFirstDow = firstDow === 0 ? 6 : firstDow - 1;
-      return Math.floor((d + adjustedFirstDow) / 7);
-    }
-    
-    const numWeeksValidation = getWeekIndexValidation(numDays - 1) + 1;
-    
     for (let n = 0; n < numNurses; n++) {
-      for (let week = 0; week < numWeeksValidation; week++) {
+      for (let week = 0; week < numWeeks; week++) {
         let restCount = 0;
         let weekDaysCount = 0;
         for (let d = 0; d < numDays; d++) {
-          if (getWeekIndexValidation(d) === week) {
+          if (getWeekIndex(d) === week) {
             weekDaysCount++;
             if (schedule[n][d] === 'R') restCount++;
           }
         }
         
-        // Proportional rest requirement for partial weeks
-        let requiredRest = minRPerWeek;
-        if (weekDaysCount < 7) {
-          requiredRest = Math.max(1, Math.ceil(weekDaysCount * minRPerWeek / 7));
-          if (weekDaysCount <= 2) requiredRest = 0;
-        }
+        // Use shared helper for proportional rest calculation
+        const requiredRest = calculateRequiredRest(weekDaysCount, minRPerWeek);
         
         if (restCount < requiredRest) {
           violations.push({ nurse: n, week, type: 'min_R_week', msg: `Infermiere ${n + 1}, settimana ${week + 1}: solo ${restCount} riposi (minimo ${requiredRest})` });
