@@ -95,6 +95,7 @@ function buildContext(config) {
     soloMattine: n.tags.includes('solo_mattine'),
     soloDiurni:  n.tags.includes('solo_diurni'),
     soloNotti:   n.tags.includes('solo_notti'),
+    diurniENotturni: n.tags.includes('diurni_e_notturni'),
     noNotti:     n.tags.includes('no_notti'),
     noDiurni:    n.tags.includes('no_diurni'),
   }));
@@ -245,9 +246,16 @@ function computeScore(schedule, ctx) {
       if (cur === 'S' && nxt !== 'R') hard++;
     }
     // N-S-R-R: second R required (except no_diurni nurses need only 1 R)
+    // N-S-R-R-R: third R required for diurni_e_notturni nurses
     for (let d = 0; d < numDays - 3; d++) {
       if (schedule[n][d] === 'N' && schedule[n][d+1] === 'S' && schedule[n][d+2] === 'R') {
-        if (schedule[n][d+3] !== 'R' && !nurseProps[n].noDiurni) hard++;
+        if (nurseProps[n].diurniENotturni) {
+          // diurni_e_notturni needs 3 R after N-S
+          if (schedule[n][d+3] !== 'R') hard++;
+          if (d + 4 < numDays && schedule[n][d+4] !== 'R') hard++;
+        } else if (!nurseProps[n].noDiurni && schedule[n][d+3] !== 'R') {
+          hard++;
+        }
       }
     }
     // D-D must be followed by R; no 3 consecutive D
@@ -314,12 +322,22 @@ function construct(ctx) {
   function canNight(n, d) {
     if (schedule[n][d] !== null || nc[n] >= maxNights) return false;
     const noDiurni = nurseProps[n].noDiurni;
+    const diurniENotturni = nurseProps[n].diurniENotturni;
     if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
     if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
-    if (!noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+    // For diurni_e_notturni: need 3 R after N-S (total 5 slots: N-S-R-R-R)
+    if (diurniENotturni) {
+      if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+      if (d + 4 < numDays && schedule[n][d + 4] !== null) return false;
+    } else if (!noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
     if (d > 0 && schedule[n][d - 1] === 'S') return false;
     if (d > 1 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'S') return false;
-    if (!noDiurni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
+    if (!noDiurni && !diurniENotturni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
+    // For diurni_e_notturni: need 3 R separation (check d-3, d-4 for prior N-S-R-R-R)
+    if (diurniENotturni) {
+      if (d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
+      if (d > 3 && schedule[n][d - 3] === 'R' && schedule[n][d - 4] === 'S') return false;
+    }
     return true;
   }
 
@@ -327,7 +345,13 @@ function construct(ctx) {
     schedule[n][d] = 'N';
     if (d + 1 < numDays) schedule[n][d + 1] = 'S';
     if (d + 2 < numDays) schedule[n][d + 2] = 'R';
-    if (!nurseProps[n].noDiurni && d + 3 < numDays) schedule[n][d + 3] = 'R';
+    // For diurni_e_notturni: 3 R after smonto; for others (except noDiurni): 2 R
+    if (nurseProps[n].diurniENotturni) {
+      if (d + 3 < numDays) schedule[n][d + 3] = 'R';
+      if (d + 4 < numDays) schedule[n][d + 4] = 'R';
+    } else if (!nurseProps[n].noDiurni && d + 3 < numDays) {
+      schedule[n][d + 3] = 'R';
+    }
     nc[n]++;
   }
 
@@ -369,6 +393,8 @@ function construct(ctx) {
     if (nurseProps[n].soloDiurni && s !== 'D' && s !== 'R') return false;
     // solo_notti: only N, S, or R allowed
     if (nurseProps[n].soloNotti && s !== 'N' && s !== 'S' && s !== 'R') return false;
+    // diurni_e_notturni: only D, N, S, R allowed (no M, P)
+    if (nurseProps[n].diurniENotturni && s !== 'D' && s !== 'N' && s !== 'S' && s !== 'R') return false;
     if (s === 'N' && nurseProps[n].noNotti) return false;
     if (s === 'D' && nurseProps[n].noDiurni) return false;
     const prev = d > 0 ? schedule[n][d - 1] : null;
@@ -377,7 +403,11 @@ function construct(ctx) {
     if (s === 'N') {
       if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
       if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
-      if (!nurseProps[n].noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+      // For diurni_e_notturni: need 3 R after N-S
+      if (nurseProps[n].diurniENotturni) {
+        if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+        if (d + 4 < numDays && schedule[n][d + 4] !== null) return false;
+      } else if (!nurseProps[n].noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
     }
     return true;
   }
@@ -489,7 +519,7 @@ function construct(ctx) {
 
   // Phase 4.6 — M/P balance for no_diurni nurses
   for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].noDiurni || nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti) continue;
+    if (!nurseProps[n].noDiurni || nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti || nurseProps[n].diurniENotturni) continue;
     const mid = Math.floor(numDays / 2);
     let f1M = 0, f1P = 0, f2M = 0, f2P = 0;
     const mD = [], pD = [];
@@ -652,6 +682,9 @@ function trySwapMove(schedule, ctx, changes) {
   // solo_notti: can only have N, S, R (N/S already handled above)
   if (nurseProps[n1].soloNotti && s2 !== 'R') return false;
   if (nurseProps[n2].soloNotti && s1 !== 'R') return false;
+  // diurni_e_notturni: can only have D, N, S, R (N/S already handled above)
+  if (nurseProps[n1].diurniENotturni && s2 !== 'D' && s2 !== 'R') return false;
+  if (nurseProps[n2].diurniENotturni && s1 !== 'D' && s1 !== 'R') return false;
   const prev1 = d > 0 ? schedule[n1][d - 1] : null, next1 = d < numDays - 1 ? schedule[n1][d + 1] : null;
   const prev2 = d > 0 ? schedule[n2][d - 1] : null, next2 = d < numDays - 1 ? schedule[n2][d + 1] : null;
   if (!transitionOk(prev1, s2, ctx, schedule, n1, d)) return false;
@@ -689,6 +722,20 @@ function tryChangeMove(schedule, ctx, changes) {
   }
   // solo_notti: can only have N, S, R (N/S changes are already blocked above, so no change possible)
   if (nurseProps[n].soloNotti) return false;
+  // diurni_e_notturni: can only change to D or R (N/S changes already blocked above)
+  if (nurseProps[n].diurniENotturni) {
+    const choices = ['D', 'R'].filter(s => s !== old);
+    shuffle(choices);
+    for (const s of choices) {
+      const prev = d > 0 ? schedule[n][d - 1] : null;
+      const next = d < numDays - 1 ? schedule[n][d + 1] : null;
+      if (!transitionOk(prev, s, ctx, schedule, n, d)) continue;
+      if (!transitionOk(s, next, ctx, schedule, n, d + 1)) continue;
+      setCell(schedule, n, d, s, changes);
+      return true;
+    }
+    return false;
+  }
   const choices = ['M', 'P', 'R'].filter(s => s !== old);
   if (!nurseProps[n].noDiurni && old !== 'D') choices.push('D');
   shuffle(choices);
@@ -708,7 +755,7 @@ function tryEquityMove(schedule, ctx, changes) {
   const { numDays, numNurses, pinned, nurseProps, minCovM, maxCovM, minCovP, maxCovP,
           minRPerWeek, weekDaysList, weekOf } = ctx;
   const n = Math.floor(Math.random() * numNurses);
-  if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti) return false;
+  if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti || nurseProps[n].diurniENotturni) return false;
   const h = nurseHours(schedule, n, numDays);
   const allH = [];
   for (let i = 0; i < numNurses; i++) allH.push(nurseHours(schedule, i, numDays));
@@ -776,7 +823,7 @@ function tryWeeklyRestMove(schedule, ctx, changes) {
         const others = shuffle(Array.from({ length: numNurses }, (_, i) => i).filter(i => i !== n));
         for (const o of others) {
           if (pinned[o][d] || schedule[o][d] !== 'R') continue;
-          if (nurseProps[o].soloMattine || nurseProps[o].soloDiurni || nurseProps[o].soloNotti) continue;
+          if (nurseProps[o].soloMattine || nurseProps[o].soloDiurni || nurseProps[o].soloNotti || nurseProps[o].diurniENotturni) continue;
           // Check other nurse doesn't go below weekly rest minimum
           const oHave = countWeekRest(schedule, o, wDays);
           const oNeed = requiredRest(wDays.length, minRPerWeek);
@@ -824,9 +871,16 @@ function collectViolations(schedule, ctx) {
         violations.push({ nurse: n, day: d, type: 'S_no_R', msg: `Infermiere ${n + 1}, giorno ${d + 1}: S non seguito da R (primo riposo dopo smonto)` });
     }
     for (let d = 0; d < numDays - 3; d++) {
-      if (schedule[n][d] === 'N' && schedule[n][d+1] === 'S' && schedule[n][d+2] === 'R' && schedule[n][d+3] !== 'R') {
-        if (!nurseProps[n].noDiurni)
+      if (schedule[n][d] === 'N' && schedule[n][d+1] === 'S' && schedule[n][d+2] === 'R') {
+        if (nurseProps[n].diurniENotturni) {
+          // diurni_e_notturni needs 3 R after N-S
+          if (schedule[n][d+3] !== 'R')
+            violations.push({ nurse: n, day: d, type: 'need_3R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R servono altri 2 R (3 riposi dopo notte)` });
+          else if (d + 4 < numDays && schedule[n][d+4] !== 'R')
+            violations.push({ nurse: n, day: d, type: 'need_3R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R-R serve un altro R (3 riposi dopo notte)` });
+        } else if (!nurseProps[n].noDiurni && schedule[n][d+3] !== 'R') {
           violations.push({ nurse: n, day: d, type: 'need_2R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)` });
+        }
       }
     }
     if (consente2D) {
@@ -1159,6 +1213,19 @@ function buildLP(ctx, perturbSeed) {
           // nurses cannot fill M or P coverage requirements.
           lines.push(` snM${n}_${d}: ${V(n,d,0)} <= 0`);
           lines.push(` snP${n}_${d}: ${V(n,d,1)} <= 0`);
+        }
+      }
+    }
+  }
+
+  // --- Nurse-specific: diurni_e_notturni → only D, N, S, R allowed (no M, P) ---
+  for (let n = 0; n < numNurses; n++) {
+    if (nurseProps[n].diurniENotturni) {
+      for (let d = 0; d < numDays; d++) {
+        if (isFree(n, d)) {
+          // Ban M, P (indices 0, 1)
+          lines.push(` denBanM${n}_${d}: ${V(n,d,0)} <= 0`);
+          lines.push(` denBanP${n}_${d}: ${V(n,d,1)} <= 0`);
         }
       }
     }

@@ -319,6 +319,7 @@ td.violation-cell {
 .tag.tag-solo_mattine { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
 .tag.tag-solo_diurni  { background: #fef9c3; color: #854d0e; border-color: #facc15; }
 .tag.tag-solo_notti   { background: #e0e7ff; color: #3730a3; border-color: #818cf8; }
+.tag.tag-diurni_e_notturni { background: #f0fdf4; color: #166534; border-color: #86efac; }
 .tag.tag-no_notti     { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
 .tag.tag-no_diurni    { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
 .tag.tag-ferie        { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
@@ -333,6 +334,7 @@ td.violation-cell {
 html.dark .tag.tag-solo_mattine { background: #1e3a5f; color: #93c5fd; border-color: #3b82f6; }
 html.dark .tag.tag-solo_diurni  { background: #422006; color: #facc15; border-color: #eab308; }
 html.dark .tag.tag-solo_notti   { background: #312e81; color: #818cf8; border-color: #6366f1; }
+html.dark .tag.tag-diurni_e_notturni { background: #14532d; color: #86efac; border-color: #22c55e; }
 html.dark .tag.tag-no_notti     { background: #3b2500; color: #fcd34d; border-color: #f59e0b; }
 html.dark .tag.tag-no_diurni    { background: #2e1a5e; color: #c4b5fd; border-color: #7c3aed; }
 html.dark .tag.tag-ferie        { background: #064e3b; color: #6ee7b7; border-color: #10b981; }
