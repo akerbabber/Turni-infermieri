@@ -527,12 +527,9 @@ function construct(ctx) {
 function trySwapMP(schedule, n, srcDays, dstDays, mid, srcIsM, ctx) {
   const { numDays, numNurses, minCovM, maxCovM, minCovP, maxCovP, rules } = ctx;
   for (const sDay of srcDays) {
-    if (srcIsM ? sDay >= mid : sDay >= mid) { if (srcIsM) continue; } else { if (!srcIsM) continue; }
-    if (srcIsM && sDay >= mid) continue;
-    if (!srcIsM && sDay >= mid) continue;
+    if (sDay >= mid) continue;
     for (const dDay of dstDays) {
-      if (srcIsM && dDay < mid) continue;
-      if (!srcIsM && dDay < mid) continue;
+      if (dDay < mid) continue;
       const newSrc = srcIsM ? 'P' : 'M';
       const newDst = srcIsM ? 'M' : 'P';
       const prevS = sDay > 0 ? schedule[n][sDay - 1] : null;
