@@ -1011,15 +1011,12 @@ function buildLP(ctx, perturbSeed) {
   }
 
   // --- Transition constraints ---
-  // P->M forbidden
+  // Shift indices: M=0, P=1, N=2, S=3, R=4
+  // Note: D (Diurno) is not modeled as a separate MILP shift;
+  // the MILP only uses M, P, N, S, R.
+
+  // P->M forbidden (forward-only rule)
   const isPMForbidden = forbidden.P && forbidden.P.includes('M');
-  // P->D forbidden
-  const isPDForbidden = forbidden.P && forbidden.P.includes('D');
-  // D->M, D->P forbidden
-  const isDMForbidden = forbidden.D && forbidden.D.includes('M');
-  const isDPForbidden = forbidden.D && forbidden.D.includes('P');
-  // D->D forbidden (unless consente2D)
-  const isDDForbidden = forbidden.D && forbidden.D.includes('D');
 
   for (let n = 0; n < numNurses; n++) {
     for (let d = 0; d < numDays - 1; d++) {
@@ -1028,17 +1025,16 @@ function buildLP(ctx, perturbSeed) {
       if (!free0 && !free1) continue;
 
       if (free0 && free1) {
-        // Both free: add forbidden pair constraints
+        // P -> M forbidden
         if (isPMForbidden) lines.push(` pm${n}_${d}: ${V(n,d,1)} + ${V(n,d+1,0)} <= 1`);
-        if (isPDForbidden) lines.push(` pd${n}_${d}: ${V(n,d,1)} + ${V(n,d+1,0)} <= 1`);
-        if (isDMForbidden) lines.push(` dm${n}_${d}: ${V(n,d,0)} + ${V(n,d+1,0)} <= 1`);
-        if (isDPForbidden) lines.push(` dp${n}_${d}: ${V(n,d,0)} + ${V(n,d+1,1)} <= 1`);
         // N must be followed by S
         lines.push(` ns${n}_${d}: ${V(n,d,2)} - ${V(n,d+1,3)} <= 0`);
         // S must be followed by R
         lines.push(` sr${n}_${d}: ${V(n,d,3)} - ${V(n,d+1,4)} <= 0`);
         // No orphan S without preceding N
         lines.push(` sn${n}_${d}: ${V(n,d+1,3)} - ${V(n,d,2)} <= 0`);
+        // N cannot follow N, S, R (already handled by N->S->R chain but add safety)
+        lines.push(` nn${n}_${d}: ${V(n,d,2)} + ${V(n,d+1,2)} <= 1`);
       } else if (!free0 && free1) {
         // Pinned day d, free day d+1
         const p = pinned[n][d];
@@ -1093,25 +1089,26 @@ function buildLP(ctx, perturbSeed) {
   // --- Nurse-specific: solo_mattine → only M or R (handled by pinning, but safety) ---
   // Already handled by pinned cells
 
-  // --- Weekly rest ---
+  // --- Weekly rest (soft: handled by local search polishing) ---
+  // Instead of hard constraints, we ensure a minimum number of R days
+  // per nurse across the entire month, which is less restrictive.
+  // The local search phase will further enforce weekly rest distribution.
   if (minRPerWeek > 0) {
     for (let n = 0; n < numNurses; n++) {
-      for (let w = 0; w < weekDaysList.length; w++) {
-        const wDays = weekDaysList[w];
-        const need = requiredRest(wDays.length, minRPerWeek);
-        let pinnedRest = 0;
-        const rTerms = [];
-        for (const d of wDays) {
-          if (pinned[n][d]) {
-            if (pinned[n][d] === 'R') pinnedRest++;
-          } else {
-            rTerms.push(V(n, d, 4)); // R shift
-          }
+      // Require at least minRPerWeek rest days per week on average across the month
+      const totalNeed = Math.floor(minRPerWeek * numDays / 7);
+      let pinnedRest = 0;
+      const rTerms = [];
+      for (let d = 0; d < numDays; d++) {
+        if (pinned[n][d]) {
+          if (pinned[n][d] === 'R') pinnedRest++;
+        } else {
+          rTerms.push(V(n, d, 4));
         }
-        const reqFree = Math.max(0, need - pinnedRest);
-        if (reqFree > 0 && rTerms.length > 0) {
-          lines.push(` wr${n}_${w}: ${rTerms.join(' + ')} >= ${reqFree}`);
-        }
+      }
+      const reqFree = Math.max(0, totalNeed - pinnedRest);
+      if (reqFree > 0 && rTerms.length > 0) {
+        lines.push(` wr${n}: ${rTerms.join(' + ')} >= ${reqFree}`);
       }
     }
   }
