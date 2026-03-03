@@ -452,10 +452,6 @@ function startSolver() {
 }
 
 function regenerateTurni() {
-  // Set preferDiurni to true for regeneration
-  state.rules.preferDiurni = true;
-  saveState();
-  
   // Terminate existing worker
   if (state.worker) { state.worker.terminate(); state.worker = null; }
 
@@ -464,11 +460,14 @@ function regenerateTurni() {
 
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
 
+  // Create a copy of rules with preferDiurni enabled for this regeneration only
+  const regenerationRules = { ...state.rules, preferDiurni: true };
+
   const config = {
     year: state.year,
     month: state.month,
     nurses: activeNurses,
-    rules: state.rules,
+    rules: regenerationRules,
   };
 
   const worker = new Worker('js/solver.js');
