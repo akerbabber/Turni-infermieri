@@ -50,6 +50,10 @@ const DEFAULT_RULES = {
   forwardOnly: true,
   minRPerWeek: 2,
   preferDiurni: false,
+  // New flags
+  coppiaTurni: null, // Array of 2 nurse indices [n1, n2] to have same shifts, or null
+  consentePomeriggioDiurno: false, // Allow P→D transition
+  consente2DiurniConsecutivi: false, // Allow D-D but require R after
 };
 
 // ---------------------------------------------------------------------------
@@ -449,6 +453,13 @@ function renderStep2() {
   bindToggle('tog-min-gap',       r.minGap11h,    v => { state.rules.minGap11h = v; saveState(); });
   bindToggle('tog-forward-only',  r.forwardOnly,  v => { state.rules.forwardOnly = v; saveState(); });
   bindToggle('tog-min-r-week',    r.minRPerWeek > 0, v => { state.rules.minRPerWeek = v ? 2 : 0; saveState(); });
+  
+  // New toggles for additional rules
+  bindToggle('tog-consente-pom-diurno', r.consentePomeriggioDiurno, v => { state.rules.consentePomeriggioDiurno = v; saveState(); });
+  bindToggle('tog-consente-2d', r.consente2DiurniConsecutivi, v => { state.rules.consente2DiurniConsecutivi = v; saveState(); });
+  
+  // Nurse pairing dropdown
+  renderNursePairingDropdown();
 }
 
 function bindRange(inputId, labelId, value, onChange) {
@@ -469,6 +480,44 @@ function bindToggle(inputId, value, onChange) {
   if (!inp) return;
   inp.checked = value;
   inp.onchange = () => onChange(inp.checked);
+}
+
+// Helper function to render nurse pairing dropdowns
+function renderNursePairingDropdown() {
+  const sel1 = document.getElementById('sel-coppia-1');
+  const sel2 = document.getElementById('sel-coppia-2');
+  if (!sel1 || !sel2) return;
+  
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  
+  // Build options
+  let optionsHtml = '<option value="">-- Nessuno --</option>';
+  activeNurses.forEach((nurse, idx) => {
+    optionsHtml += `<option value="${idx}">${escHtml(nurse.name)}</option>`;
+  });
+  
+  sel1.innerHTML = optionsHtml;
+  sel2.innerHTML = optionsHtml;
+  
+  // Set current values
+  if (state.rules.coppiaTurni && Array.isArray(state.rules.coppiaTurni) && state.rules.coppiaTurni.length === 2) {
+    sel1.value = state.rules.coppiaTurni[0];
+    sel2.value = state.rules.coppiaTurni[1];
+  }
+  
+  // Event handlers
+  sel1.onchange = sel2.onchange = () => {
+    const v1 = sel1.value;
+    const v2 = sel2.value;
+    const n1 = parseInt(v1, 10);
+    const n2 = parseInt(v2, 10);
+    if (v1 !== '' && v2 !== '' && !isNaN(n1) && !isNaN(n2) && n1 !== n2) {
+      state.rules.coppiaTurni = [n1, n2];
+    } else {
+      state.rules.coppiaTurni = null;
+    }
+    saveState();
+  };
 }
 
 // ---------------------------------------------------------------------------

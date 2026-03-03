@@ -43,12 +43,35 @@ const SHIFT_START = { M: 8, P: 14, D: 8, N: 20 };
 // After S must come R (first rest day)
 // After R that follows S, must come another R (second rest day)
 // After R, any shift is allowed including N (allows patterns like D→R→N)
-const FORBIDDEN_NEXT = {
+// These are the base forbidden transitions; they can be modified by flags
+const BASE_FORBIDDEN_NEXT = {
   P: ['M', 'D'],
   D: ['M', 'P', 'D'],
   N: ['M', 'P', 'D', 'R', 'N'], // after N must be S
   S: ['M', 'P', 'D', 'N', 'S'], // after S must be R (first rest day)
 };
+
+// Helper to build FORBIDDEN_NEXT based on rules flags
+function buildForbiddenNext(rules) {
+  const forbidden = {
+    P: [...BASE_FORBIDDEN_NEXT.P],
+    D: [...BASE_FORBIDDEN_NEXT.D],
+    N: [...BASE_FORBIDDEN_NEXT.N],
+    S: [...BASE_FORBIDDEN_NEXT.S],
+  };
+  
+  // If consentePomeriggioDiurno is enabled, allow P→D transition
+  if (rules.consentePomeriggioDiurno) {
+    forbidden.P = forbidden.P.filter(s => s !== 'D');
+  }
+  
+  // If consente2DiurniConsecutivi is enabled, allow D→D transition
+  if (rules.consente2DiurniConsecutivi) {
+    forbidden.D = forbidden.D.filter(s => s !== 'D');
+  }
+  
+  return forbidden;
+}
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -119,6 +142,14 @@ function solve(config) {
   const schedule = Array.from({ length: numNurses }, () => new Array(numDays).fill(null));
 
   progress(5, 'Costruzione vincoli...');
+  
+  // Build dynamic FORBIDDEN_NEXT based on rules
+  const FORBIDDEN_NEXT = buildForbiddenNext(rules);
+  
+  // Extract new rule flags with defaults
+  const coppiaTurni = rules.coppiaTurni ?? null; // Array of 2 nurse indices to pair, or null
+  const consentePomeriggioDiurno = rules.consentePomeriggioDiurno ?? false;
+  const consente2DiurniConsecutivi = rules.consente2DiurniConsecutivi ?? false;
   
   // Pre-calculate week-related constants (used throughout the solver)
   const firstDow = dayOfWeek(year, month, 1); // 0=Sun, 1=Mon, ...
@@ -240,9 +271,12 @@ function solve(config) {
   const nightCount = new Array(numNurses).fill(0);
   
   // Helper: check if nurse can do night on day d
+  // For nurses with no_diurni tag, only 1 R is required after S unless necessary
   function canDoNight(n, d) {
     if (schedule[n][d] !== null) return false;
     if (nightCount[n] >= maxNights) return false;
+    
+    const isNoDiurni = nurseProps[n].noDiurni;
     
     // Check if S day (d+1) is free (if within month)
     if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
@@ -250,8 +284,11 @@ function solve(config) {
     // Check if first R day (d+2) is free (if within month)
     if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
     
-    // Check if second R day (d+3) is free (if within month)
-    if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+    // For nurses WITHOUT no_diurni tag, check if second R day (d+3) is free
+    // For nurses WITH no_diurni tag, only 1 R is required after S
+    if (!isNoDiurni) {
+      if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+    }
     
     // Don't put N right after S
     if (d > 0 && schedule[n][d - 1] === 'S') return false;
@@ -260,8 +297,9 @@ function solve(config) {
     if (d > 1 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'S') return false;
     
     // Check we're not breaking an N-S-R-R pattern (need 2 R's after S before new N)
-    if (d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') {
-      // Only 1 R after S-R, need another R
+    // For no_diurni nurses, only 1 R is required, so this check is relaxed
+    if (!isNoDiurni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') {
+      // Only 1 R after S-R, need another R for regular nurses
       return false;
     }
     
@@ -269,11 +307,22 @@ function solve(config) {
   }
   
   // Helper: assign night block to nurse n on day d
+  // For nurses with no_diurni tag, only 1 R is assigned after S unless weekly rest is insufficient
   function assignNightBlock(n, d) {
+    const isNoDiurni = nurseProps[n].noDiurni;
+    
     schedule[n][d] = 'N';
     if (d + 1 < numDays) schedule[n][d + 1] = 'S';
     if (d + 2 < numDays) schedule[n][d + 2] = 'R';
-    if (d + 3 < numDays) schedule[n][d + 3] = 'R';
+    
+    // For nurses WITHOUT no_diurni tag, always assign second R
+    // For nurses WITH no_diurni tag, only assign second R if needed for weekly rest requirement
+    if (!isNoDiurni) {
+      if (d + 3 < numDays) schedule[n][d + 3] = 'R';
+    }
+    // Note: For no_diurni nurses, additional R days may be added in Phase 4.5 (weekly rest verification)
+    // if the weekly rest requirement is not met
+    
     nightCount[n]++;
   }
   
@@ -390,7 +439,8 @@ function solve(config) {
   }
 
   // Helper: is transition from prev to next allowed?
-  function transitionOk(prev, next, rules) {
+  // Also checks for consente2DiurniConsecutivi rule (D-D requires R after)
+  function transitionOk(prev, next, rules, nurseIdx, dayIdx) {
     if (!prev) return true; // first day
     const forbidden = FORBIDDEN_NEXT[prev] || [];
     if (forbidden.includes(next)) return false;
@@ -398,6 +448,18 @@ function solve(config) {
       const gap = gapHours(prev, next);
       if (gap < 11) return false;
     }
+    
+    // If consente2DiurniConsecutivi is enabled and we're going D→D, 
+    // check if we already had a D the day before (prevent 3+ consecutive D)
+    if (consente2DiurniConsecutivi && prev === 'D' && next === 'D') {
+      // Check if day before prev (dayIdx - 2) was also D
+      if (nurseIdx !== undefined && dayIdx !== undefined && dayIdx >= 2) {
+        if (schedule[nurseIdx][dayIdx - 2] === 'D') {
+          return false; // Can't have 3 consecutive D shifts
+        }
+      }
+    }
+    
     return true;
   }
 
@@ -408,16 +470,27 @@ function solve(config) {
     if (s === 'N' && nurseProps[n].noNotti) return false;
     if (s === 'D' && nurseProps[n].noDiurni) return false;
     const prev = d > 0 ? schedule[n][d - 1] : null;
-    if (!transitionOk(prev, s, rules)) return false;
-    // For night shifts, check if we have room for the S-R-R sequence
+    if (!transitionOk(prev, s, rules, n, d)) return false;
+    
+    // If consente2DiurniConsecutivi is enabled and previous was D, 
+    // and we're assigning D, we need to ensure there's room for R after
+    if (consente2DiurniConsecutivi && s === 'D' && prev === 'D') {
+      // After D-D we need R, so check if d+1 is available
+      if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
+    }
+    
+    // For night shifts, check if we have room for the S-R-R sequence (or S-R for no_diurni nurses)
     // N-S-R-R pattern requires checking d+1 (S), d+2 (R), d+3 (R)
     if (s === 'N') {
       // Check if d+1 is available for S (if within month)
       if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
       // Check if d+2 is available for first R (if within month)  
       if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
-      // Check if d+3 is available for second R (if within month)
-      if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+      // For nurses with no_diurni tag, only 1 R is required after S (unless coverage needs)
+      // For other nurses, check if d+3 is available for second R
+      if (!nurseProps[n].noDiurni) {
+        if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+      }
     }
     return true;
   }
@@ -564,6 +637,147 @@ function solve(config) {
   }
 
   // -------------------------------------------------------------------------
+  // Phase 4.6 — Balance M/P distribution for nurses with no_diurni tag
+  // These nurses only do M and P shifts (no D or N), so we need to ensure
+  // a good distribution across the month (not all M first, then all P)
+  // -------------------------------------------------------------------------
+  progress(80, 'Bilanciamento turni mattina/pomeriggio...');
+  
+  for (let n = 0; n < numNurses; n++) {
+    if (!nurseProps[n].noDiurni) continue; // Only for no_diurni nurses
+    if (nurseProps[n].soloMattine) continue; // Skip solo_mattine nurses
+    
+    // Count M and P shifts in first and second half of month
+    const midMonth = Math.floor(numDays / 2);
+    let firstHalfM = 0, firstHalfP = 0, secondHalfM = 0, secondHalfP = 0;
+    const mDays = [], pDays = [];
+    
+    for (let d = 0; d < numDays; d++) {
+      const s = schedule[n][d];
+      if (s === 'M') {
+        if (d < midMonth) firstHalfM++; else secondHalfM++;
+        mDays.push(d);
+      } else if (s === 'P') {
+        if (d < midMonth) firstHalfP++; else secondHalfP++;
+        pDays.push(d);
+      }
+    }
+    
+    // Check for imbalance: if one half has significantly more M than P (or vice versa)
+    // Try to swap some shifts to balance
+    const threshold = 3; // Allow some imbalance
+    
+    // If first half has too many M and second half has too many P, swap some
+    if (firstHalfM - firstHalfP > threshold && secondHalfP - secondHalfM > threshold) {
+      // Find an M in first half and a P in second half to swap
+      for (const mDay of mDays) {
+        if (mDay >= midMonth) continue;
+        for (const pDay of pDays) {
+          if (pDay < midMonth) continue;
+          
+          // Check if swap is valid (transitions and coverage)
+          const canSwapM = transitionOk(mDay > 0 ? schedule[n][mDay - 1] : null, 'P', rules, n, mDay) &&
+                          transitionOk('P', mDay < numDays - 1 ? schedule[n][mDay + 1] : null, rules, n, mDay);
+          const canSwapP = transitionOk(pDay > 0 ? schedule[n][pDay - 1] : null, 'M', rules, n, pDay) &&
+                          transitionOk('M', pDay < numDays - 1 ? schedule[n][pDay + 1] : null, rules, n, pDay);
+          
+          if (canSwapM && canSwapP) {
+            // Check coverage constraints
+            const covM = dayCoverage(mDay);
+            const covP = dayCoverage(pDay);
+            if (covM.M > minCovM && covM.P < maxCovP && covP.P > minCovP && covP.M < maxCovM) {
+              schedule[n][mDay] = 'P';
+              schedule[n][pDay] = 'M';
+              firstHalfM--; firstHalfP++;
+              secondHalfP--; secondHalfM++;
+              break;
+            }
+          }
+        }
+        if (firstHalfM - firstHalfP <= threshold) break;
+      }
+    }
+    
+    // If first half has too many P and second half has too many M, swap some
+    if (firstHalfP - firstHalfM > threshold && secondHalfM - secondHalfP > threshold) {
+      for (const pDay of pDays) {
+        if (pDay >= midMonth) continue;
+        for (const mDay of mDays) {
+          if (mDay < midMonth) continue;
+          
+          const canSwapP = transitionOk(pDay > 0 ? schedule[n][pDay - 1] : null, 'M', rules, n, pDay) &&
+                          transitionOk('M', pDay < numDays - 1 ? schedule[n][pDay + 1] : null, rules, n, pDay);
+          const canSwapM = transitionOk(mDay > 0 ? schedule[n][mDay - 1] : null, 'P', rules, n, mDay) &&
+                          transitionOk('P', mDay < numDays - 1 ? schedule[n][mDay + 1] : null, rules, n, mDay);
+          
+          if (canSwapP && canSwapM) {
+            const covP = dayCoverage(pDay);
+            const covM = dayCoverage(mDay);
+            if (covP.P > minCovP && covP.M < maxCovM && covM.M > minCovM && covM.P < maxCovP) {
+              schedule[n][pDay] = 'M';
+              schedule[n][mDay] = 'P';
+              firstHalfP--; firstHalfM++;
+              secondHalfM--; secondHalfP++;
+              break;
+            }
+          }
+        }
+        if (firstHalfP - firstHalfM <= threshold) break;
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 4.7 — Handle nurse pairing (coppiaTurni flag)
+  // If enabled, copy shifts from first nurse to second nurse
+  // -------------------------------------------------------------------------
+  if (coppiaTurni && Array.isArray(coppiaTurni) && coppiaTurni.length === 2) {
+    progress(82, 'Copia turni infermieri accoppiati...');
+    const [nurse1, nurse2] = coppiaTurni;
+    if (nurse1 >= 0 && nurse1 < numNurses && nurse2 >= 0 && nurse2 < numNurses && nurse1 !== nurse2) {
+      // Copy schedule from nurse1 to nurse2
+      for (let d = 0; d < numDays; d++) {
+        schedule[nurse2][d] = schedule[nurse1][d];
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 4.8 — Enforce rest after 2 consecutive D shifts
+  // If consente2DiurniConsecutivi is enabled, ensure R comes after D-D pattern
+  // -------------------------------------------------------------------------
+  if (consente2DiurniConsecutivi) {
+    progress(84, 'Verifica riposo dopo diurni consecutivi...');
+    for (let n = 0; n < numNurses; n++) {
+      for (let d = 1; d < numDays - 1; d++) {
+        // Check for D-D pattern
+        if (schedule[n][d - 1] === 'D' && schedule[n][d] === 'D') {
+          // Need R on day d+1
+          if (schedule[n][d + 1] !== 'R') {
+            // Try to convert to R if possible
+            const s = schedule[n][d + 1];
+            if (s === 'M' || s === 'P') {
+              const cov = dayCoverage(d + 1);
+              const slotMin = s === 'M' ? minCovM : minCovP;
+              const slotCurrent = s === 'M' ? cov.M : cov.P;
+              if (slotCurrent > slotMin) {
+                schedule[n][d + 1] = 'R';
+              }
+            } else if (s === 'D') {
+              // Can't have 3 consecutive D shifts, convert to R
+              // D shift covers both M and P slots, so check both
+              const cov = dayCoverage(d + 1);
+              if (cov.M > minCovM && cov.P > minCovP && cov.D > 1) {
+                schedule[n][d + 1] = 'R';
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Phase 5 — Equity pass: try to balance hours
   // -------------------------------------------------------------------------
   // Simple swap pass: if nurse A has much more hours than nurse B,
@@ -672,10 +886,32 @@ function solve(config) {
       }
     }
     // Check that after N-S-R there must be another R (2 rest days after night, smonto doesn't count)
+    // EXCEPTION: For nurses with no_diurni tag, only 1 R is required after S
     for (let d = 0; d < numDays - 3; d++) {
       if (schedule[n][d] === 'N' && schedule[n][d + 1] === 'S' && schedule[n][d + 2] === 'R') {
         if (schedule[n][d + 3] !== 'R') {
-          violations.push({ nurse: n, day: d, type: 'need_2R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)` });
+          // Only report violation if nurse doesn't have no_diurni tag
+          if (!nurseProps[n].noDiurni) {
+            violations.push({ nurse: n, day: d, type: 'need_2R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)` });
+          }
+        }
+      }
+    }
+    
+    // Check for D-D pattern when consente2DiurniConsecutivi is enabled
+    // After D-D there must be R
+    if (consente2DiurniConsecutivi) {
+      for (let d = 1; d < numDays - 1; d++) {
+        if (schedule[n][d - 1] === 'D' && schedule[n][d] === 'D') {
+          if (schedule[n][d + 1] !== 'R') {
+            violations.push({ nurse: n, day: d, type: 'DD_no_R', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo D-D serve R` });
+          }
+        }
+      }
+      // Check for 3+ consecutive D shifts (not allowed)
+      for (let d = 2; d < numDays; d++) {
+        if (schedule[n][d - 2] === 'D' && schedule[n][d - 1] === 'D' && schedule[n][d] === 'D') {
+          violations.push({ nurse: n, day: d, type: 'DDD', msg: `Infermiere ${n + 1}, giorno ${d + 1}: 3 diurni consecutivi non consentiti` });
         }
       }
     }
