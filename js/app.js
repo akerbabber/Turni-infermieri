@@ -1009,10 +1009,10 @@ function revalidate() {
   const violations = [];
 
   const FORBIDDEN_NEXT = {
-    P: ['M', 'D'],
-    D: ['M', 'P', 'D'],
+    P: state.rules.consentePomeriggioDiurno ? ['M'] : ['M', 'D'],
+    D: state.rules.consente2DiurniConsecutivi ? ['M', 'P'] : ['M', 'P', 'D'],
     N: ['M', 'P', 'D', 'R', 'N'],
-    S: ['M', 'P', 'D', 'N'],
+    S: ['M', 'P', 'D', 'N', 'S'],
   };
 
   for (let n = 0; n < numNurses; n++) {
@@ -1022,6 +1022,17 @@ function revalidate() {
       const forbidden = FORBIDDEN_NEXT[cur] || [];
       if (forbidden.includes(nxt)) {
         violations.push({ nurse: n, day: d, type: 'transition', msg: `Inf. ${n + 1}, gg ${d + 1}-${d + 2}: ${cur}→${nxt} vietato` });
+      }
+    }
+    // D-D specific checks when consecutive D shifts are allowed
+    if (state.rules.consente2DiurniConsecutivi) {
+      for (let d = 1; d < numDays - 1; d++) {
+        if (state.schedule[n][d-1] === 'D' && state.schedule[n][d] === 'D' && state.schedule[n][d+1] !== 'R')
+          violations.push({ nurse: n, day: d + 1, type: 'DD_no_R', msg: `Inf. ${n + 1}, gg ${d + 2}: dopo D-D serve R` });
+      }
+      for (let d = 2; d < numDays; d++) {
+        if (state.schedule[n][d-2] === 'D' && state.schedule[n][d-1] === 'D' && state.schedule[n][d] === 'D')
+          violations.push({ nurse: n, day: d, type: 'DDD', msg: `Inf. ${n + 1}, gg ${d + 1}: 3 diurni consecutivi non consentiti` });
       }
     }
   }
@@ -1036,8 +1047,11 @@ function revalidate() {
       if (s === 'N') N++;
     }
     if (M < state.rules.minCoverageM) violations.push({ day: d, type: 'coverage_M', msg: `Giorno ${d + 1}: M insufficiente (${M}/${state.rules.minCoverageM})` });
+    if (M > state.rules.maxCoverageM) violations.push({ day: d, type: 'coverage_M_max', msg: `Giorno ${d + 1}: M eccessiva (${M}/${state.rules.maxCoverageM})` });
     if (P < state.rules.minCoverageP) violations.push({ day: d, type: 'coverage_P', msg: `Giorno ${d + 1}: P insufficiente (${P}/${state.rules.minCoverageP})` });
+    if (P > state.rules.maxCoverageP) violations.push({ day: d, type: 'coverage_P_max', msg: `Giorno ${d + 1}: P eccessiva (${P}/${state.rules.maxCoverageP})` });
     if (N < state.rules.minCoverageN) violations.push({ day: d, type: 'coverage_N', msg: `Giorno ${d + 1}: N insufficiente (${N}/${state.rules.minCoverageN})` });
+    if (N > state.rules.maxCoverageN) violations.push({ day: d, type: 'coverage_N_max', msg: `Giorno ${d + 1}: N eccessiva (${N}/${state.rules.maxCoverageN})` });
   }
 
   state.violations = violations;
