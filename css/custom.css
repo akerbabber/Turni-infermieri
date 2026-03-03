@@ -1,0 +1,467 @@
+/* ============================================================
+   custom.css — Turni Infermieri PS
+   ============================================================ */
+
+/* ---------- CSS Custom Properties (light / dark) ---------- */
+:root {
+  --bg-primary:    #f9fafb;
+  --bg-card:       #ffffff;
+  --bg-header:     #1e3a5f;
+  --text-primary:  #111827;
+  --text-muted:    #6b7280;
+  --border:        #e5e7eb;
+  --accent:        #1e3a5f;
+  --weekend-bg:    #fef9f0;
+  --violation-bg:  #fef2f2;
+  --violation-bdr: #ef4444;
+  --scrollbar-thumb: #9ca3af;
+}
+
+html.dark {
+  --bg-primary:    #0f172a;
+  --bg-card:       #1e293b;
+  --bg-header:     #0f172a;
+  --text-primary:  #f1f5f9;
+  --text-muted:    #94a3b8;
+  --border:        #334155;
+  --accent:        #3b82f6;
+  --weekend-bg:    #1e2a3a;
+  --violation-bg:  #3b1515;
+  --violation-bdr: #ef4444;
+  --scrollbar-thumb: #475569;
+}
+
+/* ---------- Base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  min-height: 100vh;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+/* ---------- Shift color chips ---------- */
+.shift-M  { background-color: #3B82F6; color: #fff; }
+.shift-P  { background-color: #F59E0B; color: #fff; }
+.shift-D  { background-color: #8B5CF6; color: #fff; }
+.shift-N  { background-color: #1E3A5F; color: #fff; }
+.shift-S  { background-color: #9CA3AF; color: #fff; }
+.shift-R  { background-color: #10B981; color: #fff; }
+.shift-empty { background-color: #e5e7eb; color: #6b7280; }
+
+/* ---------- Schedule grid ---------- */
+.schedule-wrapper {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 70vh;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+}
+
+.schedule-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.schedule-table th,
+.schedule-table td {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 2px 1px;
+  text-align: center;
+  min-width: 32px;
+}
+
+.schedule-table th:first-child,
+.schedule-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: var(--bg-card);
+  min-width: 140px;
+  max-width: 180px;
+  text-align: left;
+  padding: 4px 8px;
+  border-right: 2px solid var(--border);
+  font-weight: 500;
+}
+
+.schedule-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg-card);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 4px 2px;
+}
+
+.schedule-table thead th:first-child {
+  z-index: 30;
+}
+
+/* Weekend columns */
+.col-weekend { background-color: var(--weekend-bg) !important; }
+
+/* Coverage row */
+.coverage-row td {
+  font-size: 11px;
+  font-weight: 600;
+  background-color: var(--bg-card);
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+.coverage-row td:first-child { z-index: 15; }
+
+/* Stats column */
+.stats-col {
+  position: sticky;
+  right: 0;
+  background: var(--bg-card) !important;
+  font-size: 11px;
+  border-left: 2px solid var(--border) !important;
+  min-width: 80px;
+  z-index: 5;
+}
+.schedule-table thead .stats-col { z-index: 25; }
+
+/* Shift cell */
+.shift-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+  user-select: none;
+}
+
+.shift-cell:hover {
+  transform: scale(1.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  z-index: 1;
+  position: relative;
+}
+
+/* Violation highlight */
+.violation-cell .shift-cell {
+  box-shadow: 0 0 0 2px var(--violation-bdr);
+}
+td.violation-cell {
+  background-color: var(--violation-bg) !important;
+}
+
+/* Coverage warning */
+.cov-warn { color: #ef4444; }
+.cov-ok   { color: #10b981; }
+
+/* ---------- Shift dropdown (inline) ---------- */
+.shift-dropdown {
+  position: absolute;
+  z-index: 100;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  padding: 6px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  max-width: 220px;
+}
+
+.shift-dropdown button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  transition: transform 0.1s;
+}
+
+.shift-dropdown button:hover { transform: scale(1.1); }
+
+/* ---------- Progress bar ---------- */
+.progress-bar-inner {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  border-radius: 9999px;
+  transition: width 0.4s ease;
+}
+
+/* ---------- Wizard step indicators ---------- */
+.step-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 14px;
+  transition: background-color 0.3s, color 0.3s;
+  border: 2px solid transparent;
+}
+
+.step-indicator.active {
+  background-color: #3b82f6;
+  color: #fff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 4px rgba(59,130,246,0.25);
+}
+
+.step-indicator.done {
+  background-color: #10b981;
+  color: #fff;
+  border-color: #10b981;
+}
+
+.step-indicator.pending {
+  background-color: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.step-connector {
+  flex: 1;
+  height: 2px;
+  background-color: var(--border);
+  transition: background-color 0.3s;
+}
+.step-connector.done { background-color: #10b981; }
+
+/* ---------- Drag and drop (nurse list) ---------- */
+.nurse-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: grab;
+  transition: box-shadow 0.2s, transform 0.1s;
+  touch-action: none;
+}
+
+.nurse-item:active { cursor: grabbing; }
+
+.nurse-item.dragging {
+  opacity: 0.5;
+  transform: scale(0.98);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.nurse-item.drag-over {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.3);
+}
+
+.drag-handle {
+  color: var(--text-muted);
+  cursor: grab;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* ---------- Tags ---------- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.tag.tag-solo_mattine { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+.tag.tag-no_notti     { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.tag.tag-no_diurni    { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
+
+.tag.active { box-shadow: 0 0 0 2px currentColor; }
+.tag.inactive { opacity: 0.4; }
+
+html.dark .tag.tag-solo_mattine { background: #1e3a5f; color: #93c5fd; border-color: #3b82f6; }
+html.dark .tag.tag-no_notti     { background: #3b2500; color: #fcd34d; border-color: #f59e0b; }
+html.dark .tag.tag-no_diurni    { background: #2e1a5e; color: #c4b5fd; border-color: #7c3aed; }
+
+/* ---------- Rule cards ---------- */
+.rule-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  transition: box-shadow 0.2s;
+}
+.rule-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #d1d5db;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: background 0.25s;
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.25s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-switch input:checked + .toggle-slider { background: #3b82f6; }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+/* Range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 3px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+/* ---------- Tooltip ---------- */
+[data-tooltip] { position: relative; }
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1f2937;
+  color: #f9fafb;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 50;
+  max-width: 220px;
+  white-space: normal;
+  text-align: center;
+}
+[data-tooltip]:hover::after { opacity: 1; }
+
+/* ---------- Step panel animation ---------- */
+.step-panel {
+  animation: fadeSlideIn 0.3s ease both;
+}
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- Button sizes ---------- */
+.btn { min-height: 44px; }
+
+/* ---------- Dark mode card overrides ---------- */
+html.dark .rule-card,
+html.dark .nurse-item,
+html.dark .schedule-table th,
+html.dark .schedule-table td,
+html.dark .schedule-table th:first-child,
+html.dark .schedule-table td:first-child,
+html.dark .coverage-row td,
+html.dark .stats-col {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+html.dark input[type="range"] { background: #334155; }
+html.dark .shift-dropdown { background: var(--bg-card); border-color: var(--border); }
+
+/* ---------- Print styles ---------- */
+@media print {
+  @page { size: A4 landscape; margin: 8mm; }
+
+  body { background: #fff !important; color: #000 !important; font-size: 9px !important; }
+
+  header, nav, #step-nav, #btn-generate, #btn-export, #btn-save, .no-print { display: none !important; }
+
+  .schedule-wrapper {
+    overflow: visible !important;
+    max-height: none !important;
+    border: none !important;
+  }
+
+  .schedule-table { font-size: 8px !important; }
+  .schedule-table th, .schedule-table td { padding: 1px !important; min-width: 22px !important; }
+  .schedule-table td:first-child { min-width: 100px !important; position: static !important; }
+  .schedule-table thead th { position: static !important; }
+  .coverage-row td { position: static !important; }
+  .stats-col { position: static !important; }
+
+  .shift-cell { width: 18px !important; height: 16px !important; font-size: 8px !important; border-radius: 2px !important; }
+
+  .shift-M { background-color: #93c5fd !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .shift-P { background-color: #fcd34d !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .shift-D { background-color: #c4b5fd !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .shift-N { background-color: #93c5fd !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .shift-S { background-color: #d1d5db !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .shift-R { background-color: #a7f3d0 !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
