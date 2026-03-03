@@ -318,16 +318,19 @@ function construct(ctx) {
   function canNight(n, d) {
     if (schedule[n][d] !== null || nc[n] >= maxNights) return false;
     const noDiurni = nurseProps[n].noDiurni;
-    const diurniENotturni = nurseProps[n].diurniENotturni;
     if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
     if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
-    // For diurni_e_notturni and regular nurses: need 2 R after N-S (total 4 slots: N-S-R-R)
+    // For regular nurses (including diurni_e_notturni): need 2 R after N-S (total 4 slots: N-S-R-R)
     // For noDiurni nurses: need only 1 R after N-S (total 3 slots: N-S-R)
     if (!noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+    
+    // Cannot start night if we're still in mandatory post-night rest period
+    // Check backward: if previous day is S, we must place R there
     if (d > 0 && schedule[n][d - 1] === 'S') return false;
+    // If d-1 is R and d-2 is S, we're at the position for second R (mandatory for non-noDiurni)
     if (d > 1 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'S') return false;
-    // For diurni_e_notturni and regular nurses: check d-2, d-3 for prior N-S-R-R
-    if (!noDiurni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
+    // For non-noDiurni: if d-1 is R and d-2 is R and d-3 is S, we're at position after second R - this is OK
+    // So the old check was wrong - we should NOT block in this case
     return true;
   }
 
@@ -343,64 +346,100 @@ function construct(ctx) {
     nc[n]++;
   }
 
-  // 2a — Ensure minimum night coverage per day (sequential for better distribution)
+  // 2a — Ensure minimum night coverage per day (with smart spreading)
   const nightStarts = new Array(numDays).fill(0);
-  // Process days in sequential order to ensure even distribution
+  
+  // Calculate optimal spacing: with N-S-R-R block (4 days), each nurse can do a night every 5 days
+  // To cover minCovN per day, we need to stagger starting days for different nurses
+  const blockSize = 4; // N-S-R-R
+  const cycleLen = blockSize + 1; // 5 days between possible night starts
+  
+  // First, calculate how many nights we need total
+  const totalNightsNeeded = numDays * minCovN;
+  const totalNightsAvailable = nightEligible.length * maxNights;
+  
+  // Assign initial starting offsets to spread nurses across the cycle
+  // This ensures different nurses have nights on different days
+  const nurseStartOffset = new Map();
+  nightEligible.forEach((n, idx) => {
+    // Spread nurses evenly across the first cycleLen days
+    nurseStartOffset.set(n, idx % cycleLen);
+  });
+  
+  // Phase 2a.1: First, place nights to meet minimum coverage, respecting offsets
+  // Go day by day and ensure we meet minCovN
   for (let d = 0; d < numDays; d++) {
     let cov = 0;
     for (let n = 0; n < numNurses; n++) if (schedule[n][d] === 'N') cov++;
+    
     while (cov < minCovN) {
-      const cands = shuffle([...nightEligible]).filter(n => canNight(n, d))
-        .sort((a, b) => nc[a] - nc[b]);
+      // Find candidates who can do night on this day
+      // Prefer nurses whose offset matches this day (mod cycleLen)
+      const cands = shuffle([...nightEligible])
+        .filter(n => canNight(n, d))
+        .sort((a, b) => {
+          // Primary: prefer nurses whose offset matches
+          const aMatch = (d % cycleLen === nurseStartOffset.get(a)) ? 0 : 1;
+          const bMatch = (d % cycleLen === nurseStartOffset.get(b)) ? 0 : 1;
+          if (aMatch !== bMatch) return aMatch - bMatch;
+          // Secondary: prefer nurses with fewer nights
+          return nc[a] - nc[b];
+        });
+      
       if (cands.length === 0) break;
       placeNight(cands[0], d);
       nightStarts[d]++;
       cov++;
     }
   }
-
-  // 2b — Second pass: try to fill any remaining uncovered days by converting scheduled R to N
-  // Only for diurni_e_notturni nurses who can sacrifice extra rest for coverage
+  
+  // Phase 2a.2: Fill in any remaining gaps (days with cov < minCovN)
+  // Try a more aggressive approach: look for nurses who can shift their schedule
   for (let d = 0; d < numDays; d++) {
     let cov = 0;
     for (let n = 0; n < numNurses; n++) if (schedule[n][d] === 'N') cov++;
     if (cov >= minCovN) continue;
     
-    // Try to find a nurse who has R on this day (from a previous night block) and can be reassigned
+    // Try to find nurses who have R (not from a recent N-S block) or null
     for (const n of shuffle([...nightEligible])) {
       if (cov >= minCovN) break;
       if (nc[n] >= maxNights) continue;
-      // Check if this nurse can do a night here by freeing up the required slots
-      if (schedule[n][d] !== 'R' && schedule[n][d] !== null) continue;
-      if (d + 1 >= numDays || d + 2 >= numDays) continue;
       
-      // Check if we can clear slots d, d+1, d+2 (and d+3 if needed)
+      const s = schedule[n][d];
+      // Skip if pinned or in the middle of a required N-S-R-R sequence
+      if (pinned[n][d]) continue;
+      
+      // Check if we can place a night here
+      if (s !== null && s !== 'R') continue;
+      
+      // For R: check it's not part of a mandatory post-night rest
+      if (s === 'R' && d > 0) {
+        const prev = schedule[n][d - 1];
+        if (prev === 'S') continue; // This is the first R after S, mandatory
+        if (prev === 'R' && d > 1 && schedule[n][d - 2] === 'S') continue; // Second R after N-S
+        if (prev === 'R' && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') continue; // Third R check
+      }
+      
+      // Check if we can clear the required slots
       const noDiurni = nurseProps[n].noDiurni;
       const needSlots = noDiurni ? 3 : 4;
       if (d + needSlots > numDays) continue;
       
-      // Check if clearing these slots would be valid
       let canClear = true;
       for (let i = 0; i < needSlots; i++) {
-        const s = schedule[n][d + i];
-        // Can only clear R, null, or the current N-S sequence if we're replacing it
-        if (s !== null && s !== 'R') { canClear = false; break; }
+        const slot = schedule[n][d + i];
         if (pinned[n][d + i]) { canClear = false; break; }
+        if (slot !== null && slot !== 'R') { canClear = false; break; }
+        // If it's R, check it's not mandatory post-night rest
+        if (slot === 'R' && d + i > 0) {
+          const prevSlot = schedule[n][d + i - 1];
+          if (prevSlot === 'S') { canClear = false; break; }
+          if (prevSlot === 'R' && d + i > 1 && schedule[n][d + i - 2] === 'S') { canClear = false; break; }
+        }
       }
       if (!canClear) continue;
       
-      // Check transition from previous day
-      if (d > 0) {
-        const prev = schedule[n][d - 1];
-        if (prev === 'S' || prev === 'N') continue;
-        if (prev === 'R') {
-          // Check if it's part of a prior N-S-R-R sequence
-          if (d > 1 && schedule[n][d - 2] === 'S') continue;
-          if (d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') continue;
-        }
-      }
-      
-      // Clear and place night
+      // Clear and place
       for (let i = 0; i < needSlots; i++) schedule[n][d + i] = null;
       placeNight(n, d);
       nightStarts[d]++;
