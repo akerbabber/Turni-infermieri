@@ -1211,7 +1211,7 @@ function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
   const lp = buildLP(ctx, perturbSeed);
   const opts = {
     time_limit: timeLimit,
-    mip_rel_gap: 0.1,
+    mip_rel_gap: 0.02,
     random_seed: perturbSeed * 137,
     output_flag: false,
     log_to_console: false,
@@ -1222,6 +1222,10 @@ function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
   }
   return null;
 }
+
+const MILP_MIN_TIME_PER_SOLUTION = 1;
+const MILP_MAX_TIME_PER_SOLUTION = 8;
+const MILP_TOTAL_TIME_BUDGET     = 30;
 
 /**
  * Multi-solution solver using HiGHS MILP + fallback to greedy.
@@ -1253,7 +1257,8 @@ function solve(config, numSolutions) {
 
   if (milpAvailable) {
     progress(5, 'Solver MILP caricato, generazione soluzioni…');
-    const timePerSolution = Math.max(1, Math.min(8, Math.floor(30 / numSolutions)));
+    const timePerSolution = Math.max(MILP_MIN_TIME_PER_SOLUTION,
+      Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(MILP_TOTAL_TIME_BUDGET / numSolutions)));
 
     for (let i = 0; i < numSolutions; i++) {
       progress(5 + Math.floor(i * 80 / numSolutions),

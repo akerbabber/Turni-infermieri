@@ -705,6 +705,8 @@ function renderSolutionPicker() {
     const label = idx === 0 ? '⭐ Migliore' : `#${idx + 1}`;
     btn.innerHTML = `${label}<br><span class="text-xs font-normal">${vioCount === 0 ? '✅ 0 viol.' : `⚠️ ${vioCount} viol.`}</span>`;
     btn.title = `Soluzione ${idx + 1} — ${vioCount} violazioni, punteggio: ${sol.score}`;
+    btn.setAttribute('aria-label', `Soluzione ${idx + 1}${idx === 0 ? ' (migliore)' : ''}, ${vioCount} violazioni`);
+    btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
     btn.addEventListener('click', () => selectSolution(idx));
     btnContainer.appendChild(btn);
   });
