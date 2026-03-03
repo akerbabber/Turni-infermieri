@@ -325,7 +325,7 @@ function construct(ctx) {
     const diurniENotturni = nurseProps[n].diurniENotturni;
     if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
     if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
-    // For diurni_e_notturni: need 3 R after N-S (total 4 slots: N-S-R-R-R)
+    // For diurni_e_notturni: need 3 R after N-S (total 5 slots: N-S-R-R-R)
     if (diurniENotturni) {
       if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
       if (d + 4 < numDays && schedule[n][d + 4] !== null) return false;
@@ -1224,8 +1224,8 @@ function buildLP(ctx, perturbSeed) {
       for (let d = 0; d < numDays; d++) {
         if (isFree(n, d)) {
           // Ban M, P (indices 0, 1)
-          lines.push(` denM${n}_${d}: ${V(n,d,0)} <= 0`);
-          lines.push(` denP${n}_${d}: ${V(n,d,1)} <= 0`);
+          lines.push(` denBanM${n}_${d}: ${V(n,d,0)} <= 0`);
+          lines.push(` denBanP${n}_${d}: ${V(n,d,1)} <= 0`);
         }
       }
     }
