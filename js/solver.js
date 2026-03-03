@@ -2,12 +2,17 @@
  * solver.js — Web Worker for nursing shift scheduling
  *
  * Shift codes:
- *   M  Mattina    08:00–14:12  (6.2h)
- *   P  Pomeriggio 14:00–20:12  (6.2h)
- *   D  Diurno     08:00–20:12  (12.2h)
- *   N  Notte      20:00–08:12  (12.2h)
- *   S  Smonto     (post-notte, 0h, non-rest)
- *   R  Riposo     (0h, real rest)
+ *   M     Mattina    08:00–14:12  (6.2h)
+ *   P     Pomeriggio 14:00–20:12  (6.2h)
+ *   D     Diurno     08:00–20:12  (12.2h)
+ *   N     Notte      20:00–08:12  (12.2h)
+ *   S     Smonto     (post-notte, 0h, non-rest)
+ *   R     Riposo     (0h, real rest)
+ *   F     Ferie      (7.12h)
+ *   MA    Malattia   (7.12h)
+ *   L104  104        (7.12h)
+ *   PR    Permesso Retribuito (7.12h)
+ *   MT    Maternità  (7.12h)
  */
 
 'use strict';
@@ -16,7 +21,16 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const SHIFT_HOURS = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0 };
+const SHIFT_HOURS = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 7.12, MA: 7.12, L104: 7.12, PR: 7.12, MT: 7.12 };
+
+// Absence type mapping
+const ABSENCE_TAG_TO_SHIFT = {
+  'ferie': 'F',
+  'malattia': 'MA',
+  '104': 'L104',
+  'permesso_retribuito': 'PR',
+  'maternita': 'MT'
+};
 
 // End-of-shift hour (24h, fractional minutes)
 const SHIFT_END = { M: 14.2, P: 20.2, D: 20.2, N: 8.2 }; // next day for N
@@ -101,14 +115,44 @@ function solve(config) {
 
   progress(5, 'Costruzione vincoli...');
 
+  // Helper to check if a date (day of month, 1-based) falls within an absence period
+  function isDateInAbsencePeriod(day1Based, absencePeriod) {
+    if (!absencePeriod || !absencePeriod.start || !absencePeriod.end) return false;
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day1Based).padStart(2, '0')}`;
+    return dateStr >= absencePeriod.start && dateStr <= absencePeriod.end;
+  }
+
+  // Helper to get the absence shift code for a specific day
+  function getAbsenceShiftForDay(nurse, day1Based) {
+    if (!nurse.absencePeriods) return null;
+    
+    // Check each absence type with period
+    for (const [tagKey, shiftCode] of Object.entries(ABSENCE_TAG_TO_SHIFT)) {
+      if (nurse.tags.includes(tagKey)) {
+        const period = nurse.absencePeriods[tagKey];
+        if (period && period.start && period.end) {
+          // If period is defined, check if day falls within
+          if (isDateInAbsencePeriod(day1Based, period)) {
+            return shiftCode;
+          }
+        } else {
+          // If no period defined but tag is active, apply for whole month
+          return shiftCode;
+        }
+      }
+    }
+    return null;
+  }
+
   // Pre-compute per-nurse properties
   const nurseProps = nurses.map(n => ({
     soloMattine: n.tags.includes('solo_mattine'),
     noNotti: n.tags.includes('no_notti'),
     noDiurni: n.tags.includes('no_diurni'),
-    assente: n.tags.includes('ferie') || n.tags.includes('malattia') || 
+    hasAnyAbsence: n.tags.includes('ferie') || n.tags.includes('malattia') || 
              n.tags.includes('104') || n.tags.includes('permesso_retribuito') || 
              n.tags.includes('maternita'),
+    absencePeriods: n.absencePeriods || {},
   }));
 
   // Day-of-week array (0=Sun…6=Sat)
@@ -118,26 +162,31 @@ function solve(config) {
   }
 
   // -------------------------------------------------------------------------
-  // Phase 1 — "Solo mattine feriali" nurses and absent nurses
+  // Phase 1 — Handle absence periods and "Solo mattine feriali" nurses
   // -------------------------------------------------------------------------
-  progress(10, 'Assegnazione turni speciali...');
+  progress(10, 'Assegnazione turni speciali e assenze...');
 
   for (let n = 0; n < numNurses; n++) {
-    // Handle absent nurses first (ferie, malattia, 104, permesso retribuito, maternità)
-    if (nurseProps[n].assente) {
-      for (let d = 0; d < numDays; d++) {
-        schedule[n][d] = 'R';
+    const nurse = nurses[n];
+    
+    // First, assign absence shifts for days within absence periods
+    for (let d = 0; d < numDays; d++) {
+      const absenceShift = getAbsenceShiftForDay(nurse, d + 1);
+      if (absenceShift) {
+        schedule[n][d] = absenceShift;
       }
-      continue;
     }
     
-    if (!nurseProps[n].soloMattine) continue;
-    for (let d = 0; d < numDays; d++) {
-      const dow = dows[d];
-      if (dow === 0 || dow === 6) {
-        schedule[n][d] = 'R';
-      } else {
-        schedule[n][d] = 'M';
+    // Then handle "solo mattine feriali" for non-absence days
+    if (nurseProps[n].soloMattine) {
+      for (let d = 0; d < numDays; d++) {
+        if (schedule[n][d] !== null) continue; // Skip if already assigned (absence)
+        const dow = dows[d];
+        if (dow === 0 || dow === 6) {
+          schedule[n][d] = 'R';
+        } else {
+          schedule[n][d] = 'M';
+        }
       }
     }
   }
@@ -147,9 +196,10 @@ function solve(config) {
   // -------------------------------------------------------------------------
   progress(20, 'Distribuzione turni notturni...');
 
+  // Nurses eligible for nights (those without global restrictions)
   const nightEligible = [];
   for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].soloMattine && !nurseProps[n].noNotti && !nurseProps[n].assente) nightEligible.push(n);
+    if (!nurseProps[n].soloMattine && !nurseProps[n].noNotti) nightEligible.push(n);
   }
 
   const targetNights = rules.targetNights ?? 4;
@@ -245,9 +295,8 @@ function solve(config) {
 
   // Helper: is nurse eligible for shift s on day d?
   function nurseEligible(n, d, s) {
-    if (schedule[n][d] !== null) return false; // already assigned
+    if (schedule[n][d] !== null) return false; // already assigned (including absence shifts)
     if (nurseProps[n].soloMattine) return false;
-    if (nurseProps[n].assente) return false; // absent nurses can't work
     if (s === 'N' && nurseProps[n].noNotti) return false;
     if (s === 'D' && nurseProps[n].noDiurni) return false;
     const prev = d > 0 ? schedule[n][d - 1] : null;
@@ -266,8 +315,9 @@ function solve(config) {
 
     // Build sorted list of nurses by current hours (least hours first = equity)
     // Helper function to get available nurses sorted by hours
+    // Only include nurses without absence/assignment on this day
     const getAvailableNurses = () => Array.from({ length: numNurses }, (_, i) => i)
-      .filter(n => schedule[n][d] === null && !nurseProps[n].assente)
+      .filter(n => schedule[n][d] === null)
       .sort((a, b) => nurseHours(a) - nurseHours(b));
 
     let availableNurses = getAvailableNurses();
@@ -355,7 +405,6 @@ function solve(config) {
 
     for (let n = 0; n < numNurses; n++) {
       if (nurseProps[n].soloMattine) continue;
-      if (nurseProps[n].assente) continue; // skip absent nurses
       if (hours[n] > avgHours + 8) {
         // Nurse has too many hours — convert some M/P to R if possible without violating coverage
         for (let d = 0; d < numDays; d++) {

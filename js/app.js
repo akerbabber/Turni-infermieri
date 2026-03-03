@@ -9,9 +9,9 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const SHIFT_COLORS = { M: 'shift-M', P: 'shift-P', D: 'shift-D', N: 'shift-N', S: 'shift-S', R: 'shift-R' };
-const SHIFT_LABELS = { M: 'Mattina', P: 'Pomeriggio', D: 'Diurno', N: 'Notte', S: 'Smonto', R: 'Riposo' };
-const SHIFT_HOURS  = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0 };
+const SHIFT_COLORS = { M: 'shift-M', P: 'shift-P', D: 'shift-D', N: 'shift-N', S: 'shift-S', R: 'shift-R', F: 'shift-F', MA: 'shift-MA', L104: 'shift-L104', PR: 'shift-PR', MT: 'shift-MT' };
+const SHIFT_LABELS = { M: 'Mattina', P: 'Pomeriggio', D: 'Diurno', N: 'Notte', S: 'Smonto', R: 'Riposo', F: 'Ferie', MA: 'Malattia', L104: '104', PR: 'Perm.Retr.', MT: 'Maternità' };
+const SHIFT_HOURS  = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 7.12, MA: 7.12, L104: 7.12, PR: 7.12, MT: 7.12 };
 const DOW_LABELS   = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const MONTHS_IT    = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
                       'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -71,6 +71,13 @@ function buildDefaultNurses(count) {
     id: genId(i),
     name: DEFAULT_NURSE_NAMES[i] || `Infermiere ${i + 1}`,
     tags: [],
+    absencePeriods: {
+      ferie: { start: null, end: null },
+      malattia: { start: null, end: null },
+      '104': { start: null, end: null },
+      permesso_retribuito: { start: null, end: null },
+      maternita: { start: null, end: null }
+    }
   }));
 }
 
@@ -111,8 +118,18 @@ function loadState() {
     state = { ...state, ...saved, worker: null };
     // Ensure rules have all keys
     state.rules = { ...DEFAULT_RULES, ...saved.rules };
-    // Re-hydrate nurses (ensure tags array)
-    state.nurses = (saved.nurses || []).map(n => ({ ...n, tags: n.tags || [] }));
+    // Re-hydrate nurses (ensure tags array and absencePeriods)
+    state.nurses = (saved.nurses || []).map(n => ({ 
+      ...n, 
+      tags: n.tags || [],
+      absencePeriods: n.absencePeriods || {
+        ferie: { start: null, end: null },
+        malattia: { start: null, end: null },
+        '104': { start: null, end: null },
+        permesso_retribuito: { start: null, end: null },
+        maternita: { start: null, end: null }
+      }
+    }));
   } catch (_) {}
 }
 
@@ -230,21 +247,41 @@ function renderNurseList() {
 
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
 
+  // Absence types that need period selection
+  const absenceTypes = [
+    { key: 'ferie', label: 'Ferie', shiftCode: 'F' },
+    { key: 'malattia', label: 'Malattia', shiftCode: 'MA' },
+    { key: '104', label: '104', shiftCode: 'L104' },
+    { key: 'permesso_retribuito', label: 'Permesso retribuito', shiftCode: 'PR' },
+    { key: 'maternita', label: 'Maternità', shiftCode: 'MT' }
+  ];
+
   activeNurses.forEach((nurse, idx) => {
+    // Ensure nurse has absencePeriods initialized
+    if (!nurse.absencePeriods) {
+      nurse.absencePeriods = {
+        ferie: { start: null, end: null },
+        malattia: { start: null, end: null },
+        '104': { start: null, end: null },
+        permesso_retribuito: { start: null, end: null },
+        maternita: { start: null, end: null }
+      };
+    }
+
     const item = document.createElement('div');
     item.className = 'nurse-item';
     item.dataset.idx = idx;
     item.draggable = true;
 
     const tagDefs = [
-      { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine' },
-      { key: 'no_notti',     label: 'No notti',            cls: 'tag-no_notti' },
-      { key: 'no_diurni',   label: 'No diurni 12h',       cls: 'tag-no_diurni' },
-      { key: 'ferie',       label: 'Ferie',               cls: 'tag-ferie' },
-      { key: 'malattia',    label: 'Malattia',            cls: 'tag-malattia' },
-      { key: '104',         label: '104',                 cls: 'tag-104' },
-      { key: 'permesso_retribuito', label: 'Permesso retribuito', cls: 'tag-permesso_retribuito' },
-      { key: 'maternita',   label: 'Maternità',           cls: 'tag-maternita' },
+      { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine', isAbsence: false },
+      { key: 'no_notti',     label: 'No notti',            cls: 'tag-no_notti', isAbsence: false },
+      { key: 'no_diurni',   label: 'No diurni 12h',       cls: 'tag-no_diurni', isAbsence: false },
+      { key: 'ferie',       label: 'Ferie',               cls: 'tag-ferie', isAbsence: true },
+      { key: 'malattia',    label: 'Malattia',            cls: 'tag-malattia', isAbsence: true },
+      { key: '104',         label: '104',                 cls: 'tag-104', isAbsence: true },
+      { key: 'permesso_retribuito', label: 'Permesso retribuito', cls: 'tag-permesso_retribuito', isAbsence: true },
+      { key: 'maternita',   label: 'Maternità',           cls: 'tag-maternita', isAbsence: true },
     ];
 
     const tagsHTML = tagDefs.map(t => {
@@ -254,13 +291,38 @@ function renderNurseList() {
                 title="${t.label}">${t.label}</button>`;
     }).join('');
 
+    // Build absence period inputs for active absence tags
+    let absencePeriodsHTML = '';
+    tagDefs.filter(t => t.isAbsence && nurse.tags.includes(t.key)).forEach(t => {
+      const period = nurse.absencePeriods[t.key] || { start: null, end: null };
+      absencePeriodsHTML += `
+        <div class="absence-period mt-2 p-2 bg-gray-50 dark:bg-slate-800 rounded-lg text-xs" data-nurse="${idx}" data-type="${t.key}">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold ${t.cls.replace('tag-', 'text-')}">${t.label}:</span>
+            <label class="flex items-center gap-1">
+              Dal: <input type="date" class="absence-start border rounded px-1 py-0.5 text-xs bg-white dark:bg-slate-700 dark:border-slate-600" 
+                     data-nurse="${idx}" data-type="${t.key}" value="${period.start || ''}" />
+            </label>
+            <label class="flex items-center gap-1">
+              Al: <input type="date" class="absence-end border rounded px-1 py-0.5 text-xs bg-white dark:bg-slate-700 dark:border-slate-600"
+                   data-nurse="${idx}" data-type="${t.key}" value="${period.end || ''}" />
+            </label>
+            <span class="text-gray-500">(7.12 ore/giorno)</span>
+          </div>
+        </div>
+      `;
+    });
+
     item.innerHTML = `
-      <span class="drag-handle" title="Trascina per riordinare">⠿</span>
-      <span class="flex-1 text-sm font-medium nurse-name"
-            contenteditable="true"
-            data-nurse="${idx}"
-            spellcheck="false">${escHtml(nurse.name)}</span>
-      <div class="flex flex-wrap gap-1">${tagsHTML}</div>
+      <div class="flex items-center gap-2 w-full">
+        <span class="drag-handle" title="Trascina per riordinare">⠿</span>
+        <span class="flex-1 text-sm font-medium nurse-name"
+              contenteditable="true"
+              data-nurse="${idx}"
+              spellcheck="false">${escHtml(nurse.name)}</span>
+        <div class="flex flex-wrap gap-1">${tagsHTML}</div>
+      </div>
+      ${absencePeriodsHTML}
     `;
 
     container.appendChild(item);
@@ -283,6 +345,37 @@ function renderNurseList() {
         if (pos >= 0) tags.splice(pos, 1); else tags.push(tKey);
         saveState();
         renderNurseList();
+      });
+    });
+
+    // Absence period date inputs
+    item.querySelectorAll('.absence-start').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const nIdx = parseInt(inp.dataset.nurse);
+        const type = inp.dataset.type;
+        if (!state.nurses[nIdx].absencePeriods) {
+          state.nurses[nIdx].absencePeriods = {};
+        }
+        if (!state.nurses[nIdx].absencePeriods[type]) {
+          state.nurses[nIdx].absencePeriods[type] = { start: null, end: null };
+        }
+        state.nurses[nIdx].absencePeriods[type].start = inp.value || null;
+        saveState();
+      });
+    });
+
+    item.querySelectorAll('.absence-end').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const nIdx = parseInt(inp.dataset.nurse);
+        const type = inp.dataset.type;
+        if (!state.nurses[nIdx].absencePeriods) {
+          state.nurses[nIdx].absencePeriods = {};
+        }
+        if (!state.nurses[nIdx].absencePeriods[type]) {
+          state.nurses[nIdx].absencePeriods[type] = { start: null, end: null };
+        }
+        state.nurses[nIdx].absencePeriods[type].end = inp.value || null;
+        saveState();
       });
     });
 
@@ -644,7 +737,8 @@ function openShiftDropdown(anchorEl, n, d) {
   dropdown.className = 'shift-dropdown';
   dropdown.id = 'active-dropdown';
 
-  ['M', 'P', 'D', 'N', 'S', 'R'].forEach(shift => {
+  // Include all shift types including absence shifts
+  ['M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT'].forEach(shift => {
     const btn = document.createElement('button');
     btn.className = `shift-cell ${SHIFT_COLORS[shift]}`;
     btn.style.width = '36px';
@@ -664,7 +758,7 @@ function openShiftDropdown(anchorEl, n, d) {
 
   // Position near anchor
   const rect = anchorEl.getBoundingClientRect();
-  const left = Math.min(rect.left + window.scrollX, window.innerWidth - 230);
+  const left = Math.min(rect.left + window.scrollX, window.innerWidth - 280);
   const top = rect.bottom + window.scrollY + 4;
   dropdown.style.position = 'absolute';
   dropdown.style.left = left + 'px';
