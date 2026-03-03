@@ -11,7 +11,7 @@
 
 const SHIFT_COLORS = { M: 'shift-M', P: 'shift-P', D: 'shift-D', N: 'shift-N', S: 'shift-S', R: 'shift-R', F: 'shift-F', MA: 'shift-MA', L104: 'shift-L104', PR: 'shift-PR', MT: 'shift-MT' };
 const SHIFT_LABELS = { M: 'Mattina', P: 'Pomeriggio', D: 'Diurno', N: 'Notte', S: 'Smonto', R: 'Riposo', F: 'Ferie', MA: 'Malattia', L104: '104', PR: 'Perm.Retr.', MT: 'Maternità' };
-const SHIFT_HOURS  = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 7.12, MA: 7.12, L104: 7.12, PR: 7.12, MT: 7.12 };
+const SHIFT_HOURS  = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 };
 const DOW_LABELS   = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const MONTHS_IT    = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
                       'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -283,6 +283,8 @@ function renderNurseList() {
 
     const tagDefs = [
       { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine', isAbsence: false },
+      { key: 'solo_diurni',  label: 'Solo diurni 12h',      cls: 'tag-solo_diurni', isAbsence: false },
+      { key: 'solo_notti',   label: 'Solo notti',           cls: 'tag-solo_notti', isAbsence: false },
       { key: 'no_notti',     label: 'No notti',            cls: 'tag-no_notti', isAbsence: false },
       { key: 'no_diurni',   label: 'No diurni 12h',       cls: 'tag-no_diurni', isAbsence: false },
       { key: 'ferie',       label: 'Ferie',               cls: 'tag-ferie', isAbsence: true },
@@ -315,7 +317,7 @@ function renderNurseList() {
               Al: <input type="date" class="absence-end border rounded px-1 py-0.5 text-xs bg-white dark:bg-slate-700 dark:border-slate-600"
                    data-nurse="${idx}" data-type="${t.key}" value="${period.end || ''}" />
             </label>
-            <span class="text-gray-500">(7.12 ore/giorno)</span>
+            <span class="text-gray-500">(6.12 ore/giorno)</span>
           </div>
         </div>
       `;

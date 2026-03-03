@@ -45,11 +45,11 @@ Nessun framework, nessun bundler, nessun `npm install`.
 | N      | Notte                  | 12.2  |
 | S      | Smonto (post-notte)    | 0     |
 | R      | Riposo                 | 0     |
-| F      | Ferie                  | 7.12  |
-| MA     | Malattia               | 7.12  |
-| L104   | Legge 104              | 7.12  |
-| PR     | Permesso Retribuito    | 7.12  |
-| MT     | Maternità              | 7.12  |
+| F      | Ferie                  | 6.12  |
+| MA     | Malattia               | 6.12  |
+| L104   | Legge 104              | 6.12  |
+| PR     | Permesso Retribuito    | 6.12  |
+| MT     | Maternità              | 6.12  |
 
 ## ⚙️ Motore di scheduling
 
