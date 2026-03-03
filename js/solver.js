@@ -325,12 +325,11 @@ function construct(ctx) {
     if (!noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
     
     // Cannot start night if we're still in mandatory post-night rest period
-    // Check backward: if previous day is S, we must place R there
+    // Check backward: if previous day is S, we're at first R position (cannot start night)
     if (d > 0 && schedule[n][d - 1] === 'S') return false;
-    // If d-1 is R and d-2 is S, we're at the position for second R (mandatory for non-noDiurni)
+    // If d-1 is R and d-2 is S, we're at second R position (mandatory for non-noDiurni)
     if (d > 1 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'S') return false;
-    // For non-noDiurni: if d-1 is R and d-2 is R and d-3 is S, we're at position after second R - this is OK
-    // So the old check was wrong - we should NOT block in this case
+    // After N-S-R-R (4 days), day 5 is free to start a new night
     return true;
   }
 
@@ -349,10 +348,11 @@ function construct(ctx) {
   // 2a — Ensure minimum night coverage per day (with smart spreading)
   const nightStarts = new Array(numDays).fill(0);
   
-  // Calculate optimal spacing: with N-S-R-R block (4 days), each nurse can do a night every 5 days
-  // To cover minCovN per day, we need to stagger starting days for different nurses
+  // Calculate optimal spacing: with N-S-R-R block (4 days), the earliest a nurse can start
+  // a new night is on day 5 (after N on day 1, S on day 2, R on day 3, R on day 4)
+  // To cover minCovN per day, we stagger starting days for different nurses
   const blockSize = 4; // N-S-R-R
-  const cycleLen = blockSize + 1; // 5 days between possible night starts
+  const cycleLen = blockSize + 1; // 5 days minimum between night shift starts
   
   // First, calculate how many nights we need total
   const totalNightsNeeded = numDays * minCovN;
@@ -416,8 +416,7 @@ function construct(ctx) {
       if (s === 'R' && d > 0) {
         const prev = schedule[n][d - 1];
         if (prev === 'S') continue; // This is the first R after S, mandatory
-        if (prev === 'R' && d > 1 && schedule[n][d - 2] === 'S') continue; // Second R after N-S
-        if (prev === 'R' && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') continue; // Third R check
+        if (prev === 'R' && d > 1 && schedule[n][d - 2] === 'S') continue; // Second R after N-S, mandatory
       }
       
       // Check if we can clear the required slots
@@ -471,7 +470,7 @@ function construct(ctx) {
       // Find nurse with most nights to remove
       nightNurses.sort((a, b) => nc[b] - nc[a]);
       const n = nightNurses.shift();
-      // Revert N-S-R-R block to R-R-R-R (or nulls to be filled later)
+      // Clear N-S-R-R block (set to null to be filled later by day shift phase)
       const noDiurni = nurseProps[n].noDiurni;
       const needSlots = noDiurni ? 3 : 4;
       for (let i = 0; i < needSlots && d + i < numDays; i++) {
