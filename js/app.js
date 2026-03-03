@@ -30,8 +30,14 @@ const DEFAULT_NURSE_NAMES = [
 ];
 
 const DEFAULT_RULES = {
-  minCoverage: 6,
-  maxCoverage: 7,
+  minCoverageM: 6,
+  maxCoverageM: 7,
+  minCoverageP: 6,
+  maxCoverageP: 7,
+  minCoverageD: 0,
+  maxCoverageD: 4,
+  minCoverageN: 2,
+  maxCoverageN: 4,
   targetHours: 36,
   minHours: 28,
   maxHours: 42,
@@ -43,6 +49,7 @@ const DEFAULT_RULES = {
   minGap11h: true,
   forwardOnly: true,
   minRPerWeek: 2,
+  preferDiurni: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -233,6 +240,11 @@ function renderNurseList() {
       { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine' },
       { key: 'no_notti',     label: 'No notti',            cls: 'tag-no_notti' },
       { key: 'no_diurni',   label: 'No diurni 12h',       cls: 'tag-no_diurni' },
+      { key: 'ferie',       label: 'Ferie',               cls: 'tag-ferie' },
+      { key: 'malattia',    label: 'Malattia',            cls: 'tag-malattia' },
+      { key: '104',         label: '104',                 cls: 'tag-104' },
+      { key: 'permesso_retribuito', label: 'Permesso retribuito', cls: 'tag-permesso_retribuito' },
+      { key: 'maternita',   label: 'Maternità',           cls: 'tag-maternita' },
     ];
 
     const tagsHTML = tagDefs.map(t => {
@@ -312,9 +324,21 @@ function escHtml(str) {
 function renderStep2() {
   const r = state.rules;
 
-  // Coverage slider
-  bindRange('sl-min-cov', 'val-min-cov', r.minCoverage, v => { state.rules.minCoverage = v; saveState(); });
-  bindRange('sl-max-cov', 'val-max-cov', r.maxCoverage, v => { state.rules.maxCoverage = v; saveState(); });
+  // Coverage sliders - Mattina
+  bindRange('sl-min-cov-m', 'val-min-cov-m', r.minCoverageM, v => { state.rules.minCoverageM = v; saveState(); });
+  bindRange('sl-max-cov-m', 'val-max-cov-m', r.maxCoverageM, v => { state.rules.maxCoverageM = v; saveState(); });
+
+  // Coverage sliders - Pomeriggio
+  bindRange('sl-min-cov-p', 'val-min-cov-p', r.minCoverageP, v => { state.rules.minCoverageP = v; saveState(); });
+  bindRange('sl-max-cov-p', 'val-max-cov-p', r.maxCoverageP, v => { state.rules.maxCoverageP = v; saveState(); });
+
+  // Coverage sliders - Diurno
+  bindRange('sl-min-cov-d', 'val-min-cov-d', r.minCoverageD, v => { state.rules.minCoverageD = v; saveState(); });
+  bindRange('sl-max-cov-d', 'val-max-cov-d', r.maxCoverageD, v => { state.rules.maxCoverageD = v; saveState(); });
+
+  // Coverage sliders - Notte
+  bindRange('sl-min-cov-n', 'val-min-cov-n', r.minCoverageN, v => { state.rules.minCoverageN = v; saveState(); });
+  bindRange('sl-max-cov-n', 'val-max-cov-n', r.maxCoverageN, v => { state.rules.maxCoverageN = v; saveState(); });
 
   // Hours
   bindRange('sl-target-hours', 'val-target-hours', r.targetHours, v => { state.rules.targetHours = v; saveState(); });
@@ -368,7 +392,7 @@ function renderStep3() {
   const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   setEl('summary-period',  `${MONTHS_IT[state.month]} ${state.year}`);
   setEl('summary-nurses',  `${activeCount} / ${state.totalNurses}`);
-  setEl('summary-cov',     `${state.rules.minCoverage}–${state.rules.maxCoverage} per slot`);
+  setEl('summary-cov',     `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`);
   setEl('summary-nights',  `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
 }
 
@@ -421,6 +445,62 @@ function startSolver() {
     alert('Errore Worker: ' + err.message);
     const btnG = document.getElementById('btn-generate');
     if (btnG) { btnG.disabled = false; btnG.textContent = 'GENERA TURNI'; }
+    state.worker = null;
+  };
+
+  worker.postMessage({ type: 'solve', config });
+}
+
+function regenerateTurni() {
+  // Set preferDiurni to true for regeneration
+  state.rules.preferDiurni = true;
+  saveState();
+  
+  // Terminate existing worker
+  if (state.worker) { state.worker.terminate(); state.worker = null; }
+
+  const btn = document.getElementById('btn-regenerate');
+  if (btn) { btn.disabled = true; btn.textContent = 'Rigenerando...'; }
+
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+
+  const config = {
+    year: state.year,
+    month: state.month,
+    nurses: activeNurses,
+    rules: state.rules,
+  };
+
+  const worker = new Worker('js/solver.js');
+  state.worker = worker;
+
+  worker.onmessage = (e) => {
+    const data = e.data;
+    if (data.type === 'progress') {
+      // Progress can be shown if needed
+    } else if (data.type === 'result') {
+      state.schedule = data.schedule;
+      state.violations = data.violations || [];
+      state.stats = data.stats || [];
+      state.worker = null;
+      worker.terminate();
+      saveState();
+      const btnR = document.getElementById('btn-regenerate');
+      if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
+      renderStep4();
+    } else if (data.type === 'error') {
+      alert('Errore nel solver: ' + data.message);
+      const btnR = document.getElementById('btn-regenerate');
+      if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
+      state.worker = null;
+      worker.terminate();
+    }
+  };
+
+  worker.onerror = (err) => {
+    alert('Errore Worker: ' + err.message);
+    const btnR = document.getElementById('btn-regenerate');
+    if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
     state.worker = null;
   };
 
@@ -664,14 +744,17 @@ function revalidate() {
   }
 
   for (let d = 0; d < numDays; d++) {
-    let M = 0, P = 0;
+    let M = 0, P = 0, D = 0, N = 0;
     for (let n = 0; n < numNurses; n++) {
       const s = state.schedule[n][d];
-      if (s === 'M' || s === 'D') M++;
-      if (s === 'P' || s === 'D') P++;
+      if (s === 'M') M++;
+      if (s === 'P') P++;
+      if (s === 'D') { D++; M++; P++; }
+      if (s === 'N') N++;
     }
-    if (M < state.rules.minCoverage) violations.push({ day: d, type: 'coverage_M', msg: `Giorno ${d + 1}: M insufficiente (${M}/${state.rules.minCoverage})` });
-    if (P < state.rules.minCoverage) violations.push({ day: d, type: 'coverage_P', msg: `Giorno ${d + 1}: P insufficiente (${P}/${state.rules.minCoverage})` });
+    if (M < state.rules.minCoverageM) violations.push({ day: d, type: 'coverage_M', msg: `Giorno ${d + 1}: M insufficiente (${M}/${state.rules.minCoverageM})` });
+    if (P < state.rules.minCoverageP) violations.push({ day: d, type: 'coverage_P', msg: `Giorno ${d + 1}: P insufficiente (${P}/${state.rules.minCoverageP})` });
+    if (N < state.rules.minCoverageN) violations.push({ day: d, type: 'coverage_N', msg: `Giorno ${d + 1}: N insufficiente (${N}/${state.rules.minCoverageN})` });
   }
 
   state.violations = violations;
@@ -837,6 +920,7 @@ function init() {
 
   // ---- Step 4 ----
   document.getElementById('btn-step4-back')?.addEventListener('click', () => goToStep(3));
+  document.getElementById('btn-regenerate')?.addEventListener('click', regenerateTurni);
   document.getElementById('btn-export-csv')?.addEventListener('click', exportCSV);
   document.getElementById('btn-save-config')?.addEventListener('click', saveConfig);
   document.getElementById('btn-print')?.addEventListener('click', () => window.print());

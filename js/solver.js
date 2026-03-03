@@ -106,6 +106,9 @@ function solve(config) {
     soloMattine: n.tags.includes('solo_mattine'),
     noNotti: n.tags.includes('no_notti'),
     noDiurni: n.tags.includes('no_diurni'),
+    assente: n.tags.includes('ferie') || n.tags.includes('malattia') || 
+             n.tags.includes('104') || n.tags.includes('permesso_retribuito') || 
+             n.tags.includes('maternita'),
   }));
 
   // Day-of-week array (0=Sun…6=Sat)
@@ -115,11 +118,19 @@ function solve(config) {
   }
 
   // -------------------------------------------------------------------------
-  // Phase 1 — "Solo mattine feriali" nurses
+  // Phase 1 — "Solo mattine feriali" nurses and absent nurses
   // -------------------------------------------------------------------------
   progress(10, 'Assegnazione turni speciali...');
 
   for (let n = 0; n < numNurses; n++) {
+    // Handle absent nurses first (ferie, malattia, 104, permesso retribuito, maternità)
+    if (nurseProps[n].assente) {
+      for (let d = 0; d < numDays; d++) {
+        schedule[n][d] = 'R';
+      }
+      continue;
+    }
+    
     if (!nurseProps[n].soloMattine) continue;
     for (let d = 0; d < numDays; d++) {
       const dow = dows[d];
@@ -138,7 +149,7 @@ function solve(config) {
 
   const nightEligible = [];
   for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].soloMattine && !nurseProps[n].noNotti) nightEligible.push(n);
+    if (!nurseProps[n].soloMattine && !nurseProps[n].noNotti && !nurseProps[n].assente) nightEligible.push(n);
   }
 
   const targetNights = rules.targetNights ?? 4;
@@ -185,23 +196,27 @@ function solve(config) {
   // -------------------------------------------------------------------------
 
   // Coverage targets
-  const minCovM = rules.minCoverage ?? 6;
-  const maxCovM = rules.maxCoverage ?? 7;
-  const minCovP = minCovM;
-  const maxCovP = maxCovM;
-  const minCovN = Math.max(1, Math.floor(minCovM / 3));
-  const maxCovN = Math.max(2, Math.ceil(maxCovM / 2));
+  const minCovM = rules.minCoverageM ?? 6;
+  const maxCovM = rules.maxCoverageM ?? 7;
+  const minCovP = rules.minCoverageP ?? 6;
+  const maxCovP = rules.maxCoverageP ?? 7;
+  const minCovD = rules.minCoverageD ?? 0;
+  const maxCovD = rules.maxCoverageD ?? 4;
+  const minCovN = rules.minCoverageN ?? 2;
+  const maxCovN = rules.maxCoverageN ?? 4;
+  const preferDiurni = rules.preferDiurni ?? false;
 
   // Helper: count current coverage for day d
   function dayCoverage(d) {
-    let M = 0, P = 0, N = 0;
+    let M = 0, P = 0, D = 0, N = 0;
     for (let n = 0; n < numNurses; n++) {
       const s = schedule[n][d];
-      if (s === 'M' || s === 'D') M++;
-      if (s === 'P' || s === 'D') P++;
+      if (s === 'M') M++;
+      if (s === 'P') P++;
+      if (s === 'D') { D++; M++; P++; }
       if (s === 'N') N++;
     }
-    return { M, P, N };
+    return { M, P, D, N };
   }
 
   // Helper: total hours assigned so far for nurse n
@@ -230,6 +245,7 @@ function solve(config) {
   function nurseEligible(n, d, s) {
     if (schedule[n][d] !== null) return false; // already assigned
     if (nurseProps[n].soloMattine) return false;
+    if (nurseProps[n].assente) return false; // absent nurses can't work
     if (s === 'N' && nurseProps[n].noNotti) return false;
     if (s === 'D' && nurseProps[n].noDiurni) return false;
     const prev = d > 0 ? schedule[n][d - 1] : null;
@@ -248,11 +264,29 @@ function solve(config) {
 
     // Build sorted list of nurses by current hours (least hours first = equity)
     const nursesByHours = Array.from({ length: numNurses }, (_, i) => i)
-      .filter(n => schedule[n][d] === null)
+      .filter(n => schedule[n][d] === null && !nurseProps[n].assente)
       .sort((a, b) => nurseHours(a) - nurseHours(b));
 
+    // If preferDiurni mode, try D shifts first
+    if (preferDiurni) {
+      const dCandidates = nursesByHours.filter(n => !nurseProps[n].noDiurni && !nurseProps[n].soloMattine);
+      for (const n of dCandidates) {
+        if (cov.D >= maxCovD) break;
+        if (cov.M >= maxCovM && cov.P >= maxCovP) break;
+        if (!nurseEligible(n, d, 'D')) continue;
+        schedule[n][d] = 'D';
+        cov.D++;
+        cov.M++;
+        cov.P++;
+      }
+    }
+
     // Try to meet M coverage
-    for (const n of nursesByHours) {
+    const nursesForM = Array.from({ length: numNurses }, (_, i) => i)
+      .filter(n => schedule[n][d] === null && !nurseProps[n].assente)
+      .sort((a, b) => nurseHours(a) - nurseHours(b));
+    
+    for (const n of nursesForM) {
       if (cov.M >= maxCovM) break;
       if (!nurseEligible(n, d, 'M')) continue;
       schedule[n][d] = 'M';
@@ -261,7 +295,7 @@ function solve(config) {
 
     // Re-sort after M assignments
     const nursesByHours2 = Array.from({ length: numNurses }, (_, i) => i)
-      .filter(n => schedule[n][d] === null)
+      .filter(n => schedule[n][d] === null && !nurseProps[n].assente)
       .sort((a, b) => nurseHours(a) - nurseHours(b));
 
     // Try to meet P coverage
@@ -272,16 +306,17 @@ function solve(config) {
       cov.P++;
     }
 
-    // If still short on M, try promoting some nurses to D (covers both M+P slots)
+    // If still short on M or P, try promoting some nurses to D (covers both M+P slots)
     if (cov.M < minCovM || cov.P < minCovP) {
       const candidates = Array.from({ length: numNurses }, (_, i) => i)
-        .filter(n => schedule[n][d] === null && !nurseProps[n].noDiurni && !nurseProps[n].soloMattine)
+        .filter(n => schedule[n][d] === null && !nurseProps[n].noDiurni && !nurseProps[n].soloMattine && !nurseProps[n].assente)
         .sort((a, b) => nurseHours(a) - nurseHours(b));
 
       for (const n of candidates) {
         if (cov.M >= maxCovM && cov.P >= maxCovP) break;
         if (!nurseEligible(n, d, 'D')) continue;
         schedule[n][d] = 'D';
+        cov.D++;
         cov.M++;
         cov.P++;
       }
@@ -321,6 +356,7 @@ function solve(config) {
 
     for (let n = 0; n < numNurses; n++) {
       if (nurseProps[n].soloMattine) continue;
+      if (nurseProps[n].assente) continue; // skip absent nurses
       if (hours[n] > avgHours + 8) {
         // Nurse has too many hours — convert some M/P to R if possible without violating coverage
         for (let d = 0; d < numDays; d++) {
@@ -370,6 +406,7 @@ function solve(config) {
     const cov = dayCoverage(d);
     if (cov.M < minCovM) violations.push({ day: d, type: 'coverage_M', msg: `Giorno ${d + 1}: copertura mattina insufficiente (${cov.M}/${minCovM})` });
     if (cov.P < minCovP) violations.push({ day: d, type: 'coverage_P', msg: `Giorno ${d + 1}: copertura pomeriggio insufficiente (${cov.P}/${minCovP})` });
+    if (cov.N < minCovN) violations.push({ day: d, type: 'coverage_N', msg: `Giorno ${d + 1}: copertura notte insufficiente (${cov.N}/${minCovN})` });
   }
 
   for (let n = 0; n < numNurses; n++) {
