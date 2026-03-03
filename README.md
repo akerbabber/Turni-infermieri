@@ -1,90 +1,90 @@
-# Turni-infermieri
+# 🏥 Turni Infermieri — Pronto Soccorso
 
-## Architecture Analysis: Solver Approach
-
-### Current approach — Hand-rolled greedy/heuristic solver
-
-The scheduling engine (`js/solver.js`, ~960 lines) uses a **multi-phase greedy
-algorithm** running inside a Web Worker:
-
-| Phase | What it does |
-|-------|-------------|
-| 1 | Pins absences (ferie, malattia, 104, maternità, permesso) and "solo mattine" nurses |
-| 2 | Distributes night-shift blocks (N → S → R → R) to meet min coverage, then tries to reach target per nurse |
-| 3 | Greedy day-shift assignment (M, P, D) sorted by fewest hours → most hours for equity |
-| 4 | Fills remaining cells with R (rest) |
-| 4.5–4.8 | Patch-up passes: weekly rest enforcement, M/P balance for no_diurni nurses, nurse pairing, D-D rest enforcement |
-| 5 | Equity swap pass (up to 3 iterations) converting R↔M/P when a nurse is ±8 h from average |
-| 6 | Validation — collects all remaining violations and computes stats |
-
-#### Where this struggles
-
-* **No backtracking.** Once a shift is placed it is never reconsidered (except
-  the limited equity swap in Phase 5). A poor early decision can cascade into
-  coverage violations that later phases cannot fix.
-* **Random seeding with no restart.** The single `shuffle()` call decides nurse
-  ordering; running the solver twice may give very different quality, with no
-  mechanism to pick the best.
-* **Hard to extend.** Every new constraint (e.g. "max 2 weekends in a row",
-  "nurse X never with nurse Y") requires weaving more `if` blocks into the
-  existing phases. The 960-line file is already hard to follow.
-* **No optimality guarantee.** There is no scoring function that the algorithm
-  tries to minimise/maximise globally; each phase locally satisfies its own
-  concerns and hopes the result is good enough.
+Applicazione web per la **generazione automatica dei turni infermieristici** in Pronto Soccorso.
+Nessun server, nessuna installazione: basta aprire `index.html` nel browser.
 
 ---
 
-### Alternative: Constraint-satisfaction / operations-research libraries
+## ✨ Funzionalità
 
-Nurse rostering is a well-known **Nurse Scheduling Problem (NSP)** — a type of
-constraint-satisfaction / combinatorial-optimisation problem that has been
-studied for decades. Proven library approaches include:
+- **Wizard a 4 step** — Organico → Regole → Genera → Risultati
+- **Motore di scheduling ibrido** — MILP (HiGHS via WASM) come solver primario, con fallback a euristica greedy + simulated annealing
+- **Modifica interattiva** — click su una cella per cambiare turno manualmente
+- **Soluzioni multiple** — genera e confronta diverse proposte, ordinate per qualità
+- **Export** — CSV, JSON configurazione, stampa ottimizzata per A4 landscape
+- **Dark mode** — tema chiaro/scuro con toggle
+- **Persistenza locale** — tutto il lavoro è salvato in `localStorage`
+- **100% offline** — funziona anche senza connessione (Tailwind CSS e HiGHS hanno fallback)
 
-| Library | Language | How it helps |
-|---------|----------|-------------|
-| **[Google OR-Tools (CP-SAT)](https://developers.google.com/optimization)** | C++ / Python / JS (WASM) | Mixed-integer / CP solver. Define variables, constraints, and an objective; the solver handles backtracking, pruning, and optimisation automatically. |
-| **[OptaPlanner / Timefold](https://timefold.ai/)** | Java / Kotlin (REST API) | Domain-specific solver for employee rostering with a nurse-scheduling quick-start. |
-| **[python-constraint](https://pypi.org/project/python-constraint/)** | Python | Lightweight CSP solver good for prototyping. |
-| **[MiniZinc](https://www.minizinc.org/)** | MiniZinc → any solver | Modelling language that can target CP, MIP, or SAT solvers. |
+## 🚀 Come usare
 
-For a **browser-only** project like this one, the most practical option is
-**OR-Tools compiled to WebAssembly** (official JS/WASM build available via npm
-`ortools`). The entire solver could be replaced with:
+1. **Apri `index.html`** in un browser moderno (Chrome, Firefox, Edge, Safari)
+2. **Step 1 — Organico**: configura mese/anno, lista infermieri, tag (solo mattine, no notti, assenze…)
+3. **Step 2 — Regole**: imposta coperture min/max per turno, ore target, limiti notti, vincoli aggiuntivi
+4. **Step 3 — Genera**: scegli numero soluzioni e tempo di elaborazione, poi premi "Genera Turni"
+5. **Step 4 — Risultati**: visualizza griglia turni, violazioni, statistiche; modifica manualmente se necessario
 
-1. **Decision variables** — `schedule[nurse][day]` ∈ {M, P, D, N, S, R, …}
-2. **Hard constraints** (must be satisfied)
-   * Forbidden transitions (P→M, D→D, N must be followed by S→R→R, etc.)
-   * Minimum/maximum daily coverage per shift type
-   * Absence periods pinned
-   * 11-hour minimum gap
-3. **Soft constraints / objectives** (optimise toward)
-   * Hours equity across nurses (minimise max deviation from average)
-   * Night-shift fairness
-   * Weekend fairness
-   * Target number of nights per nurse
+## 📁 Struttura del progetto
 
-The CP-SAT solver would explore the full search space with intelligent
-backtracking and branch-and-bound, dramatically improving the chance of finding
-a **feasible** schedule (zero violations) and allowing true **optimisation** of
-fairness.
+```
+index.html        — Pagina unica: UI wizard a 4 step
+js/app.js         — Logica applicativa: stato, rendering, eventi
+js/solver.js      — Web Worker: motore di scheduling (MILP + euristica)
+css/custom.css    — Stili CSS con variabili per temi chiaro/scuro
+```
 
----
+Nessun framework, nessun bundler, nessun `npm install`.
 
-### Verdict
+## 🔧 Codici turno
 
-> **Yes, the current solver is re-inventing the wheel.** The problem being
-> solved is a textbook constraint-satisfaction / integer-programming problem.
-> Using a library like OR-Tools CP-SAT would:
->
-> 1. **Find feasible schedules far more reliably** — the solver backtracks
->    automatically instead of hoping a single greedy pass works.
-> 2. **Produce provably optimal (or near-optimal) solutions** — you define
->    what "good" means (equity, coverage) and the solver maximises it.
-> 3. **Make new constraints trivial to add** — each rule is an independent
->    constraint declaration, not spaghetti `if`-chains spread across phases.
-> 4. **Reduce code dramatically** — the ~960-line `solver.js` could shrink to
->    ~200–300 lines of declarative constraint definitions.
->
-> The main trade-off is a **~4 MB WASM bundle** for OR-Tools and a learning
-> curve for the CP-SAT API, but the payoff in correctness, maintainability, and
-> schedule quality is substantial.
+| Codice | Nome                   | Ore   |
+|--------|------------------------|-------|
+| M      | Mattina                | 6.2   |
+| P      | Pomeriggio             | 6.2   |
+| D      | Diurno (giornata)      | 12.2  |
+| N      | Notte                  | 12.2  |
+| S      | Smonto (post-notte)    | 0     |
+| R      | Riposo                 | 0     |
+| F      | Ferie                  | 7.12  |
+| MA     | Malattia               | 7.12  |
+| L104   | Legge 104              | 7.12  |
+| PR     | Permesso Retribuito    | 7.12  |
+| MT     | Maternità              | 7.12  |
+
+## ⚙️ Motore di scheduling
+
+Il solver gira in un **Web Worker** e usa una strategia a doppio livello:
+
+1. **HiGHS MILP** (primario) — Costruisce una formulazione LP in formato CPLEX con variabili binarie di decisione, vincoli hard (copertura, transizioni, blocchi notte) e obiettivo di equità. Usa più seed con perturbazione dell'obiettivo per soluzioni diverse.
+
+2. **Greedy + Simulated Annealing** (fallback) — Costruzione euristica multi-restart seguita da ricerca locale (swap, cambio turno, equità, riposo settimanale) con accettazione simulated annealing.
+
+### Vincoli hard
+
+- Copertura minima/massima giornaliera per tipo di turno
+- Transizioni vietate (es. P→M, N deve essere seguito da S→R→R)
+- Gap minimo 11 ore tra turni
+- Riposo settimanale minimo
+- Limite massimo notti per infermiere
+
+### Obiettivi soft
+
+- Equità ore lavorate tra infermieri
+- Equità turni notturni
+- Equità weekend lavorati
+
+## 🖨️ Stampa ed export
+
+- **Stampa**: la griglia è ottimizzata per stampa A4 landscape
+- **CSV**: esporta la tabella turni in formato CSV
+- **JSON**: salva/carica la configurazione completa (organico + regole)
+
+## 💻 Requisiti tecnici
+
+- Qualsiasi browser moderno con supporto Web Worker e ES6+
+- Nessun server necessario — apri direttamente il file HTML
+- Connessione internet opzionale (per Tailwind CSS CDN e HiGHS WASM CDN; in assenza vengono usati i fallback locali)
+
+## 📄 Licenza
+
+Questo progetto è distribuito come software libero.

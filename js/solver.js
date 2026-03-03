@@ -557,7 +557,7 @@ function trySwapMP(schedule, n, srcDays, dstDays, mid, srcIsM, ctx) {
 // Local search — simulated annealing
 // ---------------------------------------------------------------------------
 
-function localSearch(schedule, ctx, maxIter) {
+function localSearch(schedule, ctx, maxIter, timeLimitSec) {
   let current     = deepCopy(schedule);
   let currentScore = computeScore(current, ctx);
   let best         = deepCopy(current);
@@ -565,8 +565,29 @@ function localSearch(schedule, ctx, maxIter) {
 
   const changes = []; // reusable array for tracking cell changes
 
-  for (let iter = 0; iter < maxIter; iter++) {
-    const temp = 2000 * (1 - iter / maxIter);
+  const useTimeLimit = timeLimitSec > 0;
+  const startMs = useTimeLimit ? Date.now() : 0;
+  const timeLimitMs = useTimeLimit ? timeLimitSec * 1000 : 0;
+  let now = startMs;
+
+  for (let iter = 0; ; iter++) {
+    // Stopping criterion: time-based when timeLimitSec is set, else iteration-based
+    if (useTimeLimit) {
+      // Check wall-clock time every 200 iterations for efficiency
+      if (iter % 200 === 0) {
+        now = Date.now();
+        if (now - startMs >= timeLimitMs) break;
+      }
+    } else {
+      if (iter >= maxIter) break;
+    }
+
+    // Temperature: use time fraction when time-limited, else iteration fraction
+    const fraction = useTimeLimit
+      ? Math.min(1, (now - startMs) / timeLimitMs)
+      : iter / maxIter;
+    const temp = 2000 * (1 - fraction);
+
     const r = Math.random();
     changes.length = 0;
 
@@ -1265,8 +1286,10 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
 
   /** Generate one batch of solutions */
   function generateBatch(batchSolutions, batchLabel, seedOffset) {
-    const timePerSolution = Math.max(MILP_MIN_TIME_PER_SOLUTION,
+    const milpTimePerSolution = Math.max(MILP_MIN_TIME_PER_SOLUTION,
       Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions)));
+    // Time budget each solution's local-search phase should use (wall-clock seconds)
+    const localSearchTimeSec = Math.max(1, totalBudget / numSolutions);
 
     for (let i = 0; i < numSolutions; i++) {
       const pctBase = 5 + Math.floor(i * 80 / numSolutions);
@@ -1274,11 +1297,11 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
         progress(pctBase, `${batchLabel}MILP: soluzione ${i + 1}/${numSolutions}…`);
         try {
           const seed = seedOffset + i;
-          const schedule = solveOneMILP(highs, ctx, seed, timePerSolution);
+          const schedule = solveOneMILP(highs, ctx, seed, milpTimePerSolution);
           if (schedule) {
-            // ~200 polish iterations per second of time budget per solution
-            const polishIters = Math.max(1000, Math.floor((totalBudget / numSolutions) * 200));
-            const polished = localSearch(schedule, ctx, polishIters);
+            // Polish with remaining time after MILP solve
+            const polishTimeSec = Math.max(1, localSearchTimeSec - milpTimePerSolution);
+            const polished = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, polishTimeSec);
             const violations = collectViolations(polished, ctx);
             const stats = computeStats(polished, ctx);
             const score = computeScore(polished, ctx);
@@ -1287,13 +1310,11 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
           }
         } catch (_e) { /* fall through to greedy */ }
       }
-      // Greedy fallback
+      // Greedy fallback — use full per-solution time budget for local search
       progress(pctBase,
                `${batchLabel}${milpAvailable ? 'Fallback euristica' : 'Euristica'} ${i + 1}/${numSolutions}…`);
-      // ~500 greedy iterations per second of time budget per solution
-      const greedyIters = Math.max(LOCAL_SEARCH_ITERS, Math.floor((totalBudget / numSolutions) * 500));
       const schedule = construct(ctx);
-      const improved = localSearch(schedule, ctx, greedyIters);
+      const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, localSearchTimeSec);
       const violations = collectViolations(improved, ctx);
       const stats = computeStats(improved, ctx);
       const score = computeScore(improved, ctx);
