@@ -257,9 +257,31 @@ function solve(config) {
     if (d + 3 < numDays) schedule[n][d + 3] = 'R';
     nightCount[n]++;
   }
+  
+  // Track how many N-S-R-R blocks start on each day (to avoid clustering)
+  const nightStartsPerDay = new Array(numDays).fill(0);
+  
+  // Helper to count R days on a specific day
+  function countRestOnDay(d) {
+    let count = 0;
+    for (let n = 0; n < numNurses; n++) {
+      if (schedule[n][d] === 'R' || schedule[n][d] === 'S') count++;
+    }
+    return count;
+  }
 
   // STEP 1: Ensure minimum coverage on ALL days first (coverage-first approach)
-  for (let d = 0; d < numDays; d++) {
+  // Process days in an order that spreads out night blocks
+  const dayOrder = [];
+  for (let d = 0; d < numDays; d++) dayOrder.push(d);
+  // Prioritize days with fewer existing night starts nearby
+  dayOrder.sort((a, b) => {
+    const nearbyA = (nightStartsPerDay[a] || 0) + (nightStartsPerDay[Math.max(0, a-1)] || 0) + (nightStartsPerDay[Math.min(numDays-1, a+1)] || 0);
+    const nearbyB = (nightStartsPerDay[b] || 0) + (nightStartsPerDay[Math.max(0, b-1)] || 0) + (nightStartsPerDay[Math.min(numDays-1, b+1)] || 0);
+    return nearbyA - nearbyB;
+  });
+  
+  for (const d of dayOrder) {
     // Count current night coverage for this day
     let nightCov = 0;
     for (let n = 0; n < numNurses; n++) {
@@ -277,29 +299,40 @@ function solve(config) {
       
       // Assign to nurse with fewest nights
       assignNightBlock(candidates[0], d);
+      nightStartsPerDay[d]++;
       nightCov++;
     }
   }
 
   // STEP 2: Distribute remaining nights fairly to reach target
+  // But try to spread them out to avoid R-day clustering
   const nightOrder = shuffle([...nightEligible]);
   
   for (const n of nightOrder) {
     if (nightCount[n] >= targetNights) continue;
     
-    // Find available days for this nurse, sorted randomly
+    // Find available days for this nurse
     const availableDays = [];
     for (let d = 0; d < numDays; d++) {
       if (canDoNight(n, d)) availableDays.push(d);
     }
     
-    shuffle(availableDays);
+    // Sort by preference: days where fewer N blocks start (to spread R days)
+    availableDays.sort((a, b) => {
+      // Prefer days with fewer night starts
+      const startsA = nightStartsPerDay[a] || 0;
+      const startsB = nightStartsPerDay[b] || 0;
+      if (startsA !== startsB) return startsA - startsB;
+      // Add some randomness for variety
+      return Math.random() - 0.5;
+    });
     
     for (const d of availableDays) {
       if (nightCount[n] >= targetNights) break;
       if (!canDoNight(n, d)) continue; // Re-check in case state changed
       
       assignNightBlock(n, d);
+      nightStartsPerDay[d]++;
     }
   }
 
@@ -462,7 +495,8 @@ function solve(config) {
   // -------------------------------------------------------------------------
   // Phase 4.5 — Ensure minimum 2 rest days (R) per week for ALL nurses
   // For nurses with no_notti tag, they don't get S (smonto) days, so they need explicit R days
-  // For nurses who do nights, the N-S-R pattern already provides rest days
+  // For nurses who do nights, the N-S-R-R pattern already provides rest days
+  // For partial weeks at month boundaries, adjust requirement proportionally
   // -------------------------------------------------------------------------
   progress(78, 'Verifica riposi settimanali...');
   
@@ -495,8 +529,18 @@ function solve(config) {
           }
         }
         
+        // For partial weeks (< 7 days), adjust the minimum rest requirement proportionally
+        // A full week needs 2 R, so partial weeks need: ceil(weekDays.length * 2 / 7)
+        // But minimum 1 if the week has 4+ days
+        let requiredRest = minRPerWeek;
+        if (weekDays.length < 7) {
+          requiredRest = Math.max(1, Math.ceil(weekDays.length * minRPerWeek / 7));
+          // If week has only 1-2 days, no rest required
+          if (weekDays.length <= 2) requiredRest = 0;
+        }
+        
         // If not enough rest days, try to convert some work days to R
-        while (restCount < minRPerWeek && weekDays.length > 0) {
+        while (restCount < requiredRest && weekDays.length > 0) {
           let converted = false;
           
           // Try to convert M or P shifts to R (prefer days with excess coverage)
@@ -656,7 +700,7 @@ function solve(config) {
     }
   }
   
-  // Validate minimum rest days per week
+  // Validate minimum rest days per week (with proportional adjustment for partial weeks)
   if (minRPerWeek > 0) {
     // Helper: get week index for a day (0-indexed day in month)
     function getWeekIndexValidation(d) {
@@ -670,13 +714,23 @@ function solve(config) {
     for (let n = 0; n < numNurses; n++) {
       for (let week = 0; week < numWeeksValidation; week++) {
         let restCount = 0;
+        let weekDaysCount = 0;
         for (let d = 0; d < numDays; d++) {
-          if (getWeekIndexValidation(d) === week && schedule[n][d] === 'R') {
-            restCount++;
+          if (getWeekIndexValidation(d) === week) {
+            weekDaysCount++;
+            if (schedule[n][d] === 'R') restCount++;
           }
         }
-        if (restCount < minRPerWeek) {
-          violations.push({ nurse: n, week, type: 'min_R_week', msg: `Infermiere ${n + 1}, settimana ${week + 1}: solo ${restCount} riposi (minimo ${minRPerWeek})` });
+        
+        // Proportional rest requirement for partial weeks
+        let requiredRest = minRPerWeek;
+        if (weekDaysCount < 7) {
+          requiredRest = Math.max(1, Math.ceil(weekDaysCount * minRPerWeek / 7));
+          if (weekDaysCount <= 2) requiredRest = 0;
+        }
+        
+        if (restCount < requiredRest) {
+          violations.push({ nurse: n, week, type: 'min_R_week', msg: `Infermiere ${n + 1}, settimana ${week + 1}: solo ${restCount} riposi (minimo ${requiredRest})` });
         }
       }
     }
