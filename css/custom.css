@@ -31,6 +31,13 @@ html.dark {
   --scrollbar-thumb: #475569;
 }
 
+/* ---------- Tailwind fallbacks (for offline / CDN-blocked environments) ---------- */
+.hidden { display: none !important; }
+.flex { display: flex; }
+.inline-flex { display: inline-flex; }
+.block { display: block; }
+.grid { display: grid; }
+
 /* ---------- Base ---------- */
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -461,7 +468,7 @@ html.dark .shift-dropdown { background: var(--bg-card); border-color: var(--bord
   .shift-M { background-color: #93c5fd !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .shift-P { background-color: #fcd34d !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .shift-D { background-color: #c4b5fd !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .shift-N { background-color: #93c5fd !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .shift-N { background-color: #60a5fa !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .shift-S { background-color: #d1d5db !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .shift-R { background-color: #a7f3d0 !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

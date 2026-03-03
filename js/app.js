@@ -49,6 +49,10 @@ const DEFAULT_RULES = {
 // State
 // ---------------------------------------------------------------------------
 
+function genId(i) {
+  return crypto.randomUUID ? crypto.randomUUID() : `n${i}`;
+}
+
 function nextMonthDefault() {
   const now = new Date();
   const m = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -57,7 +61,7 @@ function nextMonthDefault() {
 
 function buildDefaultNurses(count) {
   return Array.from({ length: count }, (_, i) => ({
-    id: crypto.randomUUID ? crypto.randomUUID() : `n${i}`,
+    id: genId(i),
     name: DEFAULT_NURSE_NAMES[i] || `Infermiere ${i + 1}`,
     tags: [],
   }));
@@ -170,7 +174,7 @@ function renderStepNav() {
   showOnlyStep(state.step);
   const steps = [1, 2, 3, 4];
   steps.forEach(i => {
-    const ind = document.getElementById(`step-ind-${i}`);
+    const ind = document.getElementById(`btn-nav-${i}`);
     if (!ind) return;
     ind.className = 'step-indicator ' + (
       i < state.step ? 'done' : i === state.step ? 'active' : 'pending'
@@ -359,6 +363,13 @@ function renderStep3() {
   const msg = document.getElementById('progress-msg');
   if (bar) bar.style.width = '0%';
   if (msg) msg.textContent = '';
+
+  const activeCount = state.totalNurses - state.absentNurses;
+  const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setEl('summary-period',  `${MONTHS_IT[state.month]} ${state.year}`);
+  setEl('summary-nurses',  `${activeCount} / ${state.totalNurses}`);
+  setEl('summary-cov',     `${state.rules.minCoverage}–${state.rules.maxCoverage} per slot`);
+  setEl('summary-nights',  `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
 }
 
 function startSolver() {
@@ -752,7 +763,7 @@ function syncNurseList() {
   while (state.nurses.length < state.totalNurses) {
     const i = state.nurses.length;
     state.nurses.push({
-      id: crypto.randomUUID ? crypto.randomUUID() : `n${i}`,
+      id: genId(i),
       name: DEFAULT_NURSE_NAMES[i] || `Infermiere ${i + 1}`,
       tags: [],
     });

@@ -6,14 +6,16 @@
   <title>Turni Infermieri PS</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+    try {
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          }
         }
-      }
-    };
+      };
+    } catch (_) { /* Tailwind CDN not available – custom.css provides fallbacks */ }
   </script>
   <link rel="stylesheet" href="css/custom.css" />
 </head>
@@ -501,39 +503,6 @@
 <footer class="mt-8 py-4 border-t border-gray-200 dark:border-slate-700 text-center text-xs text-gray-400 dark:text-slate-500 no-print">
   <p>Turni Infermieri PS &mdash; Applicazione client-side, nessun dato inviato a server.</p>
 </footer>
-
-<!-- ============================================================
-     INLINE SCRIPT: Step 3 summary updater
-     ============================================================ -->
-<script>
-  // Update Step 3 summary labels whenever the step becomes visible
-  document.addEventListener('DOMContentLoaded', () => {
-    const origGoToStep = window.goToStep;
-    const MONTHS_IT_LOCAL = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
-                             'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-    // Patch after app.js runs
-    const patchSummary = () => {
-      if (!window.state) return;
-      const s = window.state;
-      const periodEl = document.getElementById('summary-period');
-      const nursesEl = document.getElementById('summary-nurses');
-      const covEl    = document.getElementById('summary-cov');
-      const nightsEl = document.getElementById('summary-nights');
-      if (periodEl) periodEl.textContent = `${MONTHS_IT_LOCAL[s.month]} ${s.year}`;
-      if (nursesEl) nursesEl.textContent = `${s.totalNurses - s.absentNurses} / ${s.totalNurses}`;
-      if (covEl)    covEl.textContent    = `${s.rules.minCoverage}–${s.rules.maxCoverage} per slot`;
-      if (nightsEl) nightsEl.textContent = `${s.rules.targetNights} (max ${s.rules.hardMaxNights})`;
-    };
-
-    // Observe step 3 visibility
-    const obs = new MutationObserver(() => {
-      const step3 = document.getElementById('step-3');
-      if (step3 && !step3.classList.contains('hidden')) patchSummary();
-    });
-    const step3 = document.getElementById('step-3');
-    if (step3) obs.observe(step3, { attributes: true, attributeFilter: ['class'] });
-  });
-</script>
 
 <script src="js/app.js"></script>
 </body>

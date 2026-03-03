@@ -164,7 +164,7 @@ function solve(config) {
       // Check the block days are free
       if (schedule[n][d] !== null || schedule[n][d + 1] !== null || schedule[n][d + 2] !== null) continue;
       // Don't put N right after N block's S/R tail of a previous block
-      if (d > 0 && (schedule[n][d - 1] === 'S' || schedule[n][d - 1] === 'N')) continue;
+      if (d > 0 && schedule[n][d - 1] === 'S') continue;
       // Don't exceed per-nurse max
       if (nightCount[n] >= maxNights) break;
 
@@ -255,7 +255,6 @@ function solve(config) {
     for (const n of nursesByHours) {
       if (cov.M >= maxCovM) break;
       if (!nurseEligible(n, d, 'M')) continue;
-      // Prefer D on certain days to stretch coverage? No — assign M first.
       schedule[n][d] = 'M';
       cov.M++;
     }
