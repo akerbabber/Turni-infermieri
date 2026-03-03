@@ -826,13 +826,13 @@ function computeStats(schedule, ctx) {
 }
 
 // ---------------------------------------------------------------------------
-// Main solver — multi-restart + local search
+// Main solver — multi-restart + local search (fallback)
 // ---------------------------------------------------------------------------
 
 const NUM_RESTARTS       = 10;
 const LOCAL_SEARCH_ITERS = 4000;
 
-function solve(config) {
+function solveFallback(config) {
   const ctx = buildContext(config);
 
   let bestSchedule = null;
@@ -861,18 +861,472 @@ function solve(config) {
   const stats      = computeStats(bestSchedule, ctx);
 
   progress(100, 'Fatto!');
-  return { schedule: bestSchedule, violations, stats };
+  return { schedule: bestSchedule, violations, stats, score: bestScore.total };
 }
 
 // ---------------------------------------------------------------------------
-// Worker interface (unchanged)
+// HiGHS MILP solver — generates fast heuristics via optimization
+// ---------------------------------------------------------------------------
+
+// Seeded PRNG for reproducible random perturbations
+function seededRandom(seed) {
+  let s = seed | 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) & 0x7FFFFFFF;
+    return s / 0x7FFFFFFF;
+  };
+}
+
+/**
+ * Build a CPLEX LP format string for the nurse scheduling problem.
+ * @param {object} ctx - build context from buildContext()
+ * @param {number} perturbSeed - seed for objective perturbation (0 = no perturbation)
+ * @returns {string} LP format problem
+ */
+function buildLP(ctx, perturbSeed) {
+  const { numDays, numNurses, pinned, nurseProps,
+          minCovM, maxCovM, minCovP, maxCovP, minCovN, maxCovN,
+          targetNights, maxNights, minRPerWeek, weekDaysList, weekOf,
+          forbidden, consente2D, coppiaTurni } = ctx;
+
+  // Shift indices: M=0, P=1, N=2, S=3, R=4
+  const SHIFTS = ['M', 'P', 'N', 'S', 'R'];
+  const S_HRS  = [6.2, 6.2, 12.2, 0, 0];
+  const V = (n, d, s) => `x${n}_${d}_${s}`;
+
+  const lines   = [];
+  const binVars = [];
+
+  // Determine which cells are free (not pinned)
+  const isFree = (n, d) => !pinned[n][d];
+
+  // Pre-compute pinned coverage per day
+  const pinnedCovM = new Array(numDays).fill(0);
+  const pinnedCovP = new Array(numDays).fill(0);
+  const pinnedCovN = new Array(numDays).fill(0);
+  for (let d = 0; d < numDays; d++) {
+    for (let n = 0; n < numNurses; n++) {
+      const p = pinned[n][d];
+      if (!p) continue;
+      if (p === 'M' || p === 'D') pinnedCovM[d]++;
+      if (p === 'P' || p === 'D') pinnedCovP[d]++;
+      if (p === 'N') pinnedCovN[d]++;
+    }
+  }
+
+  // Pre-compute pinned hours/nights per nurse
+  const pinnedHrs = new Array(numNurses).fill(0);
+  const pinnedNights = new Array(numNurses).fill(0);
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      const p = pinned[n][d];
+      if (p) {
+        pinnedHrs[n] += SHIFT_HOURS[p] || 0;
+        if (p === 'N') pinnedNights[n]++;
+      }
+    }
+  }
+
+  // --- Objective ---
+  const objTerms = [];
+  // Small perturbation for diversity
+  const rng = perturbSeed > 0 ? seededRandom(perturbSeed * 137) : null;
+
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (!isFree(n, d)) continue;
+      for (let s = 0; s < SHIFTS.length; s++) {
+        const vn = V(n, d, s);
+        binVars.push(vn);
+        // Add small random perturbation to objective for diversity
+        if (rng) {
+          const w = (rng() * 0.04 - 0.02);
+          if (Math.abs(w) > 0.001) objTerms.push(`${w.toFixed(5)} ${vn}`);
+        }
+      }
+    }
+  }
+
+  // Penalize rest to encourage work distribution (very small weight)
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (!isFree(n, d)) continue;
+      objTerms.push(`0.001 ${V(n, d, 4)}`); // slight penalty for excess R
+    }
+  }
+
+  lines.push('Minimize');
+  if (objTerms.length === 0) objTerms.push('0 ' + binVars[0]);
+  // Split long objective across lines
+  const objChunks = [];
+  for (let i = 0; i < objTerms.length; i += 12) {
+    objChunks.push(objTerms.slice(i, i + 12).join(' + '));
+  }
+  lines.push(' obj: ' + objChunks.join('\n + '));
+  lines.push('Subject To');
+
+  // --- Assignment: one shift per nurse per day (free cells only) ---
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (!isFree(n, d)) continue;
+      lines.push(` a${n}_${d}: ${SHIFTS.map((_, s) => V(n, d, s)).join(' + ')} = 1`);
+    }
+  }
+
+  // --- Coverage constraints ---
+  for (let d = 0; d < numDays; d++) {
+    // Morning: M shifts from free nurses
+    const mFree = [];
+    for (let n = 0; n < numNurses; n++) {
+      if (isFree(n, d)) mFree.push(V(n, d, 0)); // M shift
+    }
+    if (mFree.length > 0) {
+      const needMin = Math.max(0, minCovM - pinnedCovM[d]);
+      const needMax = Math.max(0, maxCovM - pinnedCovM[d]);
+      if (needMin > 0) lines.push(` cMn${d}: ${mFree.join(' + ')} >= ${needMin}`);
+      if (needMax < mFree.length) lines.push(` cMx${d}: ${mFree.join(' + ')} <= ${needMax}`);
+    }
+    // Afternoon: P shifts from free nurses
+    const pFree = [];
+    for (let n = 0; n < numNurses; n++) {
+      if (isFree(n, d)) pFree.push(V(n, d, 1)); // P shift
+    }
+    if (pFree.length > 0) {
+      const needMin = Math.max(0, minCovP - pinnedCovP[d]);
+      const needMax = Math.max(0, maxCovP - pinnedCovP[d]);
+      if (needMin > 0) lines.push(` cPn${d}: ${pFree.join(' + ')} >= ${needMin}`);
+      if (needMax < pFree.length) lines.push(` cPx${d}: ${pFree.join(' + ')} <= ${needMax}`);
+    }
+    // Night
+    const nFree = [];
+    for (let n = 0; n < numNurses; n++) {
+      if (isFree(n, d)) nFree.push(V(n, d, 2)); // N shift
+    }
+    if (nFree.length > 0) {
+      const needMin = Math.max(0, minCovN - pinnedCovN[d]);
+      const needMax = Math.max(0, maxCovN - pinnedCovN[d]);
+      if (needMin > 0) lines.push(` cNn${d}: ${nFree.join(' + ')} >= ${needMin}`);
+      if (needMax < nFree.length) lines.push(` cNx${d}: ${nFree.join(' + ')} <= ${needMax}`);
+    }
+  }
+
+  // --- Transition constraints ---
+  // Shift indices: M=0, P=1, N=2, S=3, R=4
+  // Note: D (Diurno) is not modeled as a separate MILP shift;
+  // the MILP only uses M, P, N, S, R.
+
+  // P->M forbidden (forward-only rule)
+  const isPMForbidden = forbidden.P && forbidden.P.includes('M');
+
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays - 1; d++) {
+      const free0 = isFree(n, d);
+      const free1 = isFree(n, d + 1);
+      if (!free0 && !free1) continue;
+
+      if (free0 && free1) {
+        // P -> M forbidden
+        if (isPMForbidden) lines.push(` pm${n}_${d}: ${V(n,d,1)} + ${V(n,d+1,0)} <= 1`);
+        // N must be followed by S
+        lines.push(` ns${n}_${d}: ${V(n,d,2)} - ${V(n,d+1,3)} <= 0`);
+        // S must be followed by R
+        lines.push(` sr${n}_${d}: ${V(n,d,3)} - ${V(n,d+1,4)} <= 0`);
+        // No orphan S without preceding N
+        lines.push(` sn${n}_${d}: ${V(n,d+1,3)} - ${V(n,d,2)} <= 0`);
+        // N cannot follow N, S, R (already handled by N->S->R chain but add safety)
+        lines.push(` nn${n}_${d}: ${V(n,d,2)} + ${V(n,d+1,2)} <= 1`);
+      } else if (!free0 && free1) {
+        // Pinned day d, free day d+1
+        const p = pinned[n][d];
+        if (p === 'P' && isPMForbidden) lines.push(` tpm${n}_${d}: ${V(n,d+1,0)} <= 0`);
+        if (p === 'N') lines.push(` tns${n}_${d}: ${V(n,d+1,3)} = 1`); // force S after pinned N
+        if (p === 'S') lines.push(` tsr${n}_${d}: ${V(n,d+1,4)} = 1`); // force R after pinned S
+      } else if (free0 && !free1) {
+        // Free day d, pinned day d+1
+        const p1 = pinned[n][d + 1];
+        // N on free day d must be followed by S — if d+1 is not S, ban N
+        if (p1 !== 'S') lines.push(` fn${n}_${d}: ${V(n,d,2)} <= 0`);
+        // S on free day d must be followed by R — if d+1 is not R, ban S
+        if (p1 !== 'R') lines.push(` fs${n}_${d}: ${V(n,d,3)} <= 0`);
+      }
+    }
+  }
+
+  // --- Night block: N-S-R-R (second R for non-noDiurni) ---
+  for (let n = 0; n < numNurses; n++) {
+    if (nurseProps[n].noDiurni) continue; // noDiurni nurses only need N-S-R
+    for (let d = 0; d < numDays - 3; d++) {
+      if (isFree(n, d) && isFree(n, d + 3)) {
+        lines.push(` rr${n}_${d}: ${V(n,d,2)} - ${V(n,d+3,4)} <= 0`);
+      } else if (isFree(n, d) && !isFree(n, d + 3)) {
+        if (pinned[n][d + 3] !== 'R') lines.push(` rrp${n}_${d}: ${V(n,d,2)} <= 0`);
+      }
+    }
+  }
+
+  // --- Max nights per nurse ---
+  for (let n = 0; n < numNurses; n++) {
+    if (nurseProps[n].noNotti || nurseProps[n].soloMattine) continue;
+    const nTerms = [];
+    for (let d = 0; d < numDays; d++) {
+      if (isFree(n, d)) nTerms.push(V(n, d, 2));
+    }
+    if (nTerms.length > 0) {
+      const limit = Math.max(0, maxNights - pinnedNights[n]);
+      lines.push(` maxN${n}: ${nTerms.join(' + ')} <= ${limit}`);
+    }
+  }
+
+  // --- Nurse-specific: no_notti → ban N shift ---
+  for (let n = 0; n < numNurses; n++) {
+    if (nurseProps[n].noNotti) {
+      for (let d = 0; d < numDays; d++) {
+        if (isFree(n, d)) lines.push(` noN${n}_${d}: ${V(n,d,2)} <= 0`);
+      }
+    }
+  }
+
+  // --- Nurse-specific: solo_mattine → only M or R (handled by pinning, but safety) ---
+  // Already handled by pinned cells
+
+  // --- Weekly rest (soft: handled by local search polishing) ---
+  // Instead of hard constraints, we ensure a minimum number of R days
+  // per nurse across the entire month, which is less restrictive.
+  // The local search phase will further enforce weekly rest distribution.
+  if (minRPerWeek > 0) {
+    for (let n = 0; n < numNurses; n++) {
+      // Require at least minRPerWeek rest days per week on average across the month
+      const totalNeed = Math.floor(minRPerWeek * numDays / 7);
+      let pinnedRest = 0;
+      const rTerms = [];
+      for (let d = 0; d < numDays; d++) {
+        if (pinned[n][d]) {
+          if (pinned[n][d] === 'R') pinnedRest++;
+        } else {
+          rTerms.push(V(n, d, 4));
+        }
+      }
+      const reqFree = Math.max(0, totalNeed - pinnedRest);
+      if (reqFree > 0 && rTerms.length > 0) {
+        lines.push(` wr${n}: ${rTerms.join(' + ')} >= ${reqFree}`);
+      }
+    }
+  }
+
+  // --- Nurse pairing ---
+  if (coppiaTurni && Array.isArray(coppiaTurni) && coppiaTurni.length === 2) {
+    const [n1, n2] = coppiaTurni;
+    if (n1 >= 0 && n1 < numNurses && n2 >= 0 && n2 < numNurses && n1 !== n2) {
+      for (let d = 0; d < numDays; d++) {
+        if (isFree(n1, d) && isFree(n2, d)) {
+          for (let s = 0; s < SHIFTS.length; s++) {
+            lines.push(` cp${n1}_${n2}_${d}_${s}: ${V(n1,d,s)} - ${V(n2,d,s)} = 0`);
+          }
+        }
+      }
+    }
+  }
+
+  // --- Bounds & Binary ---
+  lines.push('Bounds');
+  lines.push('Binary');
+  for (let i = 0; i < binVars.length; i += 20) {
+    lines.push(' ' + binVars.slice(i, i + 20).join(' '));
+  }
+  lines.push('End');
+
+  return lines.join('\n');
+}
+
+/**
+ * Parse HiGHS solution into schedule array.
+ */
+function parseSolution(result, ctx) {
+  const { numDays, numNurses, pinned } = ctx;
+  const SHIFTS = ['M', 'P', 'N', 'S', 'R'];
+  const schedule = Array.from({ length: numNurses }, () => new Array(numDays).fill(null));
+
+  // Fill pinned cells
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (pinned[n][d]) schedule[n][d] = pinned[n][d];
+    }
+  }
+
+  // Fill from MILP solution
+  for (const [name, col] of Object.entries(result.Columns)) {
+    if (!name.startsWith('x')) continue;
+    if (Math.round(col.Primal) !== 1) continue;
+    const parts = name.substring(1).split('_');
+    const n = parseInt(parts[0]), d = parseInt(parts[1]), s = parseInt(parts[2]);
+    if (n >= 0 && n < numNurses && d >= 0 && d < numDays) {
+      schedule[n][d] = SHIFTS[s];
+    }
+  }
+
+  // Fill any remaining nulls with R
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (schedule[n][d] === null) schedule[n][d] = 'R';
+    }
+  }
+
+  return schedule;
+}
+
+/**
+ * Load HiGHS WASM solver. Returns the highs instance or null on failure.
+ */
+let _highsPromise = null;
+function loadHiGHS() {
+  if (_highsPromise) return _highsPromise;
+  _highsPromise = new Promise((resolve) => {
+    try {
+      importScripts('https://cdn.jsdelivr.net/npm/highs@1.8.0/build/highs.js');
+      const initHiGHS = Module || self.Module;
+      if (typeof initHiGHS === 'function') {
+        const inst = initHiGHS({
+          locateFile: (file) => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file
+        });
+        // initHiGHS might return a promise
+        if (inst && typeof inst.then === 'function') {
+          inst.then(h => resolve(h)).catch(() => resolve(null));
+        } else {
+          resolve(inst);
+        }
+      } else {
+        resolve(null);
+      }
+    } catch (e) {
+      resolve(null);
+    }
+  });
+  return _highsPromise;
+}
+
+/**
+ * Solve a single MILP instance with HiGHS.
+ */
+function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
+  const lp = buildLP(ctx, perturbSeed);
+  const opts = {
+    time_limit: timeLimit,
+    mip_rel_gap: 0.02,
+    random_seed: perturbSeed * 137,
+    output_flag: false,
+    log_to_console: false,
+  };
+  const result = highs.solve(lp, opts);
+  if (result.Status === 'Optimal' || result.Status === 'Time limit reached' || result.Status === 'Target for objective reached') {
+    return parseSolution(result, ctx);
+  }
+  return null;
+}
+
+const MILP_MIN_TIME_PER_SOLUTION = 1;
+const MILP_MAX_TIME_PER_SOLUTION = 8;
+const MILP_TOTAL_TIME_BUDGET     = 30;
+
+/**
+ * Multi-solution solver using HiGHS MILP + fallback to greedy.
+ */
+function solve(config, numSolutions) {
+  numSolutions = Math.max(1, Math.min(numSolutions || 1, 20));
+  const ctx = buildContext(config);
+  const solutions = [];
+
+  // Try HiGHS MILP first
+  let highs = null;
+  let milpAvailable = false;
+  try {
+    progress(2, 'Caricamento solver MILP…');
+    // Try synchronous load (importScripts is synchronous in workers)
+    try {
+      importScripts('https://cdn.jsdelivr.net/npm/highs@1.8.0/build/highs.js');
+    } catch (_e) { /* may already be loaded */ }
+
+    if (typeof Module === 'function') {
+      highs = Module({
+        locateFile: (file) => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file
+      });
+      milpAvailable = highs && typeof highs.solve === 'function';
+    }
+  } catch (_e) {
+    milpAvailable = false;
+  }
+
+  if (milpAvailable) {
+    progress(5, 'Solver MILP caricato, generazione soluzioni…');
+    const timePerSolution = Math.max(MILP_MIN_TIME_PER_SOLUTION,
+      Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(MILP_TOTAL_TIME_BUDGET / numSolutions)));
+
+    for (let i = 0; i < numSolutions; i++) {
+      progress(5 + Math.floor(i * 80 / numSolutions),
+               `MILP: soluzione ${i + 1}/${numSolutions}…`);
+      try {
+        const schedule = solveOneMILP(highs, ctx, i, timePerSolution);
+        if (schedule) {
+          // Post-process with a short local search to polish
+          const polished = localSearch(schedule, ctx, 1000);
+          const violations = collectViolations(polished, ctx);
+          const stats = computeStats(polished, ctx);
+          const score = computeScore(polished, ctx);
+          solutions.push({ schedule: polished, violations, stats, score: score.total });
+        }
+      } catch (e) {
+        // MILP failed for this seed, use greedy fallback
+        progress(5 + Math.floor(i * 80 / numSolutions),
+                 `Fallback euristica ${i + 1}/${numSolutions}…`);
+        const schedule = construct(ctx);
+        const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS);
+        const violations = collectViolations(improved, ctx);
+        const stats = computeStats(improved, ctx);
+        const score = computeScore(improved, ctx);
+        solutions.push({ schedule: improved, violations, stats, score: score.total });
+      }
+    }
+  } else {
+    // Full greedy fallback
+    progress(5, 'MILP non disponibile, euristica classica…');
+    for (let i = 0; i < numSolutions; i++) {
+      progress(5 + Math.floor(i * 80 / numSolutions),
+               `Euristica ${i + 1}/${numSolutions}…`);
+      const schedule = construct(ctx);
+      const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS);
+      const violations = collectViolations(improved, ctx);
+      const stats = computeStats(improved, ctx);
+      const score = computeScore(improved, ctx);
+      solutions.push({ schedule: improved, violations, stats, score: score.total });
+    }
+  }
+
+  // Sort by score (best first)
+  solutions.sort((a, b) => a.score - b.score);
+
+  progress(95, 'Validazione…');
+  progress(100, 'Fatto!');
+
+  return solutions;
+}
+
+// ---------------------------------------------------------------------------
+// Worker interface
 // ---------------------------------------------------------------------------
 
 self.onmessage = function (e) {
   if (e.data.type === 'solve') {
     try {
-      const result = solve(e.data.config);
-      self.postMessage({ type: 'result', schedule: result.schedule, violations: result.violations, stats: result.stats });
+      const numSolutions = e.data.numSolutions || 1;
+      const solutions = solve(e.data.config, numSolutions);
+      // Send all solutions; first one is the best
+      const best = solutions[0] || {};
+      self.postMessage({
+        type: 'result',
+        schedule: best.schedule,
+        violations: best.violations || [],
+        stats: best.stats || [],
+        solutions: solutions,
+      });
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });
     }
