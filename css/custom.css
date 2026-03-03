@@ -273,12 +273,10 @@ td.violation-cell {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  cursor: grab;
+  cursor: default;
   transition: box-shadow 0.2s, transform 0.1s;
-  touch-action: none;
+  /* Removed touch-action: none to allow touch interaction on tags and inputs */
 }
-
-.nurse-item:active { cursor: grabbing; }
 
 .nurse-item.dragging {
   opacity: 0.5;
@@ -296,6 +294,11 @@ td.violation-cell {
   cursor: grab;
   font-size: 18px;
   line-height: 1;
+  touch-action: none; /* Enable drag-and-drop only on the handle */
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 /* ---------- Tags ---------- */
