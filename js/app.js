@@ -101,6 +101,7 @@ let state = {
   solutions: [],
   selectedSolution: 0,
   numSolutions: 3,
+  timeBudget: 0,          // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
   worker: null,
   darkMode: false,
 };
@@ -527,6 +528,34 @@ function renderNursePairingDropdown() {
 // Step 3 — Genera
 // ---------------------------------------------------------------------------
 
+/**
+ * Estimate expected solving time (seconds) from the current constraints.
+ * Heuristic: base cost ~ numNurses × numDays × avgCoverage, scaled empirically.
+ */
+function estimateTimeBudget() {
+  const activeCount = state.totalNurses - state.absentNurses;
+  const daysInMonth = new Date(state.year, state.month + 1, 0).getDate();
+  const avgCoverage = (
+    (state.rules.minCoverageM + state.rules.maxCoverageM) / 2 +
+    (state.rules.minCoverageP + state.rules.maxCoverageP) / 2 +
+    (state.rules.minCoverageD + state.rules.maxCoverageD) / 2 +
+    (state.rules.minCoverageN + state.rules.maxCoverageN) / 2
+  );
+  // Complexity proxy: nurses × days × coverage density
+  const complexity = activeCount * daysInMonth * avgCoverage;
+  // Empirical mapping: ~5000 complexity ≈ 30s, scale linearly with a floor of 15s and cap of 120s
+  const estimated = Math.round(Math.max(15, Math.min(120, complexity / 170)));
+  return estimated;
+}
+
+/** Label for the time-budget select dropdown */
+function timeBudgetLabel(value) {
+  if (value === -1) return 'Fino a 0 violazioni';
+  if (value === 0)  return 'Auto';
+  if (value < 60)   return `${value} secondi`;
+  return `${value / 60} minuti`;
+}
+
 function renderStep3() {
   const bar = document.getElementById('progress-bar');
   const msg = document.getElementById('progress-msg');
@@ -542,6 +571,27 @@ function renderStep3() {
 
   // Bind num solutions slider
   bindRange('inp-num-solutions', 'val-num-solutions', state.numSolutions, v => { state.numSolutions = v; saveState(); });
+
+  // Bind time budget selector
+  const selTime = document.getElementById('sel-time-budget');
+  const lblEstimate = document.getElementById('lbl-time-estimate');
+  if (selTime) {
+    selTime.value = String(state.timeBudget);
+    selTime.onchange = () => {
+      state.timeBudget = parseInt(selTime.value, 10);
+      saveState();
+      if (lblEstimate) {
+        lblEstimate.textContent = state.timeBudget === 0
+          ? `Tempo stimato: ~${estimateTimeBudget()} secondi`
+          : '';
+      }
+    };
+  }
+  if (lblEstimate) {
+    lblEstimate.textContent = state.timeBudget === 0
+      ? `Tempo stimato: ~${estimateTimeBudget()} secondi`
+      : '';
+  }
 }
 
 function startSolver() {
@@ -605,7 +655,14 @@ function startSolver() {
     state.worker = null;
   };
 
-  worker.postMessage({ type: 'solve', config, numSolutions: state.numSolutions });
+  const effectiveTimeBudget = state.timeBudget === 0 ? estimateTimeBudget() : state.timeBudget;
+  worker.postMessage({
+    type: 'solve',
+    config,
+    numSolutions: state.numSolutions,
+    timeBudget: effectiveTimeBudget,
+    untilZeroViolations: state.timeBudget === -1,
+  });
 }
 
 function regenerateTurni() {
@@ -669,7 +726,14 @@ function regenerateTurni() {
     state.worker = null;
   };
 
-  worker.postMessage({ type: 'solve', config, numSolutions: state.numSolutions });
+  const effectiveTimeBudget = state.timeBudget === 0 ? estimateTimeBudget() : state.timeBudget;
+  worker.postMessage({
+    type: 'solve',
+    config,
+    numSolutions: state.numSolutions,
+    timeBudget: effectiveTimeBudget,
+    untilZeroViolations: state.timeBudget === -1,
+  });
 }
 
 // ---------------------------------------------------------------------------

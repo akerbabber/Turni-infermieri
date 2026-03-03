@@ -575,6 +575,28 @@
         </div>
       </div>
 
+      <!-- Time budget selector -->
+      <div class="rule-card mb-6 text-left">
+        <h3 class="font-semibold mb-2 text-sm">⏱️ Durata massima di elaborazione</h3>
+        <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
+          Scegli per quanto tempo il motore euristico può cercare la soluzione migliore.
+          «Auto» stima il tempo necessario in base alla complessità dei vincoli.
+        </p>
+        <select id="sel-time-budget"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-slate-600
+                       bg-white dark:bg-slate-800 rounded-lg text-sm focus:ring-2
+                       focus:ring-blue-500 focus:border-blue-500">
+          <option value="0">Auto (stimato dai vincoli)</option>
+          <option value="15">15 secondi — Veloce</option>
+          <option value="30">30 secondi — Bilanciato</option>
+          <option value="60">1 minuto — Approfondito</option>
+          <option value="120">2 minuti — Molto approfondito</option>
+          <option value="300">5 minuti — Massima qualità</option>
+          <option value="-1">Fino a 0 violazioni (senza limite)</option>
+        </select>
+        <p id="lbl-time-estimate" class="text-xs text-blue-600 dark:text-blue-400 mt-2"></p>
+      </div>
+
       <!-- Generate button -->
       <button id="btn-generate"
               class="btn w-full py-5 text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600
