@@ -246,14 +246,10 @@ function computeScore(schedule, ctx) {
       if (cur === 'S' && nxt !== 'R') hard++;
     }
     // N-S-R-R: second R required (except no_diurni nurses need only 1 R)
-    // N-S-R-R-R: third R required for diurni_e_notturni nurses
+    // Now diurni_e_notturni uses the same N-S-R-R pattern as regular nurses
     for (let d = 0; d < numDays - 3; d++) {
       if (schedule[n][d] === 'N' && schedule[n][d+1] === 'S' && schedule[n][d+2] === 'R') {
-        if (nurseProps[n].diurniENotturni) {
-          // diurni_e_notturni needs 3 R after N-S
-          if (schedule[n][d+3] !== 'R') hard++;
-          if (d + 4 < numDays && schedule[n][d+4] !== 'R') hard++;
-        } else if (!nurseProps[n].noDiurni && schedule[n][d+3] !== 'R') {
+        if (!nurseProps[n].noDiurni && schedule[n][d+3] !== 'R') {
           hard++;
         }
       }
@@ -325,19 +321,13 @@ function construct(ctx) {
     const diurniENotturni = nurseProps[n].diurniENotturni;
     if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
     if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
-    // For diurni_e_notturni: need 3 R after N-S (total 5 slots: N-S-R-R-R)
-    if (diurniENotturni) {
-      if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
-      if (d + 4 < numDays && schedule[n][d + 4] !== null) return false;
-    } else if (!noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+    // For diurni_e_notturni and regular nurses: need 2 R after N-S (total 4 slots: N-S-R-R)
+    // For noDiurni nurses: need only 1 R after N-S (total 3 slots: N-S-R)
+    if (!noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
     if (d > 0 && schedule[n][d - 1] === 'S') return false;
     if (d > 1 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'S') return false;
-    if (!noDiurni && !diurniENotturni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
-    // For diurni_e_notturni: need 3 R separation (check d-3, d-4 for prior N-S-R-R-R)
-    if (diurniENotturni) {
-      if (d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
-      if (d > 3 && schedule[n][d - 3] === 'R' && schedule[n][d - 4] === 'S') return false;
-    }
+    // For diurni_e_notturni and regular nurses: check d-2, d-3 for prior N-S-R-R
+    if (!noDiurni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
     return true;
   }
 
@@ -345,21 +335,18 @@ function construct(ctx) {
     schedule[n][d] = 'N';
     if (d + 1 < numDays) schedule[n][d + 1] = 'S';
     if (d + 2 < numDays) schedule[n][d + 2] = 'R';
-    // For diurni_e_notturni: 3 R after smonto; for others (except noDiurni): 2 R
-    if (nurseProps[n].diurniENotturni) {
-      if (d + 3 < numDays) schedule[n][d + 3] = 'R';
-      if (d + 4 < numDays) schedule[n][d + 4] = 'R';
-    } else if (!nurseProps[n].noDiurni && d + 3 < numDays) {
+    // For diurni_e_notturni and regular nurses: 2 R after smonto
+    // For noDiurni nurses: only 1 R after smonto
+    if (!nurseProps[n].noDiurni && d + 3 < numDays) {
       schedule[n][d + 3] = 'R';
     }
     nc[n]++;
   }
 
-  // 2a — Ensure minimum night coverage per day
+  // 2a — Ensure minimum night coverage per day (sequential for better distribution)
   const nightStarts = new Array(numDays).fill(0);
-  const dayOrder = Array.from({ length: numDays }, (_, i) => i);
-  shuffle(dayOrder);
-  for (const d of dayOrder) {
+  // Process days in sequential order to ensure even distribution
+  for (let d = 0; d < numDays; d++) {
     let cov = 0;
     for (let n = 0; n < numNurses; n++) if (schedule[n][d] === 'N') cov++;
     while (cov < minCovN) {
@@ -372,7 +359,56 @@ function construct(ctx) {
     }
   }
 
-  // 2b — Fill nights to target per nurse
+  // 2b — Second pass: try to fill any remaining uncovered days by converting scheduled R to N
+  // Only for diurni_e_notturni nurses who can sacrifice extra rest for coverage
+  for (let d = 0; d < numDays; d++) {
+    let cov = 0;
+    for (let n = 0; n < numNurses; n++) if (schedule[n][d] === 'N') cov++;
+    if (cov >= minCovN) continue;
+    
+    // Try to find a nurse who has R on this day (from a previous night block) and can be reassigned
+    for (const n of shuffle([...nightEligible])) {
+      if (cov >= minCovN) break;
+      if (nc[n] >= maxNights) continue;
+      // Check if this nurse can do a night here by freeing up the required slots
+      if (schedule[n][d] !== 'R' && schedule[n][d] !== null) continue;
+      if (d + 1 >= numDays || d + 2 >= numDays) continue;
+      
+      // Check if we can clear slots d, d+1, d+2 (and d+3 if needed)
+      const noDiurni = nurseProps[n].noDiurni;
+      const needSlots = noDiurni ? 3 : 4;
+      if (d + needSlots > numDays) continue;
+      
+      // Check if clearing these slots would be valid
+      let canClear = true;
+      for (let i = 0; i < needSlots; i++) {
+        const s = schedule[n][d + i];
+        // Can only clear R, null, or the current N-S sequence if we're replacing it
+        if (s !== null && s !== 'R') { canClear = false; break; }
+        if (pinned[n][d + i]) { canClear = false; break; }
+      }
+      if (!canClear) continue;
+      
+      // Check transition from previous day
+      if (d > 0) {
+        const prev = schedule[n][d - 1];
+        if (prev === 'S' || prev === 'N') continue;
+        if (prev === 'R') {
+          // Check if it's part of a prior N-S-R-R sequence
+          if (d > 1 && schedule[n][d - 2] === 'S') continue;
+          if (d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') continue;
+        }
+      }
+      
+      // Clear and place night
+      for (let i = 0; i < needSlots; i++) schedule[n][d + i] = null;
+      placeNight(n, d);
+      nightStarts[d]++;
+      cov++;
+    }
+  }
+
+  // 2c — Fill nights to target per nurse, prioritizing days with less coverage
   for (const n of shuffle([...nightEligible])) {
     if (nc[n] >= targetNights) continue;
     const days = shuffle(Array.from({ length: numDays }, (_, i) => i).filter(d => canNight(n, d)));
@@ -384,6 +420,30 @@ function construct(ctx) {
       nightStarts[d]++;
     }
   }
+
+  // 2d — Final pass: ensure we don't exceed maxCovN per day (reduce excess)
+  for (let d = 0; d < numDays; d++) {
+    let cov = 0;
+    const nightNurses = [];
+    for (let n = 0; n < numNurses; n++) {
+      if (schedule[n][d] === 'N') { cov++; nightNurses.push(n); }
+    }
+    while (cov > maxCovN && nightNurses.length > 0) {
+      // Find nurse with most nights to remove
+      nightNurses.sort((a, b) => nc[b] - nc[a]);
+      const n = nightNurses.shift();
+      // Revert N-S-R-R block to R-R-R-R (or nulls to be filled later)
+      const noDiurni = nurseProps[n].noDiurni;
+      const needSlots = noDiurni ? 3 : 4;
+      for (let i = 0; i < needSlots && d + i < numDays; i++) {
+        if (!pinned[n][d + i]) schedule[n][d + i] = null;
+      }
+      nc[n]--;
+      cov--;
+      nightStarts[d]--;
+    }
+  }
+
 
   // Phase 3 — Day shifts (M, P, D)
   function eligible(n, d, s) {
@@ -403,11 +463,9 @@ function construct(ctx) {
     if (s === 'N') {
       if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
       if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
-      // For diurni_e_notturni: need 3 R after N-S
-      if (nurseProps[n].diurniENotturni) {
-        if (d + 3 < numDays && schedule[n][d + 3] !== null) return false;
-        if (d + 4 < numDays && schedule[n][d + 4] !== null) return false;
-      } else if (!nurseProps[n].noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
+      // For diurni_e_notturni and regular nurses: need 2 R after N-S
+      // For noDiurni nurses: only 1 R needed after N-S
+      if (!nurseProps[n].noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
     }
     return true;
   }
@@ -872,13 +930,8 @@ function collectViolations(schedule, ctx) {
     }
     for (let d = 0; d < numDays - 3; d++) {
       if (schedule[n][d] === 'N' && schedule[n][d+1] === 'S' && schedule[n][d+2] === 'R') {
-        if (nurseProps[n].diurniENotturni) {
-          // diurni_e_notturni needs 3 R after N-S
-          if (schedule[n][d+3] !== 'R')
-            violations.push({ nurse: n, day: d, type: 'need_3R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R servono altri 2 R (3 riposi dopo notte)` });
-          else if (d + 4 < numDays && schedule[n][d+4] !== 'R')
-            violations.push({ nurse: n, day: d, type: 'need_3R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R-R serve un altro R (3 riposi dopo notte)` });
-        } else if (!nurseProps[n].noDiurni && schedule[n][d+3] !== 'R') {
+        // N-S-R-R: second R required for diurni_e_notturni and regular nurses (except noDiurni)
+        if (!nurseProps[n].noDiurni && schedule[n][d+3] !== 'R') {
           violations.push({ nurse: n, day: d, type: 'need_2R_after_night', msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)` });
         }
       }
