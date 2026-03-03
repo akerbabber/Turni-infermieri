@@ -29,6 +29,9 @@
 
 const SHIFT_HOURS = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 };
 
+const EQUITY_THRESHOLD_HOURS = 2;        // ±hours from average before equity move triggers
+const HOUR_EQUITY_MILP_WEIGHT = 0.3;     // weight for minimax hour equity in MILP objective
+
 const ABSENCE_TAG_TO_SHIFT = {
   'ferie': 'F',
   'malattia': 'MA',
@@ -782,11 +785,11 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     let moved = false;
     if (currentScore.hard > 0 && r < 0.30) {
       moved = tryWeeklyRestMove(current, ctx, changes);
-    } else if (r < 0.30) {
+    } else if (r < 0.35) {
       moved = trySwapMove(current, ctx, changes);
-    } else if (r < 0.50) {
+    } else if (r < 0.55) {
       moved = tryChangeMove(current, ctx, changes);
-    } else if (r < 0.80) {
+    } else if (r < 0.85) {
       moved = tryEquityMove(current, ctx, changes);
     } else {
       moved = tryWeeklyRestMove(current, ctx, changes);
@@ -913,9 +916,8 @@ function tryEquityMove(schedule, ctx, changes) {
   const avg = allH.reduce((a, b) => a + b, 0) / numNurses;
 
   const isDiurniOnly = nurseProps[n].soloDiurni || nurseProps[n].diurniENotturni;
-  const threshold = 2;
 
-  if (h > avg + threshold) {
+  if (h > avg + EQUITY_THRESHOLD_HOURS) {
     const days = shuffle(Array.from({ length: numDays }, (_, i) => i));
     for (const d of days) {
       if (pinned[n][d]) continue;
@@ -936,7 +938,7 @@ function tryEquityMove(schedule, ctx, changes) {
       setCell(schedule, n, d, 'R', changes);
       return true;
     }
-  } else if (h < avg - threshold) {
+  } else if (h < avg - EQUITY_THRESHOLD_HOURS) {
     const days = shuffle(Array.from({ length: numDays }, (_, i) => i));
     for (const d of days) {
       if (pinned[n][d] || schedule[n][d] !== 'R') continue;
@@ -1253,8 +1255,8 @@ function buildLP(ctx, perturbSeed) {
   const eqConstraints = [];
   if (controllable.length >= 2) {
     contVars.push('hmax', 'hmin');
-    objTerms.push('0.3 hmax');
-    objTerms.push('-0.3 hmin');
+    objTerms.push(`${HOUR_EQUITY_MILP_WEIGHT} hmax`);
+    objTerms.push(`-${HOUR_EQUITY_MILP_WEIGHT} hmin`);
 
     for (const n of controllable) {
       const hTerms = [];
