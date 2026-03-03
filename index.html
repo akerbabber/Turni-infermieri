@@ -562,6 +562,19 @@
         </div>
       </div>
 
+      <!-- Number of solutions -->
+      <div class="rule-card mb-6 text-left">
+        <h3 class="font-semibold mb-2 text-sm">🎯 Numero di soluzioni da generare</h3>
+        <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
+          Genera più soluzioni alternative e scegli la migliore. Usa il solver MILP (HiGHS) per risultati veloci e ottimali.
+        </p>
+        <div class="flex items-center gap-3">
+          <input id="inp-num-solutions" type="range" min="1" max="10" step="1" value="3"
+                 class="flex-1" />
+          <span id="val-num-solutions" class="font-bold text-blue-600 dark:text-blue-400 w-8 text-right">3</span>
+        </div>
+      </div>
+
       <!-- Generate button -->
       <button id="btn-generate"
               class="btn w-full py-5 text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600
@@ -630,6 +643,17 @@
           📂 Carica config
         </button>
         <input id="inp-load-file" type="file" accept=".json" class="hidden" />
+      </div>
+    </div>
+
+    <!-- Solution picker (shown when multiple solutions) -->
+    <div id="solution-picker" class="mb-4 hidden">
+      <div class="rule-card">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold text-sm">🎯 Soluzioni generate</h3>
+          <span id="solution-count" class="text-xs text-gray-500 dark:text-slate-400"></span>
+        </div>
+        <div id="solution-buttons" class="flex flex-wrap gap-2"></div>
       </div>
     </div>
 

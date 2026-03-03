@@ -98,6 +98,9 @@ let state = {
   schedule: null,
   violations: [],
   stats: [],
+  solutions: [],
+  selectedSolution: 0,
+  numSolutions: 3,
   worker: null,
   darkMode: false,
 };
@@ -108,7 +111,7 @@ let state = {
 
 function saveState() {
   try {
-    const s = { ...state, worker: null, schedule: state.schedule };
+    const s = { ...state, worker: null, schedule: state.schedule, solutions: [] };
     localStorage.setItem('turni_state', JSON.stringify(s));
   } catch (_) {}
 }
@@ -536,6 +539,9 @@ function renderStep3() {
   setEl('summary-nurses',  `${activeCount} / ${state.totalNurses}`);
   setEl('summary-cov',     `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`);
   setEl('summary-nights',  `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
+
+  // Bind num solutions slider
+  bindRange('inp-num-solutions', 'val-num-solutions', state.numSolutions, v => { state.numSolutions = v; saveState(); });
 }
 
 function startSolver() {
@@ -565,9 +571,18 @@ function startSolver() {
       if (bar) bar.style.width = data.percent + '%';
       if (msg) msg.textContent = data.message;
     } else if (data.type === 'result') {
-      state.schedule = data.schedule;
-      state.violations = data.violations || [];
-      state.stats = data.stats || [];
+      state.solutions = data.solutions || [];
+      state.selectedSolution = 0;
+      if (state.solutions.length > 0) {
+        const best = state.solutions[0];
+        state.schedule = best.schedule;
+        state.violations = best.violations || [];
+        state.stats = best.stats || [];
+      } else {
+        state.schedule = data.schedule;
+        state.violations = data.violations || [];
+        state.stats = data.stats || [];
+      }
       state.worker = null;
       worker.terminate();
       saveState();
@@ -590,7 +605,7 @@ function startSolver() {
     state.worker = null;
   };
 
-  worker.postMessage({ type: 'solve', config });
+  worker.postMessage({ type: 'solve', config, numSolutions: state.numSolutions });
 }
 
 function regenerateTurni() {
@@ -620,9 +635,18 @@ function regenerateTurni() {
     if (data.type === 'progress') {
       // Progress can be shown if needed
     } else if (data.type === 'result') {
-      state.schedule = data.schedule;
-      state.violations = data.violations || [];
-      state.stats = data.stats || [];
+      state.solutions = data.solutions || [];
+      state.selectedSolution = 0;
+      if (state.solutions.length > 0) {
+        const best = state.solutions[0];
+        state.schedule = best.schedule;
+        state.violations = best.violations || [];
+        state.stats = best.stats || [];
+      } else {
+        state.schedule = data.schedule;
+        state.violations = data.violations || [];
+        state.stats = data.stats || [];
+      }
       state.worker = null;
       worker.terminate();
       saveState();
@@ -645,7 +669,7 @@ function regenerateTurni() {
     state.worker = null;
   };
 
-  worker.postMessage({ type: 'solve', config });
+  worker.postMessage({ type: 'solve', config, numSolutions: state.numSolutions });
 }
 
 // ---------------------------------------------------------------------------
@@ -654,9 +678,56 @@ function regenerateTurni() {
 
 let openDropdown = null;
 
+function renderSolutionPicker() {
+  const picker = document.getElementById('solution-picker');
+  const btnContainer = document.getElementById('solution-buttons');
+  const countEl = document.getElementById('solution-count');
+  if (!picker || !btnContainer) return;
+
+  if (!state.solutions || state.solutions.length <= 1) {
+    picker.classList.add('hidden');
+    return;
+  }
+
+  picker.classList.remove('hidden');
+  if (countEl) countEl.textContent = `${state.solutions.length} soluzioni ordinate per qualità`;
+  btnContainer.innerHTML = '';
+
+  state.solutions.forEach((sol, idx) => {
+    const vioCount = (sol.violations || []).length;
+    const isSelected = idx === state.selectedSolution;
+    const btn = document.createElement('button');
+    btn.className = `px-3 py-2 text-sm font-semibold rounded-lg shadow transition-colors ${
+      isSelected
+        ? 'bg-blue-600 text-white ring-2 ring-blue-400'
+        : 'bg-white dark:bg-slate-700 text-gray-700 dark:text-slate-300 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-600'
+    }`;
+    const label = idx === 0 ? '⭐ Migliore' : `#${idx + 1}`;
+    btn.innerHTML = `${label}<br><span class="text-xs font-normal">${vioCount === 0 ? '✅ 0 viol.' : `⚠️ ${vioCount} viol.`}</span>`;
+    btn.title = `Soluzione ${idx + 1} — ${vioCount} violazioni, punteggio: ${sol.score}`;
+    btn.addEventListener('click', () => selectSolution(idx));
+    btnContainer.appendChild(btn);
+  });
+}
+
+function selectSolution(idx) {
+  if (!state.solutions || idx < 0 || idx >= state.solutions.length) return;
+  state.selectedSolution = idx;
+  const sol = state.solutions[idx];
+  state.schedule = sol.schedule;
+  state.violations = sol.violations || [];
+  state.stats = sol.stats || [];
+  saveState();
+  renderStep4();
+}
+
 function renderStep4() {
   const container = document.getElementById('schedule-container');
   if (!container) return;
+
+  // Render solution picker
+  renderSolutionPicker();
+
   if (!state.schedule) {
     container.innerHTML = '<p class="text-gray-500 italic text-center py-12">Nessun turno generato. Torna al passo 3.</p>';
     return;
