@@ -112,7 +112,7 @@ function buildContext(config) {
   const minCovM = rules.minCoverageM ?? 6, maxCovM = rules.maxCoverageM ?? 7;
   const minCovP = rules.minCoverageP ?? 6, maxCovP = rules.maxCoverageP ?? 7;
   const minCovD = rules.minCoverageD ?? 0, maxCovD = rules.maxCoverageD ?? 4;
-  const minCovN = rules.minCoverageN ?? 2, maxCovN = rules.maxCoverageN ?? 4;
+  const minCovN = rules.minCoverageN ?? 6, maxCovN = rules.maxCoverageN ?? 6;
 
   const targetNights = rules.targetNights ?? 4;
   const maxNights    = rules.maxNights ?? 7;
