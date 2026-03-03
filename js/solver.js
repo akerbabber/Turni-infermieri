@@ -1227,7 +1227,7 @@ const MILP_MIN_TIME_PER_SOLUTION = 1;
 const MILP_MAX_TIME_PER_SOLUTION = 8;
 const MILP_DEFAULT_TOTAL_TIME_BUDGET = 30;
 
-// Safety cap for "until zero violations" mode (seconds)
+// Safety cap to prevent indefinite runs in zero-violations mode (10 minutes)
 const UNTIL_ZERO_MAX_TIME = 600;
 
 /**
@@ -1264,7 +1264,7 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
   }
 
   /** Generate one batch of solutions */
-  function generateBatch(batchSolutions, batchLabel) {
+  function generateBatch(batchSolutions, batchLabel, seedOffset) {
     const timePerSolution = Math.max(MILP_MIN_TIME_PER_SOLUTION,
       Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions)));
 
@@ -1273,9 +1273,10 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
       if (milpAvailable) {
         progress(pctBase, `${batchLabel}MILP: soluzione ${i + 1}/${numSolutions}…`);
         try {
-          const seed = batchSolutions.length + i;
+          const seed = seedOffset + i;
           const schedule = solveOneMILP(highs, ctx, seed, timePerSolution);
           if (schedule) {
+            // ~200 polish iterations per second of time budget per solution
             const polishIters = Math.max(1000, Math.floor((totalBudget / numSolutions) * 200));
             const polished = localSearch(schedule, ctx, polishIters);
             const violations = collectViolations(polished, ctx);
@@ -1289,6 +1290,7 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
       // Greedy fallback
       progress(pctBase,
                `${batchLabel}${milpAvailable ? 'Fallback euristica' : 'Euristica'} ${i + 1}/${numSolutions}…`);
+      // ~500 greedy iterations per second of time budget per solution
       const greedyIters = Math.max(LOCAL_SEARCH_ITERS, Math.floor((totalBudget / numSolutions) * 500));
       const schedule = construct(ctx);
       const improved = localSearch(schedule, ctx, greedyIters);
@@ -1316,16 +1318,17 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
         progress(90, `Tempo massimo raggiunto (${Math.round(elapsed)}s). Uso miglior soluzione trovata.`);
         break;
       }
+      const prevLen = solutions.length;
       progress(5, `Tentativo #${round} — ricerca soluzione senza violazioni…`);
-      generateBatch(solutions, `[#${round}] `);
-      // Check if any solution has 0 violations
-      for (const sol of solutions) {
-        if (sol.violations.length === 0) { foundZero = true; break; }
+      generateBatch(solutions, `[#${round}] `, (round - 1) * numSolutions);
+      // Check only newly added solutions from this batch
+      for (let j = prevLen; j < solutions.length; j++) {
+        if (solutions[j].violations.length === 0) { foundZero = true; break; }
       }
       round++;
     }
   } else {
-    generateBatch(solutions, '');
+    generateBatch(solutions, '', 0);
   }
 
   // Sort by score (best first)

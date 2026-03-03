@@ -543,7 +543,8 @@ function estimateTimeBudget() {
   );
   // Complexity proxy: nurses × days × coverage density
   const complexity = activeCount * daysInMonth * avgCoverage;
-  // Empirical mapping: ~5000 complexity ≈ 30s, scale linearly with a floor of 15s and cap of 120s
+  // Empirical mapping: ~5000 complexity ≈ 30s, scale linearly
+  // Floor 15s (small rosters solve fast), cap 120s (diminishing returns beyond)
   const estimated = Math.round(Math.max(15, Math.min(120, complexity / 170)));
   return estimated;
 }
@@ -553,7 +554,7 @@ function timeBudgetLabel(value) {
   if (value === -1) return 'Fino a 0 violazioni';
   if (value === 0)  return 'Auto';
   if (value < 60)   return `${value} secondi`;
-  return `${value / 60} minuti`;
+  return `${value / 60} ${value / 60 === 1 ? 'minuto' : 'minuti'}`;
 }
 
 function renderStep3() {
