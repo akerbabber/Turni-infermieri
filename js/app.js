@@ -9,9 +9,9 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const SHIFT_COLORS = { M: 'shift-M', P: 'shift-P', D: 'shift-D', N: 'shift-N', S: 'shift-S', R: 'shift-R' };
-const SHIFT_LABELS = { M: 'Mattina', P: 'Pomeriggio', D: 'Diurno', N: 'Notte', S: 'Smonto', R: 'Riposo' };
-const SHIFT_HOURS  = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0 };
+const SHIFT_COLORS = { M: 'shift-M', P: 'shift-P', D: 'shift-D', N: 'shift-N', S: 'shift-S', R: 'shift-R', F: 'shift-F', MA: 'shift-MA', L104: 'shift-L104', PR: 'shift-PR', MT: 'shift-MT' };
+const SHIFT_LABELS = { M: 'Mattina', P: 'Pomeriggio', D: 'Diurno', N: 'Notte', S: 'Smonto', R: 'Riposo', F: 'Ferie', MA: 'Malattia', L104: '104', PR: 'Perm.Retr.', MT: 'Maternità' };
+const SHIFT_HOURS  = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 7.12, MA: 7.12, L104: 7.12, PR: 7.12, MT: 7.12 };
 const DOW_LABELS   = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const MONTHS_IT    = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
                       'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -30,8 +30,14 @@ const DEFAULT_NURSE_NAMES = [
 ];
 
 const DEFAULT_RULES = {
-  minCoverage: 6,
-  maxCoverage: 7,
+  minCoverageM: 6,
+  maxCoverageM: 7,
+  minCoverageP: 6,
+  maxCoverageP: 7,
+  minCoverageD: 0,
+  maxCoverageD: 4,
+  minCoverageN: 2,
+  maxCoverageN: 4,
   targetHours: 36,
   minHours: 28,
   maxHours: 42,
@@ -43,6 +49,7 @@ const DEFAULT_RULES = {
   minGap11h: true,
   forwardOnly: true,
   minRPerWeek: 2,
+  preferDiurni: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,6 +71,13 @@ function buildDefaultNurses(count) {
     id: genId(i),
     name: DEFAULT_NURSE_NAMES[i] || `Infermiere ${i + 1}`,
     tags: [],
+    absencePeriods: {
+      ferie: { start: null, end: null },
+      malattia: { start: null, end: null },
+      '104': { start: null, end: null },
+      permesso_retribuito: { start: null, end: null },
+      maternita: { start: null, end: null }
+    }
   }));
 }
 
@@ -104,8 +118,18 @@ function loadState() {
     state = { ...state, ...saved, worker: null };
     // Ensure rules have all keys
     state.rules = { ...DEFAULT_RULES, ...saved.rules };
-    // Re-hydrate nurses (ensure tags array)
-    state.nurses = (saved.nurses || []).map(n => ({ ...n, tags: n.tags || [] }));
+    // Re-hydrate nurses (ensure tags array and absencePeriods)
+    state.nurses = (saved.nurses || []).map(n => ({ 
+      ...n, 
+      tags: n.tags || [],
+      absencePeriods: n.absencePeriods || {
+        ferie: { start: null, end: null },
+        malattia: { start: null, end: null },
+        '104': { start: null, end: null },
+        permesso_retribuito: { start: null, end: null },
+        maternita: { start: null, end: null }
+      }
+    }));
   } catch (_) {}
 }
 
@@ -223,16 +247,41 @@ function renderNurseList() {
 
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
 
+  // Absence types that need period selection
+  const absenceTypes = [
+    { key: 'ferie', label: 'Ferie', shiftCode: 'F' },
+    { key: 'malattia', label: 'Malattia', shiftCode: 'MA' },
+    { key: '104', label: '104', shiftCode: 'L104' },
+    { key: 'permesso_retribuito', label: 'Permesso retribuito', shiftCode: 'PR' },
+    { key: 'maternita', label: 'Maternità', shiftCode: 'MT' }
+  ];
+
   activeNurses.forEach((nurse, idx) => {
+    // Ensure nurse has absencePeriods initialized
+    if (!nurse.absencePeriods) {
+      nurse.absencePeriods = {
+        ferie: { start: null, end: null },
+        malattia: { start: null, end: null },
+        '104': { start: null, end: null },
+        permesso_retribuito: { start: null, end: null },
+        maternita: { start: null, end: null }
+      };
+    }
+
     const item = document.createElement('div');
     item.className = 'nurse-item';
     item.dataset.idx = idx;
     item.draggable = true;
 
     const tagDefs = [
-      { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine' },
-      { key: 'no_notti',     label: 'No notti',            cls: 'tag-no_notti' },
-      { key: 'no_diurni',   label: 'No diurni 12h',       cls: 'tag-no_diurni' },
+      { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine', isAbsence: false },
+      { key: 'no_notti',     label: 'No notti',            cls: 'tag-no_notti', isAbsence: false },
+      { key: 'no_diurni',   label: 'No diurni 12h',       cls: 'tag-no_diurni', isAbsence: false },
+      { key: 'ferie',       label: 'Ferie',               cls: 'tag-ferie', isAbsence: true },
+      { key: 'malattia',    label: 'Malattia',            cls: 'tag-malattia', isAbsence: true },
+      { key: '104',         label: '104',                 cls: 'tag-104', isAbsence: true },
+      { key: 'permesso_retribuito', label: 'Permesso retribuito', cls: 'tag-permesso_retribuito', isAbsence: true },
+      { key: 'maternita',   label: 'Maternità',           cls: 'tag-maternita', isAbsence: true },
     ];
 
     const tagsHTML = tagDefs.map(t => {
@@ -242,13 +291,38 @@ function renderNurseList() {
                 title="${t.label}">${t.label}</button>`;
     }).join('');
 
+    // Build absence period inputs for active absence tags
+    let absencePeriodsHTML = '';
+    tagDefs.filter(t => t.isAbsence && nurse.tags.includes(t.key)).forEach(t => {
+      const period = nurse.absencePeriods[t.key] || { start: null, end: null };
+      absencePeriodsHTML += `
+        <div class="absence-period mt-2 p-2 bg-gray-50 dark:bg-slate-800 rounded-lg text-xs" data-nurse="${idx}" data-type="${t.key}">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold ${t.cls.replace('tag-', 'text-')}">${t.label}:</span>
+            <label class="flex items-center gap-1">
+              Dal: <input type="date" class="absence-start border rounded px-1 py-0.5 text-xs bg-white dark:bg-slate-700 dark:border-slate-600" 
+                     data-nurse="${idx}" data-type="${t.key}" value="${period.start || ''}" />
+            </label>
+            <label class="flex items-center gap-1">
+              Al: <input type="date" class="absence-end border rounded px-1 py-0.5 text-xs bg-white dark:bg-slate-700 dark:border-slate-600"
+                   data-nurse="${idx}" data-type="${t.key}" value="${period.end || ''}" />
+            </label>
+            <span class="text-gray-500">(7.12 ore/giorno)</span>
+          </div>
+        </div>
+      `;
+    });
+
     item.innerHTML = `
-      <span class="drag-handle" title="Trascina per riordinare">⠿</span>
-      <span class="flex-1 text-sm font-medium nurse-name"
-            contenteditable="true"
-            data-nurse="${idx}"
-            spellcheck="false">${escHtml(nurse.name)}</span>
-      <div class="flex flex-wrap gap-1">${tagsHTML}</div>
+      <div class="flex items-center gap-2 w-full">
+        <span class="drag-handle" title="Trascina per riordinare">⠿</span>
+        <span class="flex-1 text-sm font-medium nurse-name"
+              contenteditable="true"
+              data-nurse="${idx}"
+              spellcheck="false">${escHtml(nurse.name)}</span>
+        <div class="flex flex-wrap gap-1">${tagsHTML}</div>
+      </div>
+      ${absencePeriodsHTML}
     `;
 
     container.appendChild(item);
@@ -271,6 +345,37 @@ function renderNurseList() {
         if (pos >= 0) tags.splice(pos, 1); else tags.push(tKey);
         saveState();
         renderNurseList();
+      });
+    });
+
+    // Absence period date inputs
+    item.querySelectorAll('.absence-start').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const nIdx = parseInt(inp.dataset.nurse);
+        const type = inp.dataset.type;
+        if (!state.nurses[nIdx].absencePeriods) {
+          state.nurses[nIdx].absencePeriods = {};
+        }
+        if (!state.nurses[nIdx].absencePeriods[type]) {
+          state.nurses[nIdx].absencePeriods[type] = { start: null, end: null };
+        }
+        state.nurses[nIdx].absencePeriods[type].start = inp.value || null;
+        saveState();
+      });
+    });
+
+    item.querySelectorAll('.absence-end').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const nIdx = parseInt(inp.dataset.nurse);
+        const type = inp.dataset.type;
+        if (!state.nurses[nIdx].absencePeriods) {
+          state.nurses[nIdx].absencePeriods = {};
+        }
+        if (!state.nurses[nIdx].absencePeriods[type]) {
+          state.nurses[nIdx].absencePeriods[type] = { start: null, end: null };
+        }
+        state.nurses[nIdx].absencePeriods[type].end = inp.value || null;
+        saveState();
       });
     });
 
@@ -312,9 +417,21 @@ function escHtml(str) {
 function renderStep2() {
   const r = state.rules;
 
-  // Coverage slider
-  bindRange('sl-min-cov', 'val-min-cov', r.minCoverage, v => { state.rules.minCoverage = v; saveState(); });
-  bindRange('sl-max-cov', 'val-max-cov', r.maxCoverage, v => { state.rules.maxCoverage = v; saveState(); });
+  // Coverage sliders - Mattina
+  bindRange('sl-min-cov-m', 'val-min-cov-m', r.minCoverageM, v => { state.rules.minCoverageM = v; saveState(); });
+  bindRange('sl-max-cov-m', 'val-max-cov-m', r.maxCoverageM, v => { state.rules.maxCoverageM = v; saveState(); });
+
+  // Coverage sliders - Pomeriggio
+  bindRange('sl-min-cov-p', 'val-min-cov-p', r.minCoverageP, v => { state.rules.minCoverageP = v; saveState(); });
+  bindRange('sl-max-cov-p', 'val-max-cov-p', r.maxCoverageP, v => { state.rules.maxCoverageP = v; saveState(); });
+
+  // Coverage sliders - Diurno
+  bindRange('sl-min-cov-d', 'val-min-cov-d', r.minCoverageD, v => { state.rules.minCoverageD = v; saveState(); });
+  bindRange('sl-max-cov-d', 'val-max-cov-d', r.maxCoverageD, v => { state.rules.maxCoverageD = v; saveState(); });
+
+  // Coverage sliders - Notte
+  bindRange('sl-min-cov-n', 'val-min-cov-n', r.minCoverageN, v => { state.rules.minCoverageN = v; saveState(); });
+  bindRange('sl-max-cov-n', 'val-max-cov-n', r.maxCoverageN, v => { state.rules.maxCoverageN = v; saveState(); });
 
   // Hours
   bindRange('sl-target-hours', 'val-target-hours', r.targetHours, v => { state.rules.targetHours = v; saveState(); });
@@ -368,7 +485,7 @@ function renderStep3() {
   const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   setEl('summary-period',  `${MONTHS_IT[state.month]} ${state.year}`);
   setEl('summary-nurses',  `${activeCount} / ${state.totalNurses}`);
-  setEl('summary-cov',     `${state.rules.minCoverage}–${state.rules.maxCoverage} per slot`);
+  setEl('summary-cov',     `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`);
   setEl('summary-nights',  `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
 }
 
@@ -421,6 +538,61 @@ function startSolver() {
     alert('Errore Worker: ' + err.message);
     const btnG = document.getElementById('btn-generate');
     if (btnG) { btnG.disabled = false; btnG.textContent = 'GENERA TURNI'; }
+    state.worker = null;
+  };
+
+  worker.postMessage({ type: 'solve', config });
+}
+
+function regenerateTurni() {
+  // Terminate existing worker
+  if (state.worker) { state.worker.terminate(); state.worker = null; }
+
+  const btn = document.getElementById('btn-regenerate');
+  if (btn) { btn.disabled = true; btn.textContent = 'Rigenerando...'; }
+
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+
+  // Create a copy of rules with preferDiurni enabled for this regeneration only
+  const regenerationRules = { ...state.rules, preferDiurni: true };
+
+  const config = {
+    year: state.year,
+    month: state.month,
+    nurses: activeNurses,
+    rules: regenerationRules,
+  };
+
+  const worker = new Worker('js/solver.js');
+  state.worker = worker;
+
+  worker.onmessage = (e) => {
+    const data = e.data;
+    if (data.type === 'progress') {
+      // Progress can be shown if needed
+    } else if (data.type === 'result') {
+      state.schedule = data.schedule;
+      state.violations = data.violations || [];
+      state.stats = data.stats || [];
+      state.worker = null;
+      worker.terminate();
+      saveState();
+      const btnR = document.getElementById('btn-regenerate');
+      if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
+      renderStep4();
+    } else if (data.type === 'error') {
+      alert('Errore nel solver: ' + data.message);
+      const btnR = document.getElementById('btn-regenerate');
+      if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
+      state.worker = null;
+      worker.terminate();
+    }
+  };
+
+  worker.onerror = (err) => {
+    alert('Errore Worker: ' + err.message);
+    const btnR = document.getElementById('btn-regenerate');
+    if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
     state.worker = null;
   };
 
@@ -565,7 +737,8 @@ function openShiftDropdown(anchorEl, n, d) {
   dropdown.className = 'shift-dropdown';
   dropdown.id = 'active-dropdown';
 
-  ['M', 'P', 'D', 'N', 'S', 'R'].forEach(shift => {
+  // Include all shift types including absence shifts
+  ['M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT'].forEach(shift => {
     const btn = document.createElement('button');
     btn.className = `shift-cell ${SHIFT_COLORS[shift]}`;
     btn.style.width = '36px';
@@ -585,7 +758,7 @@ function openShiftDropdown(anchorEl, n, d) {
 
   // Position near anchor
   const rect = anchorEl.getBoundingClientRect();
-  const left = Math.min(rect.left + window.scrollX, window.innerWidth - 230);
+  const left = Math.min(rect.left + window.scrollX, window.innerWidth - 280);
   const top = rect.bottom + window.scrollY + 4;
   dropdown.style.position = 'absolute';
   dropdown.style.left = left + 'px';
@@ -664,14 +837,17 @@ function revalidate() {
   }
 
   for (let d = 0; d < numDays; d++) {
-    let M = 0, P = 0;
+    let M = 0, P = 0, D = 0, N = 0;
     for (let n = 0; n < numNurses; n++) {
       const s = state.schedule[n][d];
-      if (s === 'M' || s === 'D') M++;
-      if (s === 'P' || s === 'D') P++;
+      if (s === 'M') M++;
+      if (s === 'P') P++;
+      if (s === 'D') { D++; M++; P++; }
+      if (s === 'N') N++;
     }
-    if (M < state.rules.minCoverage) violations.push({ day: d, type: 'coverage_M', msg: `Giorno ${d + 1}: M insufficiente (${M}/${state.rules.minCoverage})` });
-    if (P < state.rules.minCoverage) violations.push({ day: d, type: 'coverage_P', msg: `Giorno ${d + 1}: P insufficiente (${P}/${state.rules.minCoverage})` });
+    if (M < state.rules.minCoverageM) violations.push({ day: d, type: 'coverage_M', msg: `Giorno ${d + 1}: M insufficiente (${M}/${state.rules.minCoverageM})` });
+    if (P < state.rules.minCoverageP) violations.push({ day: d, type: 'coverage_P', msg: `Giorno ${d + 1}: P insufficiente (${P}/${state.rules.minCoverageP})` });
+    if (N < state.rules.minCoverageN) violations.push({ day: d, type: 'coverage_N', msg: `Giorno ${d + 1}: N insufficiente (${N}/${state.rules.minCoverageN})` });
   }
 
   state.violations = violations;
@@ -837,6 +1013,7 @@ function init() {
 
   // ---- Step 4 ----
   document.getElementById('btn-step4-back')?.addEventListener('click', () => goToStep(3));
+  document.getElementById('btn-regenerate')?.addEventListener('click', regenerateTurni);
   document.getElementById('btn-export-csv')?.addEventListener('click', exportCSV);
   document.getElementById('btn-save-config')?.addEventListener('click', saveConfig);
   document.getElementById('btn-print')?.addEventListener('click', () => window.print());

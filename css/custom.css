@@ -63,6 +63,11 @@ body {
 .shift-N  { background-color: #1E3A5F; color: #fff; }
 .shift-S  { background-color: #9CA3AF; color: #fff; }
 .shift-R  { background-color: #10B981; color: #fff; }
+.shift-F  { background-color: #06B6D4; color: #fff; } /* Ferie - cyan */
+.shift-MA { background-color: #EF4444; color: #fff; } /* Malattia - red */
+.shift-L104 { background-color: #6366F1; color: #fff; } /* 104 - indigo */
+.shift-PR { background-color: #EC4899; color: #fff; } /* Permesso Retribuito - pink */
+.shift-MT { background-color: #F472B6; color: #fff; } /* Maternità - light pink */
 .shift-empty { background-color: #e5e7eb; color: #6b7280; }
 
 /* ---------- Schedule grid ---------- */
@@ -311,6 +316,11 @@ td.violation-cell {
 .tag.tag-solo_mattine { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
 .tag.tag-no_notti     { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
 .tag.tag-no_diurni    { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
+.tag.tag-ferie        { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+.tag.tag-malattia     { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+.tag.tag-104          { background: #e0e7ff; color: #3730a3; border-color: #a5b4fc; }
+.tag.tag-permesso_retribuito { background: #fef3c7; color: #78350f; border-color: #fcd34d; }
+.tag.tag-maternita    { background: #fce7f3; color: #9d174d; border-color: #f9a8d4; }
 
 .tag.active { box-shadow: 0 0 0 2px currentColor; }
 .tag.inactive { opacity: 0.4; }
@@ -318,6 +328,11 @@ td.violation-cell {
 html.dark .tag.tag-solo_mattine { background: #1e3a5f; color: #93c5fd; border-color: #3b82f6; }
 html.dark .tag.tag-no_notti     { background: #3b2500; color: #fcd34d; border-color: #f59e0b; }
 html.dark .tag.tag-no_diurni    { background: #2e1a5e; color: #c4b5fd; border-color: #7c3aed; }
+html.dark .tag.tag-ferie        { background: #064e3b; color: #6ee7b7; border-color: #10b981; }
+html.dark .tag.tag-malattia     { background: #7f1d1d; color: #fca5a5; border-color: #ef4444; }
+html.dark .tag.tag-104          { background: #312e81; color: #a5b4fc; border-color: #6366f1; }
+html.dark .tag.tag-permesso_retribuito { background: #78350f; color: #fcd34d; border-color: #f59e0b; }
+html.dark .tag.tag-maternita    { background: #831843; color: #f9a8d4; border-color: #ec4899; }
 
 /* ---------- Rule cards ---------- */
 .rule-card {
