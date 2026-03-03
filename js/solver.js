@@ -1286,10 +1286,10 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
 
   /** Generate one batch of solutions */
   function generateBatch(batchSolutions, batchLabel, seedOffset) {
-    const milpTimePerSolution = Math.max(MILP_MIN_TIME_PER_SOLUTION,
+    const milpTimeLimitSec = Math.max(MILP_MIN_TIME_PER_SOLUTION,
       Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions)));
-    // Time budget each solution's local-search phase should use (wall-clock seconds)
-    const localSearchTimeSec = Math.max(1, totalBudget / numSolutions);
+    // Total wall-clock time budget per solution (includes MILP + polish or greedy)
+    const perSolutionBudgetSec = Math.max(1, totalBudget / numSolutions);
 
     for (let i = 0; i < numSolutions; i++) {
       const pctBase = 5 + Math.floor(i * 80 / numSolutions);
@@ -1297,10 +1297,12 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
         progress(pctBase, `${batchLabel}MILP: soluzione ${i + 1}/${numSolutions}…`);
         try {
           const seed = seedOffset + i;
-          const schedule = solveOneMILP(highs, ctx, seed, milpTimePerSolution);
+          const milpStart = Date.now();
+          const schedule = solveOneMILP(highs, ctx, seed, milpTimeLimitSec);
+          const milpElapsed = (Date.now() - milpStart) / 1000;
           if (schedule) {
-            // Polish with remaining time after MILP solve
-            const polishTimeSec = Math.max(1, localSearchTimeSec - milpTimePerSolution);
+            // Polish with remaining time after actual MILP elapsed time
+            const polishTimeSec = Math.max(1, perSolutionBudgetSec - milpElapsed);
             const polished = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, polishTimeSec);
             const violations = collectViolations(polished, ctx);
             const stats = computeStats(polished, ctx);
@@ -1314,7 +1316,7 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
       progress(pctBase,
                `${batchLabel}${milpAvailable ? 'Fallback euristica' : 'Euristica'} ${i + 1}/${numSolutions}…`);
       const schedule = construct(ctx);
-      const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, localSearchTimeSec);
+      const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec);
       const violations = collectViolations(improved, ctx);
       const stats = computeStats(improved, ctx);
       const score = computeScore(improved, ctx);
