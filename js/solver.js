@@ -29,6 +29,9 @@
 
 const SHIFT_HOURS = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 };
 
+const EQUITY_THRESHOLD_HOURS = 2;        // ±hours from average before equity move triggers
+const HOUR_EQUITY_MILP_WEIGHT = 0.3;     // weight for minimax hour equity in MILP objective
+
 const ABSENCE_TAG_TO_SHIFT = {
   'ferie': 'F',
   'malattia': 'MA',
@@ -276,11 +279,11 @@ function computeScore(schedule, ctx) {
     }
   }
 
-  // Soft: hours equity
+  // Soft: hours equity (weight 3 — on par with night fairness)
   const hours = [];
   for (let n = 0; n < numNurses; n++) hours.push(nurseHours(schedule, n, numDays));
   const avg = hours.reduce((a, b) => a + b, 0) / numNurses;
-  for (const h of hours) soft += Math.abs(h - avg);
+  for (const h of hours) soft += Math.abs(h - avg) * 3;
 
   // Soft: night-count fairness
   for (let n = 0; n < numNurses; n++) {
@@ -784,9 +787,9 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
       moved = tryWeeklyRestMove(current, ctx, changes);
     } else if (r < 0.35) {
       moved = trySwapMove(current, ctx, changes);
-    } else if (r < 0.60) {
+    } else if (r < 0.55) {
       moved = tryChangeMove(current, ctx, changes);
-    } else if (r < 0.80) {
+    } else if (r < 0.85) {
       moved = tryEquityMove(current, ctx, changes);
     } else {
       moved = tryWeeklyRestMove(current, ctx, changes);
@@ -904,22 +907,30 @@ function tryChangeMove(schedule, ctx, changes) {
 
 function tryEquityMove(schedule, ctx, changes) {
   const { numDays, numNurses, pinned, nurseProps, minCovM, maxCovM, minCovP, maxCovP,
-          minRPerWeek, weekDaysList, weekOf } = ctx;
+          minRPerWeek, weekDaysList, weekOf, consente2D } = ctx;
   const n = Math.floor(Math.random() * numNurses);
-  if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti || nurseProps[n].diurniENotturni) return false;
+  if (nurseProps[n].soloMattine || nurseProps[n].soloNotti) return false;
   const h = nurseHours(schedule, n, numDays);
   const allH = [];
   for (let i = 0; i < numNurses; i++) allH.push(nurseHours(schedule, i, numDays));
   const avg = allH.reduce((a, b) => a + b, 0) / numNurses;
 
-  if (h > avg + 4) {
+  const isDiurniOnly = nurseProps[n].soloDiurni || nurseProps[n].diurniENotturni;
+
+  if (h > avg + EQUITY_THRESHOLD_HOURS) {
     const days = shuffle(Array.from({ length: numDays }, (_, i) => i));
     for (const d of days) {
       if (pinned[n][d]) continue;
       const s = schedule[n][d];
-      if (s !== 'M' && s !== 'P') continue;
-      const cov = dayCoverage(schedule, d, numNurses);
-      if ((s === 'M' ? cov.M : cov.P) <= (s === 'M' ? ctx.minCovM : ctx.minCovP)) continue;
+      if (isDiurniOnly) {
+        if (s !== 'D') continue;
+        const cov = dayCoverage(schedule, d, numNurses);
+        if (cov.M <= minCovM || cov.P <= minCovP) continue;
+      } else {
+        if (s !== 'M' && s !== 'P') continue;
+        const cov = dayCoverage(schedule, d, numNurses);
+        if ((s === 'M' ? cov.M : cov.P) <= (s === 'M' ? ctx.minCovM : ctx.minCovP)) continue;
+      }
       const prev = d > 0 ? schedule[n][d - 1] : null;
       const next = d < numDays - 1 ? schedule[n][d + 1] : null;
       if (!transitionOk(prev, 'R', ctx, schedule, n, d)) continue;
@@ -927,7 +938,7 @@ function tryEquityMove(schedule, ctx, changes) {
       setCell(schedule, n, d, 'R', changes);
       return true;
     }
-  } else if (h < avg - 4) {
+  } else if (h < avg - EQUITY_THRESHOLD_HOURS) {
     const days = shuffle(Array.from({ length: numDays }, (_, i) => i));
     for (const d of days) {
       if (pinned[n][d] || schedule[n][d] !== 'R') continue;
@@ -938,14 +949,36 @@ function tryEquityMove(schedule, ctx, changes) {
       }
       const prev = d > 0 ? schedule[n][d - 1] : null;
       const next = d < numDays - 1 ? schedule[n][d + 1] : null;
-      const cov = dayCoverage(schedule, d, numNurses);
-      for (const s of shuffle(['M', 'P'])) {
-        if (s === 'M' && cov.M >= maxCovM) continue;
-        if (s === 'P' && cov.P >= maxCovP) continue;
-        if (!transitionOk(prev, s, ctx, schedule, n, d)) continue;
-        if (!transitionOk(s, next, ctx, schedule, n, d + 1)) continue;
-        setCell(schedule, n, d, s, changes);
+      if (isDiurniOnly) {
+        // For solo_diurni / diurni_e_notturni: try adding a D shift
+        if (!transitionOk(prev, 'D', ctx, schedule, n, d)) continue;
+        if (!transitionOk('D', next, ctx, schedule, n, d + 1)) continue;
+        // Check D-D rules if consente2D
+        if (consente2D) {
+          // D[d-1]-D[d]: need next to be R, no D-D-D from left
+          if (prev === 'D') {
+            if (next !== null && next !== 'R') continue;
+            if (d > 1 && schedule[n][d - 2] === 'D') continue;
+          }
+          // D[d]-D[d+1]: need d+2 to be R, no D-D-D from right
+          if (next === 'D') {
+            const next2 = d + 2 < numDays ? schedule[n][d + 2] : null;
+            if (next2 !== null && next2 !== 'R') continue;
+            if (prev === 'D') continue;
+          }
+        } else if (prev === 'D' || next === 'D') continue; // consecutive D not allowed
+        setCell(schedule, n, d, 'D', changes);
         return true;
+      } else {
+        const cov = dayCoverage(schedule, d, numNurses);
+        for (const s of shuffle(['M', 'P'])) {
+          if (s === 'M' && cov.M >= maxCovM) continue;
+          if (s === 'P' && cov.P >= maxCovP) continue;
+          if (!transitionOk(prev, s, ctx, schedule, n, d)) continue;
+          if (!transitionOk(s, next, ctx, schedule, n, d + 1)) continue;
+          setCell(schedule, n, d, s, changes);
+          return true;
+        }
       }
     }
   }
@@ -1207,6 +1240,40 @@ function buildLP(ctx, perturbSeed) {
     }
   }
 
+  // --- Hour equity via minimax: minimize (hmax - hmin) of total hours ---
+  // Identify nurses whose hours the MILP can meaningfully control
+  const contVars = [];
+  const controllable = [];
+  for (let n = 0; n < numNurses; n++) {
+    if (nurseProps[n].soloDiurni || nurseProps[n].soloMattine) continue;
+    let hasFree = false;
+    for (let d = 0; d < numDays; d++) {
+      if (isFree(n, d)) { hasFree = true; break; }
+    }
+    if (hasFree) controllable.push(n);
+  }
+  const eqConstraints = [];
+  if (controllable.length >= 2) {
+    contVars.push('hmax', 'hmin');
+    objTerms.push(`${HOUR_EQUITY_MILP_WEIGHT} hmax`);
+    objTerms.push(`-${HOUR_EQUITY_MILP_WEIGHT} hmin`);
+
+    for (const n of controllable) {
+      const hTerms = [];
+      for (let d = 0; d < numDays; d++) {
+        if (!isFree(n, d)) continue;
+        for (let s = 0; s < SHIFTS.length; s++) {
+          if (S_HRS[s] > 0) hTerms.push(`${S_HRS[s]} ${V(n, d, s)}`);
+        }
+      }
+      if (hTerms.length === 0) continue;
+      // totalHrs_n = pinnedHrs[n] + freeHrs_n <= hmax
+      eqConstraints.push(` eqMx${n}: ${hTerms.join(' + ')} - hmax <= ${(-pinnedHrs[n]).toFixed(2)}`);
+      // totalHrs_n = pinnedHrs[n] + freeHrs_n >= hmin
+      eqConstraints.push(` eqMn${n}: hmin - ${hTerms.join(' - ')} <= ${pinnedHrs[n].toFixed(2)}`);
+    }
+  }
+
   lines.push('Minimize');
   if (objTerms.length === 0) objTerms.push('0 ' + binVars[0]);
   // Split long objective across lines
@@ -1216,6 +1283,9 @@ function buildLP(ctx, perturbSeed) {
   }
   lines.push(' obj: ' + objChunks.join('\n + '));
   lines.push('Subject To');
+
+  // --- Hour equity constraints (hmax/hmin bounds) ---
+  for (const c of eqConstraints) lines.push(c);
 
   // --- Assignment: one shift per nurse per day (free cells only) ---
   for (let n = 0; n < numNurses; n++) {
@@ -1423,6 +1493,7 @@ function buildLP(ctx, perturbSeed) {
 
   // --- Bounds & Binary ---
   lines.push('Bounds');
+  for (const cv of contVars) lines.push(` 0 <= ${cv}`);
   lines.push('Binary');
   for (let i = 0; i < binVars.length; i += 20) {
     lines.push(' ' + binVars.slice(i, i + 20).join(' '));
