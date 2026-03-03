@@ -33,13 +33,13 @@ This is a **Nurse Scheduling Problem (NSP)** application. Key shift codes:
 | N    | Notte (Night)       | 12.2  |
 | S    | Smonto (Post-night) | 0     |
 | R    | Riposo (Rest)       | 0     |
-| F    | Ferie (Holiday)     | 7.12  |
-| MA   | Malattia (Sick)     | 7.12  |
-| L104 | Legge 104           | 7.12  |
-| PR   | Permesso Retribuito | 7.12  |
-| MT   | Maternità           | 7.12  |
+| F    | Ferie (Holiday)     | 6.12  |
+| MA   | Malattia (Sick)     | 6.12  |
+| L104 | Legge 104           | 6.12  |
+| PR   | Permesso Retribuito | 6.12  |
+| MT   | Maternità           | 6.12  |
 
-Nurse tags: `solo_mattine`, `no_notti`, `no_diurni`, and absence tags (`ferie`, `malattia`, `104`, `permesso_retribuito`, `maternita`).
+Nurse tags: `solo_mattine`, `solo_diurni`, `solo_notti`, `no_notti`, `no_diurni`, and absence tags (`ferie`, `malattia`, `104`, `permesso_retribuito`, `maternita`).
 
 ## Solver Architecture (`js/solver.js`)
 
