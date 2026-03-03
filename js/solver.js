@@ -687,11 +687,8 @@ function tryChangeMove(schedule, ctx, changes) {
     }
     return false;
   }
-  // solo_notti: can only have N, S, R (but N/S are handled above)
-  if (nurseProps[n].soloNotti) {
-    if (old !== 'R') return false;
-    return false; // R is the only option, no change possible
-  }
+  // solo_notti: can only have N, S, R (N/S changes are already blocked above, so no change possible)
+  if (nurseProps[n].soloNotti) return false;
   const choices = ['M', 'P', 'R'].filter(s => s !== old);
   if (!nurseProps[n].noDiurni && old !== 'D') choices.push('D');
   shuffle(choices);
@@ -1158,7 +1155,8 @@ function buildLP(ctx, perturbSeed) {
     if (nurseProps[n].soloNotti) {
       for (let d = 0; d < numDays; d++) {
         if (isFree(n, d)) {
-          // Ban M, P, D (indices 0, 1, and D which is not in SHIFTS - D counts as M+P coverage)
+          // Ban M, P (indices 0, 1). D is implicitly disallowed since solo_notti
+          // nurses cannot fill M or P coverage requirements.
           lines.push(` snM${n}_${d}: ${V(n,d,0)} <= 0`);
           lines.push(` snP${n}_${d}: ${V(n,d,1)} <= 0`);
         }
