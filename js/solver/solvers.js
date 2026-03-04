@@ -12,8 +12,10 @@
 
 /**
  * Load HiGHS WASM solver. Returns the highs instance or null on failure.
+ * Diagnostics are surfaced via progress() so the user can see what happened.
  */
 let _highsPromise = null;
+let _highsLoadDiag = ''; // diagnostic message from last load attempt
 function loadHiGHS() {
   if (_highsPromise) return _highsPromise;
   console.log('[HiGHS] Starting load...');
@@ -21,32 +23,58 @@ function loadHiGHS() {
   _highsPromise = new Promise(resolve => {
     try {
       importScripts('https://cdn.jsdelivr.net/npm/highs@1.8.0/build/highs.js');
+      console.log(`[HiGHS] importScripts completed in ${Date.now() - t0}ms`);
+
+      // Emscripten MODULARIZE=1 sets the factory on self.Module (default EXPORT_NAME)
       const initHiGHS = self.Module;
-      if (typeof initHiGHS === 'function') {
-        const inst = initHiGHS({
-          locateFile: file => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file,
-        });
-        // initHiGHS might return a promise
-        if (inst && typeof inst.then === 'function') {
-          inst
-            .then(h => {
-              console.log(`[HiGHS] Loaded successfully in ${Date.now() - t0}ms, solve=${typeof h?.solve}`);
-              resolve(h);
-            })
-            .catch(err => {
-              console.error('[HiGHS] Init promise rejected:', err);
-              resolve(null);
-            });
-        } else {
-          console.log(`[HiGHS] Loaded (sync) in ${Date.now() - t0}ms, solve=${typeof inst?.solve}`);
-          resolve(inst);
-        }
-      } else {
-        console.error('[HiGHS] initHiGHS is not a function:', typeof initHiGHS);
+      if (typeof initHiGHS !== 'function') {
+        // Log all globals that look like they could be HiGHS
+        const candidates = Object.keys(self).filter(
+          k => /highs|module|solver/i.test(k) && typeof self[k] === 'function'
+        );
+        const msg = `self.Module is ${typeof initHiGHS}, not a function. Candidate globals: [${candidates.join(', ')}]`;
+        console.error('[HiGHS]', msg);
+        _highsLoadDiag = msg;
         resolve(null);
+        return;
+      }
+
+      const inst = initHiGHS({
+        locateFile: file => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file,
+      });
+
+      if (inst && typeof inst.then === 'function') {
+        inst
+          .then(h => {
+            const elapsed = Date.now() - t0;
+            const hasSolve = h && typeof h.solve === 'function';
+            console.log(`[HiGHS] WASM initialized in ${elapsed}ms, solve=${typeof h?.solve}`);
+            if (!hasSolve) {
+              const keys = h ? Object.keys(h).slice(0, 20).join(', ') : 'null';
+              _highsLoadDiag = `WASM loaded but .solve() missing. Instance keys: [${keys}]`;
+              console.error('[HiGHS]', _highsLoadDiag);
+            } else {
+              _highsLoadDiag = `OK (${elapsed}ms)`;
+            }
+            resolve(h);
+          })
+          .catch(err => {
+            const msg = `WASM init rejected: ${err?.message || err}`;
+            console.error('[HiGHS]', msg);
+            _highsLoadDiag = msg;
+            resolve(null);
+          });
+      } else {
+        const elapsed = Date.now() - t0;
+        const hasSolve = inst && typeof inst.solve === 'function';
+        console.log(`[HiGHS] Loaded (sync) in ${elapsed}ms, solve=${typeof inst?.solve}`);
+        _highsLoadDiag = hasSolve ? `OK sync (${elapsed}ms)` : 'Loaded sync but .solve() missing';
+        resolve(inst);
       }
     } catch (e) {
-      console.error('[HiGHS] Load failed with exception:', e.message || e);
+      const msg = `importScripts failed: ${e.message || e}`;
+      console.error('[HiGHS]', msg);
+      _highsLoadDiag = msg;
       resolve(null);
     }
   });
@@ -294,9 +322,13 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     try {
       highs = await loadHiGHS();
       milpAvailable = highs && typeof highs.solve === 'function';
-      console.log(`[Solver] HiGHS loaded: available=${milpAvailable}`);
+      console.log(`[Solver] HiGHS loaded: available=${milpAvailable}, diag=${_highsLoadDiag}`);
+      if (!milpAvailable) {
+        progress(2, `HiGHS non disponibile: ${_highsLoadDiag}`);
+      }
     } catch (loadErr) {
       console.error('[Solver] HiGHS loading threw exception:', loadErr.message || loadErr);
+      progress(2, `Errore caricamento HiGHS: ${loadErr.message || loadErr}`);
       milpAvailable = false;
     }
   }
@@ -332,7 +364,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
 
       // Try HiGHS MILP
       if (useHiGHS && !solved) {
-        progress(pctBase, `${batchLabel}HiGHS MILP: soluzione ${i + 1}/${numSolutions}…`);
+        progress(pctBase, `${batchLabel}HiGHS MILP: soluzione ${i + 1}/${numSolutions} (max ${milpTimeLimitSec}s)…`);
         try {
           console.log(`[Solver] Trying HiGHS MILP (timeLimit=${milpTimeLimitSec}s)...`);
           const milpStart = Date.now();
@@ -340,6 +372,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
           const milpElapsed = (Date.now() - milpStart) / 1000;
           if (schedule) {
             console.log(`[Solver] HiGHS returned a schedule in ${milpElapsed.toFixed(2)}s, polishing...`);
+            progress(pctBase + 2, `${batchLabel}HiGHS OK in ${milpElapsed.toFixed(0)}s, ottimizzazione locale…`);
             const polishTimeSec = Math.max(1, perSolutionBudgetSec - milpElapsed);
             const polished = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, polishTimeSec);
             const violations = collectViolations(polished, ctx);
@@ -351,11 +384,14 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
             batchSolutions.push({ schedule: polished, violations, stats, score: score.total, solverMethod: 'milp' });
             solved = true;
           } else {
+            const reason = `nessuna soluzione ammissibile in ${milpElapsed.toFixed(0)}s`;
             console.warn(`[Solver] HiGHS returned null (no feasible solution) after ${milpElapsed.toFixed(2)}s`);
+            progress(pctBase, `${batchLabel}HiGHS fallito: ${reason}`);
           }
         } catch (highsErr) {
           console.error('[Solver] HiGHS solve threw exception:', highsErr.message || highsErr);
           if (highsErr.stack) console.error('[Solver]   Stack:', highsErr.stack);
+          progress(pctBase, `${batchLabel}HiGHS errore: ${highsErr.message || highsErr}`);
         }
       }
 
@@ -390,8 +426,9 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
 
       // Greedy + SA fallback
       if (!solved) {
-        const label = useHiGHS || useGLPK ? 'Fallback euristica' : 'Euristica';
-        console.log(`[Solver] Both MILP solvers failed/unavailable, using ${label}`);
+        const attempted = [useHiGHS && 'HiGHS', useGLPK && 'GLPK'].filter(Boolean);
+        const label = attempted.length > 0 ? `Fallback euristica (${attempted.join('+')})` : 'Euristica';
+        console.log(`[Solver] MILP solvers failed/unavailable [${attempted.join(',')}], using fallback`);
         progress(pctBase, `${batchLabel}${label} ${i + 1}/${numSolutions}…`);
         const schedule = construct(ctx);
         const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec);
@@ -406,19 +443,20 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     }
   }
 
-  // Status message
+  // Status message with diagnostic detail
   const availSolvers = [];
   if (useHiGHS) availSolvers.push('HiGHS');
   if (useGLPK) availSolvers.push('GLPK');
   if (availSolvers.length > 0) {
-    progress(5, `Solver disponibili: ${availSolvers.join(', ')}. Generazione soluzioni…`);
+    const milpTime = Math.max(MILP_MIN_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions));
+    progress(5, `Solver: ${availSolvers.join(', ')}. ${numSolutions} soluzioni, ${milpTime}s ciascuna…`);
+  } else if (solverChoice === 'fallback') {
+    progress(5, 'Euristica selezionata manualmente…');
   } else {
-    progress(
-      5,
-      solverChoice === 'fallback'
-        ? 'Euristica selezionata manualmente…'
-        : 'Nessun solver MILP disponibile, euristica classica…'
-    );
+    // Tell the user why no MILP solver is available
+    const reasons = [];
+    if (solverChoice === 'auto' || solverChoice === 'milp') reasons.push(`HiGHS: ${_highsLoadDiag || 'non caricato'}`);
+    progress(5, `Nessun solver MILP disponibile (${reasons.join('; ')}). Uso euristica…`);
   }
 
   if (untilZeroViolations) {
