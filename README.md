@@ -52,23 +52,32 @@ npm run serve         # Local dev server on port 8080
 ## Project Structure
 
 ```
-index.html              Single-page UI: 4-step wizard
+index.html                  Single-page UI: 4-step wizard
 js/
-  app.js                Main application logic: state, rendering, events
-  solver.js             Web Worker: scheduling solver (MILP + heuristic)
+  app.js                    Main application logic: state, rendering, events
+  solver.js                 Web Worker entry point (loads modules via importScripts)
+  solver/
+    constants.js            Shift data, weights, utility functions
+    context.js              Preprocessing: buildContext, getAbsenceShift
+    scoring.js              Constraints, scoring, violations, stats
+    construct.js            Greedy construction heuristic (8 phases)
+    local-search.js         Simulated annealing + move functions
+    lp-model.js             MILP LP formulation, solution parsers
+    solvers.js              HiGHS/GLPK loaders, solve orchestration
 css/
-  custom.css            Styles with CSS variables for light/dark themes
+  custom.css                Styles with CSS variables for light/dark themes
 test/
-  solver.test.js        Unit tests for solver pure functions
+  solver.test.js            Unit tests for solver pure functions
 .github/
   workflows/
-    ci.yml              CI pipeline: lint + format + test
-    deploy.yml          GitHub Pages deployment
-  copilot-instructions.md  AI assistant guidelines
-CLAUDE.md               Agent development guide
+    ci.yml                  CI pipeline: lint + format + test
+    deploy.yml              GitHub Pages deployment
+  copilot-instructions.md   AI assistant guidelines
+CLAUDE.md                   Agent development guide
 ```
 
 No framework, no bundler, no build step. Runtime dependencies load from CDN with offline fallbacks.
+The solver modules share scope via `importScripts()` — no module system needed.
 
 ## Shift Codes
 

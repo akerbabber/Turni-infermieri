@@ -1,10 +1,13 @@
 /**
- * @file solver.test.js — Unit tests for solver.js pure functions
+ * @file solver.test.js — Unit tests for solver pure functions
  *
  * Uses Node.js built-in test runner (node:test) and assertion module (node:assert/strict).
- * Since solver.js runs as a Web Worker and does not export its functions, we load it
- * into a sandboxed VM context that stubs the Worker globals and exposes all top-level
- * bindings for testing.
+ * Since the solver modules run as Web Worker scripts and do not export their functions,
+ * we load them into a sandboxed VM context that stubs the Worker globals and exposes
+ * all top-level bindings for testing.
+ *
+ * The modules are loaded in dependency order, matching the importScripts() chain
+ * in the main solver.js entry point.
  */
 
 'use strict';
@@ -16,14 +19,20 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 // ---------------------------------------------------------------------------
-// Helper: load solver.js into a sandboxed context
+// Helper: load solver modules into a sandboxed context
 // ---------------------------------------------------------------------------
 
 function loadSolver() {
-  const code = fs.readFileSync(
-    path.join(__dirname, '..', 'js', 'solver.js'),
-    'utf8',
-  );
+  // Module files in dependency order (same as importScripts in solver.js)
+  const moduleFiles = [
+    'solver/constants.js',
+    'solver/context.js',
+    'solver/scoring.js',
+    'solver/construct.js',
+    'solver/local-search.js',
+    'solver/lp-model.js',
+    'solver/solvers.js',
+  ];
 
   const context = {
     self: {},
@@ -49,7 +58,7 @@ function loadSolver() {
     parseFloat,
     isNaN,
     isFinite,
-    importScripts: () => {},   // stub — not used in pure functions
+    importScripts: () => {},   // stub — external CDN scripts not loaded in tests
     postMessage: () => {},     // stub
     setTimeout,
     clearTimeout,
@@ -60,7 +69,16 @@ function loadSolver() {
   };
 
   vm.createContext(context);
-  vm.runInContext(code, context);
+
+  // Define progress() stub before loading modules (solver.js defines it before importScripts)
+  vm.runInContext('function progress() {}', context);
+
+  // Load each module file into the same shared context
+  const jsDir = path.join(__dirname, '..', 'js');
+  for (const file of moduleFiles) {
+    const code = fs.readFileSync(path.join(jsDir, file), 'utf8');
+    vm.runInContext(code, context, { filename: file });
+  }
 
   // const/let declarations are script-scoped in the VM and not exposed on the
   // context object. Inject accessor functions so tests can reach them.

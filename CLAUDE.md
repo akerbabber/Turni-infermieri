@@ -38,21 +38,29 @@ npm run validate       # Run lint + format check + tests (all-in-one)
 
 ```
 /
-├── index.html          # Single-page app: 4-step wizard UI (739 lines)
+├── index.html              # Single-page app: 4-step wizard UI (739 lines)
 ├── js/
-│   ├── app.js          # Main thread: state, UI rendering, event handling (1309 lines)
-│   └── solver.js       # Web Worker: MILP solver + heuristic fallback (2399 lines)
+│   ├── app.js              # Main thread: state, UI rendering, event handling (~1300 lines)
+│   ├── solver.js           # Web Worker entry point: loads modules via importScripts (~80 lines)
+│   └── solver/             # Modular solver components (loaded in dependency order)
+│       ├── constants.js    # Shift constants, weights, utilities (shuffle, dayOfWeek, etc.)
+│       ├── context.js      # buildContext(), getAbsenceShift() — preprocessing
+│       ├── scoring.js      # transitionOk, dayCoverage, computeScore, collectViolations, computeStats
+│       ├── construct.js    # Greedy construction heuristic (8 phases)
+│       ├── local-search.js # Simulated annealing + 4 move types (swap, change, equity, rest)
+│       ├── lp-model.js     # MILP LP formulation (buildLP), solution parsers, GLPK conversion
+│       └── solvers.js      # HiGHS/GLPK loaders, solve orchestration, fallback heuristic
 ├── css/
-│   └── custom.css      # Styles, dark mode vars, print styles (498 lines)
-├── test/               # Node.js test files (node --test)
-├── package.json        # Dev scripts only (lint, test, format)
-├── eslint.config.js    # ESLint 9 flat config
-├── .prettierrc.json    # Prettier config (2-space, single quotes, semicolons)
-├── .editorconfig       # Editor settings (2-space indent, LF, UTF-8)
+│   └── custom.css          # Styles, dark mode vars, print styles (~500 lines)
+├── test/                   # Node.js test files (node --test)
+├── package.json            # Dev scripts only (lint, test, format)
+├── eslint.config.js        # ESLint 9 flat config with solver shared globals
+├── .prettierrc.json        # Prettier config (2-space, single quotes, semicolons)
+├── .editorconfig           # Editor settings (2-space indent, LF, UTF-8)
 └── .github/
     └── workflows/
-        ├── ci.yml      # Lint + format check + test on PRs
-        └── deploy.yml  # Deploy to GitHub Pages on push to main
+        ├── ci.yml          # Lint + format check + test on PRs
+        └── deploy.yml      # Deploy to GitHub Pages on push to main
 ```
 
 ### How components relate
@@ -64,6 +72,9 @@ index.html
         ├── Renders UI via innerHTML + template literals
         ├── Persists to localStorage
         └── Spawns js/solver.js as Web Worker
+              ├── solver.js defines progress() then importScripts() loads:
+              │     constants.js → context.js → scoring.js → construct.js
+              │     → local-search.js → lp-model.js → solvers.js
               ├── Receives: {type:'solve', config, numSolutions, timeBudget, solverChoice}
               ├── Sends:    {type:'progress', percent, message}
               ├── Sends:    {type:'result', schedule, violations, stats, solutions, solverMethod}
@@ -186,27 +197,39 @@ Keeps the zero-dependency promise. `custom.css` provides fallback classes (`.hid
 ### Adding a new shift type
 
 1. **`js/app.js`**: Add to `SHIFT_COLORS`, `SHIFT_LABELS`, `SHIFT_HOURS`
-2. **`js/solver.js`**: Add to `SHIFT_HOURS` (duplicated for Worker context), update `ABSENCE_TAG_TO_SHIFT` if it maps from an absence tag, add to `SHIFT_START`/`SHIFT_END` if it has specific times
+2. **`js/solver/constants.js`**: Add to `SHIFT_HOURS` (duplicated for Worker context), update `ABSENCE_TAG_TO_SHIFT` if it maps from an absence tag, add to `SHIFT_START`/`SHIFT_END` if it has specific times
 3. **`css/custom.css`**: Add `.shift-XX` color class and a print-friendly version in `@media print`
 4. **`index.html`**: Add the shift option to any dropdown/selector that lists shifts (Step 4 inline edit dropdown)
 
 ### Adding a new constraint
 
 1. **`js/app.js`**: Add the rule to `DEFAULT_RULES` with a sensible default. Add UI controls in Step 2 (Regole) section of `index.html`, and wire them in `renderStep2()`
-2. **`js/solver.js`**:
-   - Add to `buildContext()` to extract the rule from config
-   - Implement the constraint in `computeScore()` (hard penalty for hard constraints, soft penalty for soft)
-   - Add to `construct()` if it affects initial schedule building
-   - Add to `buildLP()` if the MILP formulation should enforce it
-   - Add to `collectViolations()` so violations appear in the UI
-   - Add to local search moves if relevant
+2. **Solver modules** (under `js/solver/`):
+   - `context.js`: Add to `buildContext()` to extract the rule from config
+   - `scoring.js`: Implement in `computeScore()` (hard/soft penalty) and `collectViolations()`
+   - `construct.js`: Add to `construct()` if it affects initial schedule building
+   - `lp-model.js`: Add to `buildLP()` if the MILP formulation should enforce it
+   - `local-search.js`: Add to move functions if relevant
 
 ### Modifying the solver
+
+The solver is split into 7 modules under `js/solver/` loaded via `importScripts()`:
+
+| Module | Responsibility |
+|--------|---------------|
+| `constants.js` | Shift data, weights, utility functions |
+| `context.js` | `buildContext()`, `getAbsenceShift()` |
+| `scoring.js` | Constraints, scoring, violations, stats |
+| `construct.js` | Greedy construction heuristic |
+| `local-search.js` | Simulated annealing + move functions |
+| `lp-model.js` | MILP LP generation, solution parsing, GLPK conversion |
+| `solvers.js` | HiGHS/GLPK loaders, solve orchestration, fallback |
 
 - The solver has three entry points: `solveOneMILP()` (HiGHS), `solveOneGLPK()` (GLPK.js), `solveFallback()` (greedy + SA)
 - All strategies share: `buildContext()`, `computeScore()`, `collectViolations()`, `computeStats()`, `localSearch()`
 - The MILP formulation is in `buildLP()` which generates CPLEX LP format strings
 - After any MILP solution, `localSearch()` polishes the result
+- All modules share scope via `importScripts()` — functions from any module are available to all
 - Test changes by generating schedules and checking violation counts in the UI
 
 ### Modifying the UI
@@ -251,7 +274,7 @@ describe('myFeature', () => {
   });
 });
 ```
-3. To test solver functions, extract them or `require` the relevant module. Since `solver.js` is designed for Web Worker context, you may need to extract pure functions into a testable form.
+3. To test solver functions, the test harness loads all `js/solver/*.js` module files into a shared VM context (in dependency order), simulating the `importScripts()` behavior. See `test/solver.test.js` for the pattern.
 
 ---
 
@@ -320,7 +343,7 @@ Scores combine hard and soft penalties: `total = hard * 1000 + soft`. A score wi
 
 ## Gotchas
 
-1. **`solver.js` runs in a Web Worker** -- no `document`, no `window`, no `localStorage`. Only `self`, `postMessage`, `importScripts`, and standard JS APIs are available.
+1. **`solver.js` and `js/solver/*.js` run in a Web Worker** -- no `document`, no `window`, no `localStorage`. Only `self`, `postMessage`, `importScripts`, and standard JS APIs are available. All solver modules share scope via `importScripts()` — functions defined in any module are globally accessible to all others.
 
 2. **D shifts count toward M+P coverage** -- When computing coverage, a D shift increments M count, P count, AND D count. Forgetting this leads to incorrect coverage calculations.
 
@@ -330,7 +353,7 @@ Scores combine hard and soft penalties: `total = hard * 1000 + soft`. A score wi
 
 5. **N-S-R-R is a 4-day mandatory pattern** -- After a night shift, the sequence must be N -> S -> R -> R. The second R is enforced for most nurses (except those with `no_diurni` tag who only need N -> S -> R).
 
-6. **`SHIFT_HOURS` is duplicated** -- Both `app.js` and `solver.js` define their own `SHIFT_HOURS` constant because the Worker cannot share variables with the main thread. If you change shift hours, update both files.
+6. **`SHIFT_HOURS` is duplicated** -- Both `app.js` and `js/solver/constants.js` define their own `SHIFT_HOURS` constant because the Worker cannot share variables with the main thread. If you change shift hours, update both files.
 
 7. **The solver generates multiple solutions** -- By default `numSolutions: 3`. Each uses a different random seed for MILP objective perturbation to produce diverse schedules. The UI lets users pick between them.
 
