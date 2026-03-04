@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solver Benchmark — Turni Infermieri</title>
+    <style>
+      :root {
+        --bg: #f8f9fa;
+        --card-bg: #ffffff;
+        --text: #1a1a2e;
+        --muted: #6c757d;
+        --border: #dee2e6;
+        --accent: #2563eb;
+        --green: #16a34a;
+        --red: #dc2626;
+        --amber: #d97706;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        padding: 2rem;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+      .subtitle {
+        color: var(--muted);
+        margin-bottom: 2rem;
+      }
+      .controls {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: end;
+      }
+      .control-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .control-group label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .control-group select,
+      .control-group input {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-size: 0.9rem;
+      }
+      button {
+        padding: 0.5rem 1.5rem;
+        background: var(--accent);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .results {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      .solver-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem;
+      }
+      .solver-card h3 {
+        font-size: 1rem;
+        margin-bottom: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .badge {
+        font-size: 0.65rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        font-weight: 600;
+      }
+      .badge-best {
+        background: #dcfce7;
+        color: var(--green);
+      }
+      .badge-loading {
+        background: #fef3c7;
+        color: var(--amber);
+      }
+      .badge-failed {
+        background: #fecaca;
+        color: var(--red);
+      }
+      .badge-done {
+        background: #e0e7ff;
+        color: var(--accent);
+      }
+      .metric-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }
+      .metric {
+        background: var(--bg);
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+      }
+      .metric .label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .metric .value {
+        font-size: 1.1rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .metric .value.good {
+        color: var(--green);
+      }
+      .metric .value.bad {
+        color: var(--red);
+      }
+      .progress-bar {
+        width: 100%;
+        height: 6px;
+        background: var(--border);
+        border-radius: 3px;
+        margin: 0.75rem 0;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 3px;
+        transition: width 0.3s;
+        width: 0%;
+      }
+      .status {
+        font-size: 0.8rem;
+        color: var(--muted);
+        min-height: 1.2rem;
+      }
+      .log-area {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+      }
+      .log-area h3 {
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+      }
+      #log {
+        font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.75rem;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .comparison-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1.5rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .comparison-table th,
+      .comparison-table td {
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+      }
+      .comparison-table th {
+        background: var(--bg);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+      .winner {
+        background: #f0fdf4;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Solver Benchmark</h1>
+    <p class="subtitle">Compare HiGHS MILP vs GLPK vs Heuristic fallback — same config, head-to-head</p>
+
+    <div class="controls">
+      <div class="control-group">
+        <label>Scenario</label>
+        <select id="scenario">
+          <option value="small">Small (8 nurses, no D)</option>
+          <option value="medium">Medium (20 nurses, with D)</option>
+          <option value="real" selected>Real-world (37 nurses, full)</option>
+          <option value="relaxed">Real-world + relaxed rules (37)</option>
+          <option value="stress">Stress test (50 nurses)</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Time budget (s)</label>
+        <input type="number" id="timeBudget" value="20" min="5" max="120" step="5" />
+      </div>
+      <div class="control-group">
+        <label>Solutions per solver</label>
+        <input type="number" id="numSolutions" value="1" min="1" max="5" step="1" />
+      </div>
+      <button id="runBtn" onclick="runBenchmark()">Run Benchmark</button>
+      <button id="stopBtn" onclick="stopBenchmark()" disabled style="background: var(--red)">Stop</button>
+    </div>
+
+    <div class="results" id="results">
+      <div class="solver-card" id="card-highs">
+        <h3>HiGHS MILP <span class="badge" id="badge-highs">Waiting</span></h3>
+        <div class="progress-bar"><div class="progress-fill" id="progress-highs"></div></div>
+        <div class="status" id="status-highs">—</div>
+        <div class="metric-grid" id="metrics-highs">
+          <div class="metric">
+            <div class="label">Score</div>
+            <div class="value" id="score-highs">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Time</div>
+            <div class="value" id="time-highs">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Hard</div>
+            <div class="value" id="hard-highs">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Soft</div>
+            <div class="value" id="soft-highs">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Violations</div>
+            <div class="value" id="viol-highs">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Method</div>
+            <div class="value" id="method-highs">—</div>
+          </div>
+        </div>
+      </div>
+      <div class="solver-card" id="card-glpk">
+        <h3>GLPK.js <span class="badge" id="badge-glpk">Waiting</span></h3>
+        <div class="progress-bar"><div class="progress-fill" id="progress-glpk"></div></div>
+        <div class="status" id="status-glpk">—</div>
+        <div class="metric-grid" id="metrics-glpk">
+          <div class="metric">
+            <div class="label">Score</div>
+            <div class="value" id="score-glpk">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Time</div>
+            <div class="value" id="time-glpk">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Hard</div>
+            <div class="value" id="hard-glpk">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Soft</div>
+            <div class="value" id="soft-glpk">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Violations</div>
+            <div class="value" id="viol-glpk">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Method</div>
+            <div class="value" id="method-glpk">—</div>
+          </div>
+        </div>
+      </div>
+      <div class="solver-card" id="card-fallback">
+        <h3>Heuristic <span class="badge" id="badge-fallback">Waiting</span></h3>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fallback"></div></div>
+        <div class="status" id="status-fallback">—</div>
+        <div class="metric-grid" id="metrics-fallback">
+          <div class="metric">
+            <div class="label">Score</div>
+            <div class="value" id="score-fallback">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Time</div>
+            <div class="value" id="time-fallback">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Hard</div>
+            <div class="value" id="hard-fallback">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Soft</div>
+            <div class="value" id="soft-fallback">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Violations</div>
+            <div class="value" id="viol-fallback">—</div>
+          </div>
+          <div class="metric">
+            <div class="label">Method</div>
+            <div class="value" id="method-fallback">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="comparison-container"></div>
+
+    <div class="log-area">
+      <h3>Log</h3>
+      <div id="log"></div>
+    </div>
+
+    <script>
+      'use strict';
+
+      // ---------------------------------------------------------------------------
+      // Scenario configs
+      // ---------------------------------------------------------------------------
+      function makeNurses(n, overrides) {
+        const nurses = [];
+        for (let i = 0; i < n; i++) {
+          nurses.push({
+            name: 'Infermiere ' + (i + 1),
+            tags: [],
+            absencePeriods: {},
+            ...((overrides && overrides[i]) || {}),
+          });
+        }
+        return nurses;
+      }
+
+      const SCENARIOS = {
+        small: {
+          year: 2026,
+          month: 2,
+          nurses: makeNurses(8),
+          rules: {
+            minCoverageM: 2,
+            maxCoverageM: 3,
+            minCoverageP: 2,
+            maxCoverageP: 3,
+            minCoverageD: 0,
+            maxCoverageD: 0,
+            minCoverageN: 1,
+            maxCoverageN: 2,
+            targetNights: 3,
+            maxNights: 5,
+            minRPerWeek: 1,
+            preferDiurni: false,
+            coppiaTurni: null,
+            consente2DiurniConsecutivi: false,
+            consentePomeriggioDiurno: false,
+            minGap11h: false,
+          },
+        },
+        medium: {
+          year: 2026,
+          month: 2,
+          nurses: makeNurses(20),
+          rules: {
+            minCoverageM: 3,
+            maxCoverageM: 5,
+            minCoverageP: 3,
+            maxCoverageP: 5,
+            minCoverageD: 1,
+            maxCoverageD: 2,
+            minCoverageN: 2,
+            maxCoverageN: 3,
+            targetNights: 3,
+            maxNights: 5,
+            minRPerWeek: 2,
+            preferDiurni: true,
+            coppiaTurni: null,
+            consente2DiurniConsecutivi: false,
+            consentePomeriggioDiurno: false,
+            minGap11h: false,
+          },
+        },
+        real: {
+          year: 2026,
+          month: 2,
+          nurses: makeNurses(37, {
+            0: { tags: ['solo_mattine'] },
+            1: { tags: ['solo_notti'] },
+            2: { tags: ['no_notti'] },
+            3: { tags: ['diurni_e_notturni'] },
+            4: { tags: ['ferie'], absencePeriods: { ferie: { start: '2026-03-10', end: '2026-03-20' } } },
+            5: { tags: ['malattia'], absencePeriods: { malattia: { start: '2026-03-01', end: '2026-03-07' } } },
+          }),
+          rules: {
+            minCoverageM: 4,
+            maxCoverageM: 6,
+            minCoverageP: 4,
+            maxCoverageP: 6,
+            minCoverageD: 1,
+            maxCoverageD: 3,
+            minCoverageN: 2,
+            maxCoverageN: 3,
+            targetNights: 3,
+            maxNights: 5,
+            minRPerWeek: 2,
+            preferDiurni: true,
+            coppiaTurni: null,
+            consente2DiurniConsecutivi: false,
+            consentePomeriggioDiurno: false,
+            minGap11h: false,
+          },
+        },
+        relaxed: {
+          year: 2026,
+          month: 2,
+          nurses: makeNurses(37, {
+            0: { tags: ['solo_mattine'] },
+            1: { tags: ['solo_notti'] },
+            2: { tags: ['no_notti'] },
+            3: { tags: ['diurni_e_notturni'] },
+            4: { tags: ['no_diurni'] },
+          }),
+          rules: {
+            minCoverageM: 4,
+            maxCoverageM: 6,
+            minCoverageP: 4,
+            maxCoverageP: 6,
+            minCoverageD: 1,
+            maxCoverageD: 3,
+            minCoverageN: 2,
+            maxCoverageN: 3,
+            targetNights: 3,
+            maxNights: 5,
+            minRPerWeek: 2,
+            preferDiurni: true,
+            coppiaTurni: null,
+            consente2DiurniConsecutivi: true,
+            consentePomeriggioDiurno: true,
+            minGap11h: false,
+          },
+        },
+        stress: {
+          year: 2026,
+          month: 0,
+          nurses: makeNurses(50),
+          rules: {
+            minCoverageM: 6,
+            maxCoverageM: 8,
+            minCoverageP: 6,
+            maxCoverageP: 8,
+            minCoverageD: 2,
+            maxCoverageD: 4,
+            minCoverageN: 3,
+            maxCoverageN: 4,
+            targetNights: 3,
+            maxNights: 5,
+            minRPerWeek: 2,
+            preferDiurni: true,
+            coppiaTurni: null,
+            consente2DiurniConsecutivi: false,
+            consentePomeriggioDiurno: false,
+            minGap11h: false,
+          },
+        },
+      };
+
+      // ---------------------------------------------------------------------------
+      // State
+      // ---------------------------------------------------------------------------
+      let workers = {};
+      let startTimes = {};
+      let running = false;
+      let completedCount = 0;
+
+      const SOLVER_IDS = ['highs', 'glpk', 'fallback'];
+      const SOLVER_CHOICES = { highs: 'milp', glpk: 'glpk', fallback: 'fallback' };
+
+      // ---------------------------------------------------------------------------
+      // Logging
+      // ---------------------------------------------------------------------------
+      function log(msg) {
+        const el = document.getElementById('log');
+        const ts = new Date().toISOString().slice(11, 23);
+        el.textContent += `[${ts}] ${msg}\n`;
+        el.scrollTop = el.scrollHeight;
+      }
+
+      // ---------------------------------------------------------------------------
+      // UI helpers
+      // ---------------------------------------------------------------------------
+      function setBadge(id, text, cls) {
+        const el = document.getElementById('badge-' + id);
+        el.textContent = text;
+        el.className = 'badge ' + cls;
+      }
+
+      function setProgress(id, pct) {
+        document.getElementById('progress-' + id).style.width = pct + '%';
+      }
+
+      function setStatus(id, text) {
+        document.getElementById('status-' + id).textContent = text;
+      }
+
+      function setMetric(id, field, value, cls) {
+        const el = document.getElementById(field + '-' + id);
+        el.textContent = value;
+        el.className = 'value' + (cls ? ' ' + cls : '');
+      }
+
+      // ---------------------------------------------------------------------------
+      // Run one solver in a dedicated worker
+      // ---------------------------------------------------------------------------
+      function runSolver(solverId, config, numSolutions, timeBudget) {
+        return new Promise(resolve => {
+          const solverChoice = SOLVER_CHOICES[solverId];
+          setBadge(solverId, 'Loading...', 'badge-loading');
+          setStatus(solverId, 'Loading solver...');
+          setProgress(solverId, 0);
+
+          const worker = new Worker('js/solver.js');
+          workers[solverId] = worker;
+          startTimes[solverId] = Date.now();
+
+          worker.onmessage = function (e) {
+            const data = e.data;
+            if (data.type === 'progress') {
+              setProgress(solverId, data.percent);
+              setStatus(solverId, data.message);
+            } else if (data.type === 'result') {
+              const elapsed = ((Date.now() - startTimes[solverId]) / 1000).toFixed(2);
+              const solutions = data.solutions || [];
+              const best = solutions[0];
+
+              if (best) {
+                setMetric(solverId, 'score', best.score);
+                setMetric(solverId, 'time', elapsed + 's');
+                setMetric(
+                  solverId,
+                  'hard',
+                  best.violations.filter(v => v.type === 'hard' || !v.soft).length,
+                  best.violations.length === 0 ? 'good' : ''
+                );
+                setMetric(solverId, 'soft', best.score % 1000);
+                setMetric(
+                  solverId,
+                  'viol',
+                  best.violations.length,
+                  best.violations.length === 0 ? 'good' : best.violations.length > 5 ? 'bad' : ''
+                );
+                setMetric(solverId, 'method', best.solverMethod || solverChoice);
+                setBadge(solverId, 'Done', 'badge-done');
+                setProgress(solverId, 100);
+                setStatus(solverId, `Completed in ${elapsed}s`);
+                log(
+                  `${solverId.toUpperCase()}: score=${best.score}, violations=${best.violations.length}, method=${best.solverMethod}, time=${elapsed}s`
+                );
+                resolve({
+                  solverId,
+                  score: best.score,
+                  violations: best.violations.length,
+                  elapsed: parseFloat(elapsed),
+                  method: best.solverMethod,
+                  stats: best.stats,
+                });
+              } else {
+                setBadge(solverId, 'No result', 'badge-failed');
+                setStatus(solverId, 'No solution produced');
+                log(`${solverId.toUpperCase()}: No solution produced after ${elapsed}s`);
+                resolve({ solverId, score: Infinity, violations: -1, elapsed: parseFloat(elapsed), method: 'none' });
+              }
+              worker.terminate();
+            } else if (data.type === 'error') {
+              const elapsed = ((Date.now() - startTimes[solverId]) / 1000).toFixed(2);
+              setBadge(solverId, 'Error', 'badge-failed');
+              setStatus(solverId, data.message);
+              log(`${solverId.toUpperCase()} ERROR: ${data.message}`);
+              resolve({ solverId, score: Infinity, violations: -1, elapsed: parseFloat(elapsed), method: 'error' });
+              worker.terminate();
+            }
+          };
+
+          worker.onerror = function (err) {
+            const elapsed = ((Date.now() - startTimes[solverId]) / 1000).toFixed(2);
+            setBadge(solverId, 'Error', 'badge-failed');
+            setStatus(solverId, err.message);
+            log(`${solverId.toUpperCase()} WORKER ERROR: ${err.message}`);
+            resolve({ solverId, score: Infinity, violations: -1, elapsed: parseFloat(elapsed), method: 'error' });
+          };
+
+          log(
+            `Starting ${solverId.toUpperCase()} (choice=${solverChoice}, budget=${timeBudget}s, solutions=${numSolutions})`
+          );
+          worker.postMessage({
+            type: 'solve',
+            config,
+            numSolutions,
+            timeBudget,
+            solverChoice,
+          });
+        });
+      }
+
+      // ---------------------------------------------------------------------------
+      // Comparison table
+      // ---------------------------------------------------------------------------
+      function showComparison(results) {
+        const valid = results.filter(r => r.score < Infinity);
+        if (valid.length === 0) {
+          document.getElementById('comparison-container').innerHTML = '';
+          return;
+        }
+
+        const bestScore = Math.min(...valid.map(r => r.score));
+        const bestViol = Math.min(...valid.filter(r => r.violations >= 0).map(r => r.violations));
+        const bestTime = Math.min(...valid.map(r => r.elapsed));
+
+        let html = '<table class="comparison-table"><thead><tr>';
+        html += '<th>Metric</th>';
+        for (const r of results) {
+          html += `<th>${r.solverId.toUpperCase()}</th>`;
+        }
+        html += '</tr></thead><tbody>';
+
+        const rows = [
+          { label: 'Score (lower=better)', key: 'score', best: bestScore },
+          { label: 'Violations', key: 'violations', best: bestViol },
+          { label: 'Time (s)', key: 'elapsed', best: bestTime },
+          { label: 'Method used', key: 'method', best: null },
+        ];
+
+        for (const row of rows) {
+          html += '<tr>';
+          html += `<td><strong>${row.label}</strong></td>`;
+          for (const r of results) {
+            const val = r[row.key];
+            const isWinner = row.best !== null && val === row.best && val < Infinity;
+            html += `<td class="${isWinner ? 'winner' : ''}">${val === Infinity ? '—' : val}</td>`;
+          }
+          html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        document.getElementById('comparison-container').innerHTML = html;
+
+        // Mark overall best
+        const winner = valid.reduce((a, b) => (a.score < b.score ? a : b));
+        setBadge(winner.solverId, 'Best', 'badge-best');
+      }
+
+      // ---------------------------------------------------------------------------
+      // Main benchmark
+      // ---------------------------------------------------------------------------
+      async function runBenchmark() {
+        if (running) return;
+        running = true;
+        completedCount = 0;
+
+        document.getElementById('runBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+        document.getElementById('log').textContent = '';
+        document.getElementById('comparison-container').innerHTML = '';
+
+        // Reset cards
+        for (const id of SOLVER_IDS) {
+          setBadge(id, 'Queued', '');
+          setProgress(id, 0);
+          setStatus(id, 'Waiting...');
+          setMetric(id, 'score', '—', '');
+          setMetric(id, 'time', '—', '');
+          setMetric(id, 'hard', '—', '');
+          setMetric(id, 'soft', '—', '');
+          setMetric(id, 'viol', '—', '');
+          setMetric(id, 'method', '—', '');
+        }
+
+        const scenarioKey = document.getElementById('scenario').value;
+        const timeBudget = parseInt(document.getElementById('timeBudget').value) || 20;
+        const numSolutions = parseInt(document.getElementById('numSolutions').value) || 1;
+        const config = SCENARIOS[scenarioKey];
+
+        log(
+          `Benchmark: scenario=${scenarioKey}, nurses=${config.nurses.length}, budget=${timeBudget}s, solutions=${numSolutions}`
+        );
+
+        // Run all three in parallel
+        const promises = SOLVER_IDS.map(id => runSolver(id, config, numSolutions, timeBudget));
+        const results = await Promise.all(promises);
+
+        showComparison(results);
+
+        running = false;
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+        log('Benchmark complete.');
+      }
+
+      function stopBenchmark() {
+        for (const id of SOLVER_IDS) {
+          if (workers[id]) {
+            workers[id].terminate();
+            workers[id] = null;
+            setBadge(id, 'Stopped', 'badge-failed');
+            setStatus(id, 'Terminated by user');
+          }
+        }
+        running = false;
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+        log('Benchmark stopped by user.');
+      }
+    </script>
+  </body>
+</html>
