@@ -10,8 +10,8 @@
 function seededRandom(seed) {
   let s = seed | 0;
   return () => {
-    s = (s * 1664525 + 1013904223) & 0x7FFFFFFF;
-    return s / 0x7FFFFFFF;
+    s = (s * 1664525 + 1013904223) & 0x7fffffff;
+    return s / 0x7fffffff;
   };
 }
 
@@ -22,17 +22,35 @@ function seededRandom(seed) {
  * @returns {string} LP format problem
  */
 function buildLP(ctx, perturbSeed) {
-  const { numDays, numNurses, pinned, nurseProps,
-          minCovM, maxCovM, minCovP, maxCovP, minCovD, maxCovD, minCovN, maxCovN,
-          targetNights, maxNights, minRPerWeek, weekDaysList, weekOf,
-          forbidden, consente2D, coppiaTurni } = ctx;
+  const {
+    numDays,
+    numNurses,
+    pinned,
+    nurseProps,
+    minCovM,
+    maxCovM,
+    minCovP,
+    maxCovP,
+    minCovD,
+    maxCovD,
+    minCovN,
+    maxCovN,
+    targetNights,
+    maxNights,
+    minRPerWeek,
+    weekDaysList,
+    weekOf,
+    forbidden,
+    consente2D,
+    coppiaTurni,
+  } = ctx;
 
   // Shift indices: M=0, P=1, N=2, S=3, R=4, D=5
   const SHIFTS = ['M', 'P', 'N', 'S', 'R', 'D'];
-  const S_HRS  = [6.2, 6.2, 12.2, 0, 0, 12.2];
+  const S_HRS = [6.2, 6.2, 12.2, 0, 0, 12.2];
   const V = (n, d, s) => `x${n}_${d}_${s}`;
 
-  const lines   = [];
+  const lines = [];
   const binVars = [];
 
   // Determine which cells are free (not pinned)
@@ -80,7 +98,7 @@ function buildLP(ctx, perturbSeed) {
         binVars.push(vn);
         // Add small random perturbation to objective for diversity
         if (rng) {
-          const w = (rng() * 0.04 - 0.02);
+          const w = rng() * 0.04 - 0.02;
           if (Math.abs(w) > 0.001) objTerms.push(`${w.toFixed(5)} ${vn}`);
         }
       }
@@ -103,7 +121,10 @@ function buildLP(ctx, perturbSeed) {
     if (nurseProps[n].soloDiurni || nurseProps[n].soloMattine) continue;
     let hasFree = false;
     for (let d = 0; d < numDays; d++) {
-      if (isFree(n, d)) { hasFree = true; break; }
+      if (isFree(n, d)) {
+        hasFree = true;
+        break;
+      }
     }
     if (hasFree) controllable.push(n);
   }
@@ -135,7 +156,10 @@ function buildLP(ctx, perturbSeed) {
     if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].noNotti) continue;
     let hasFreeN = false;
     for (let d = 0; d < numDays; d++) {
-      if (isFree(n, d)) { hasFreeN = true; break; }
+      if (isFree(n, d)) {
+        hasFreeN = true;
+        break;
+      }
     }
     if (hasFreeN) nightElig.push(n);
   }
@@ -150,7 +174,7 @@ function buildLP(ctx, perturbSeed) {
         if (isFree(n, d)) nTerms.push(V(n, d, 2)); // N shift index
       }
       if (nTerms.length === 0) continue;
-      eqConstraints.push(` neqMx${n}: ${nTerms.join(' + ')} - nmax <= ${(-pinnedNights[n])}`);
+      eqConstraints.push(` neqMx${n}: ${nTerms.join(' + ')} - nmax <= ${-pinnedNights[n]}`);
       eqConstraints.push(` neqMn${n}: nmin - ${nTerms.join(' - ')} <= ${pinnedNights[n]}`);
     }
   }
@@ -167,7 +191,10 @@ function buildLP(ctx, perturbSeed) {
     if (nurseProps[n].soloMattine || nurseProps[n].soloNotti || nurseProps[n].noDiurni) continue;
     let hasFreeDay = false;
     for (let d = 0; d < numDays; d++) {
-      if (isFree(n, d)) { hasFreeDay = true; break; }
+      if (isFree(n, d)) {
+        hasFreeDay = true;
+        break;
+      }
     }
     if (hasFreeDay) diurniElig.push(n);
   }
@@ -182,7 +209,7 @@ function buildLP(ctx, perturbSeed) {
         if (isFree(n, d)) dTerms.push(V(n, d, 5)); // D shift index
       }
       if (dTerms.length === 0) continue;
-      eqConstraints.push(` deqMx${n}: ${dTerms.join(' + ')} - dmax <= ${(-pinnedDiurni[n])}`);
+      eqConstraints.push(` deqMx${n}: ${dTerms.join(' + ')} - dmax <= ${-pinnedDiurni[n]}`);
       eqConstraints.push(` deqMn${n}: dmin - ${dTerms.join(' - ')} <= ${pinnedDiurni[n]}`);
     }
   }
@@ -190,9 +217,17 @@ function buildLP(ctx, perturbSeed) {
   // --- M/P balance for no_diurni nurses: penalize |M_count - P_count| ---
   for (let n = 0; n < numNurses; n++) {
     if (!nurseProps[n].noDiurni) continue;
-    if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti || nurseProps[n].diurniENotturni) continue;
-    const mTerms = [], pTerms = [];
-    let pinnedM = 0, pinnedP = 0;
+    if (
+      nurseProps[n].soloMattine ||
+      nurseProps[n].soloDiurni ||
+      nurseProps[n].soloNotti ||
+      nurseProps[n].diurniENotturni
+    )
+      continue;
+    const mTerms = [],
+      pTerms = [];
+    let pinnedM = 0,
+      pinnedP = 0;
     for (let d = 0; d < numDays; d++) {
       if (isFree(n, d)) {
         mTerms.push(V(n, d, 0));
@@ -204,7 +239,8 @@ function buildLP(ctx, perturbSeed) {
     }
     if (mTerms.length === 0 && pTerms.length === 0) continue;
     // Linearize |M - P| using slack: M - P - mpOver + mpUnder = pinnedP - pinnedM
-    const overVar = `mpOv${n}`, underVar = `mpUn${n}`;
+    const overVar = `mpOv${n}`,
+      underVar = `mpUn${n}`;
     contVars.push(overVar, underVar);
     objTerms.push(`${MP_BALANCE_MILP_WEIGHT} ${overVar}`);
     objTerms.push(`${MP_BALANCE_MILP_WEIGHT} ${underVar}`);
@@ -216,29 +252,31 @@ function buildLP(ctx, perturbSeed) {
 
   // --- LP model diagnostics ---
   {
-    let freeCount = 0, pinnedCount = 0;
+    let freeCount = 0,
+      pinnedCount = 0;
     for (let n = 0; n < numNurses; n++) {
       for (let d = 0; d < numDays; d++) {
-        if (isFree(n, d)) freeCount++; else pinnedCount++;
+        if (isFree(n, d)) freeCount++;
+        else pinnedCount++;
       }
     }
     // Check feasibility: can we meet night coverage with available nurses?
-    const nightEligibleCount = nurseProps.filter((p, i) =>
-      !p.soloMattine && !p.soloDiurni && !p.noNotti
-    ).length;
+    const nightEligibleCount = nurseProps.filter((p, i) => !p.soloMattine && !p.soloDiurni && !p.noNotti).length;
     // Each night nurse needs 4 days (N-S-R-R) per night block, so max nights per nurse ≈ numDays/4
     const theoreticalMaxNightSlots = nightEligibleCount * Math.floor(numDays / 4);
     const requiredNightSlots = minCovN * numDays;
     // Work-eligible nurses (can do M or P)
-    const workEligibleCount = nurseProps.filter(p =>
-      !p.soloNotti
-    ).length;
+    const workEligibleCount = nurseProps.filter(p => !p.soloNotti).length;
 
     console.log(`[buildLP] Free cells: ${freeCount}, Pinned cells: ${pinnedCount}, Binary vars: ${binVars.length}`);
-    console.log(`[buildLP] Night-eligible nurses: ${nightEligibleCount}, theoretical max night slots: ${theoreticalMaxNightSlots}, required: ${requiredNightSlots}`);
+    console.log(
+      `[buildLP] Night-eligible nurses: ${nightEligibleCount}, theoretical max night slots: ${theoreticalMaxNightSlots}, required: ${requiredNightSlots}`
+    );
     console.log(`[buildLP] Work-eligible nurses (M/P/D): ${workEligibleCount}`);
     if (requiredNightSlots > theoreticalMaxNightSlots) {
-      console.warn(`[buildLP] ⚠ INFEASIBILITY RISK: required night slots (${requiredNightSlots}) > theoretical max (${theoreticalMaxNightSlots})`);
+      console.warn(
+        `[buildLP] ⚠ INFEASIBILITY RISK: required night slots (${requiredNightSlots}) > theoretical max (${theoreticalMaxNightSlots})`
+      );
     }
   }
 
@@ -265,7 +303,10 @@ function buildLP(ctx, perturbSeed) {
 
   // --- Coverage constraints (D covers both morning and afternoon slots) ---
   for (let d = 0; d < numDays; d++) {
-    const mFree = [], pFree = [], nFree = [], dFree = [];
+    const mFree = [],
+      pFree = [],
+      nFree = [],
+      dFree = [];
     for (let n = 0; n < numNurses; n++) {
       if (!isFree(n, d)) continue;
       mFree.push(V(n, d, 0));
@@ -323,45 +364,45 @@ function buildLP(ctx, perturbSeed) {
 
       if (free0 && free1) {
         // P -> M forbidden
-        if (isPMForbidden) lines.push(` pm${n}_${d}: ${V(n,d,1)} + ${V(n,d+1,0)} <= 1`);
+        if (isPMForbidden) lines.push(` pm${n}_${d}: ${V(n, d, 1)} + ${V(n, d + 1, 0)} <= 1`);
         // D -> M forbidden
-        if (isDMForbidden) lines.push(` dm${n}_${d}: ${V(n,d,5)} + ${V(n,d+1,0)} <= 1`);
+        if (isDMForbidden) lines.push(` dm${n}_${d}: ${V(n, d, 5)} + ${V(n, d + 1, 0)} <= 1`);
         // D -> P forbidden
-        if (isDPForbidden) lines.push(` dp${n}_${d}: ${V(n,d,5)} + ${V(n,d+1,1)} <= 1`);
+        if (isDPForbidden) lines.push(` dp${n}_${d}: ${V(n, d, 5)} + ${V(n, d + 1, 1)} <= 1`);
         // P -> D forbidden (unless consentePomeriggioDiurno relaxed it)
-        if (isPDForbidden) lines.push(` pd${n}_${d}: ${V(n,d,1)} + ${V(n,d+1,5)} <= 1`);
+        if (isPDForbidden) lines.push(` pd${n}_${d}: ${V(n, d, 1)} + ${V(n, d + 1, 5)} <= 1`);
         // D -> D forbidden (unless consente2DiurniConsecutivi)
-        if (isDDForbidden) lines.push(` dd${n}_${d}: ${V(n,d,5)} + ${V(n,d+1,5)} <= 1`);
+        if (isDDForbidden) lines.push(` dd${n}_${d}: ${V(n, d, 5)} + ${V(n, d + 1, 5)} <= 1`);
         // N must be followed by S
-        lines.push(` ns${n}_${d}: ${V(n,d,2)} - ${V(n,d+1,3)} <= 0`);
+        lines.push(` ns${n}_${d}: ${V(n, d, 2)} - ${V(n, d + 1, 3)} <= 0`);
         // S must be followed by R
-        lines.push(` sr${n}_${d}: ${V(n,d,3)} - ${V(n,d+1,4)} <= 0`);
+        lines.push(` sr${n}_${d}: ${V(n, d, 3)} - ${V(n, d + 1, 4)} <= 0`);
         // No orphan S without preceding N
-        lines.push(` sn${n}_${d}: ${V(n,d+1,3)} - ${V(n,d,2)} <= 0`);
+        lines.push(` sn${n}_${d}: ${V(n, d + 1, 3)} - ${V(n, d, 2)} <= 0`);
         // N cannot follow N, S, R (already handled by N->S->R chain but add safety)
-        lines.push(` nn${n}_${d}: ${V(n,d,2)} + ${V(n,d+1,2)} <= 1`);
+        lines.push(` nn${n}_${d}: ${V(n, d, 2)} + ${V(n, d + 1, 2)} <= 1`);
       } else if (!free0 && free1) {
         // Pinned day d, free day d+1
         const p = pinned[n][d];
-        if (p === 'P' && isPMForbidden) lines.push(` tpm${n}_${d}: ${V(n,d+1,0)} <= 0`);
-        if (p === 'P' && isPDForbidden) lines.push(` tpd${n}_${d}: ${V(n,d+1,5)} <= 0`);
-        if (p === 'D' && isDMForbidden) lines.push(` tdm${n}_${d}: ${V(n,d+1,0)} <= 0`);
-        if (p === 'D' && isDPForbidden) lines.push(` tdp${n}_${d}: ${V(n,d+1,1)} <= 0`);
-        if (p === 'D' && isDDForbidden) lines.push(` tdd${n}_${d}: ${V(n,d+1,5)} <= 0`);
-        if (p === 'N') lines.push(` tns${n}_${d}: ${V(n,d+1,3)} = 1`); // force S after pinned N
-        if (p === 'S') lines.push(` tsr${n}_${d}: ${V(n,d+1,4)} = 1`); // force R after pinned S
+        if (p === 'P' && isPMForbidden) lines.push(` tpm${n}_${d}: ${V(n, d + 1, 0)} <= 0`);
+        if (p === 'P' && isPDForbidden) lines.push(` tpd${n}_${d}: ${V(n, d + 1, 5)} <= 0`);
+        if (p === 'D' && isDMForbidden) lines.push(` tdm${n}_${d}: ${V(n, d + 1, 0)} <= 0`);
+        if (p === 'D' && isDPForbidden) lines.push(` tdp${n}_${d}: ${V(n, d + 1, 1)} <= 0`);
+        if (p === 'D' && isDDForbidden) lines.push(` tdd${n}_${d}: ${V(n, d + 1, 5)} <= 0`);
+        if (p === 'N') lines.push(` tns${n}_${d}: ${V(n, d + 1, 3)} = 1`); // force S after pinned N
+        if (p === 'S') lines.push(` tsr${n}_${d}: ${V(n, d + 1, 4)} = 1`); // force R after pinned S
       } else if (free0 && !free1) {
         // Free day d, pinned day d+1
         const p1 = pinned[n][d + 1];
         // N on free day d must be followed by S — if d+1 is not S, ban N
-        if (p1 !== 'S') lines.push(` fn${n}_${d}: ${V(n,d,2)} <= 0`);
+        if (p1 !== 'S') lines.push(` fn${n}_${d}: ${V(n, d, 2)} <= 0`);
         // S on free day d must be followed by R — if d+1 is not R, ban S
-        if (p1 !== 'R') lines.push(` fs${n}_${d}: ${V(n,d,3)} <= 0`);
+        if (p1 !== 'R') lines.push(` fs${n}_${d}: ${V(n, d, 3)} <= 0`);
         // D transition: ban D if next day is M or P (D->M, D->P forbidden)
-        if (p1 === 'M' && isDMForbidden) lines.push(` fdm${n}_${d}: ${V(n,d,5)} <= 0`);
-        if (p1 === 'P' && isDPForbidden) lines.push(` fdp${n}_${d}: ${V(n,d,5)} <= 0`);
-        if (p1 === 'D' && isDDForbidden) lines.push(` fdd${n}_${d}: ${V(n,d,5)} <= 0`);
-        if (p1 === 'D' && isPDForbidden) lines.push(` fpd${n}_${d}: ${V(n,d,1)} <= 0`);
+        if (p1 === 'M' && isDMForbidden) lines.push(` fdm${n}_${d}: ${V(n, d, 5)} <= 0`);
+        if (p1 === 'P' && isDPForbidden) lines.push(` fdp${n}_${d}: ${V(n, d, 5)} <= 0`);
+        if (p1 === 'D' && isDDForbidden) lines.push(` fdd${n}_${d}: ${V(n, d, 5)} <= 0`);
+        if (p1 === 'D' && isPDForbidden) lines.push(` fpd${n}_${d}: ${V(n, d, 1)} <= 0`);
       }
     }
   }
@@ -370,24 +411,26 @@ function buildLP(ctx, perturbSeed) {
   if (consente2D) {
     for (let n = 0; n < numNurses; n++) {
       for (let d = 0; d < numDays - 2; d++) {
-        const f0 = isFree(n, d), f1 = isFree(n, d+1), f2 = isFree(n, d+2);
+        const f0 = isFree(n, d),
+          f1 = isFree(n, d + 1),
+          f2 = isFree(n, d + 2);
         // D-D-D forbidden: at most 2 consecutive D
         if (f0 && f1 && f2) {
-          lines.push(` ddd${n}_${d}: ${V(n,d,5)} + ${V(n,d+1,5)} + ${V(n,d+2,5)} <= 2`);
+          lines.push(` ddd${n}_${d}: ${V(n, d, 5)} + ${V(n, d + 1, 5)} + ${V(n, d + 2, 5)} <= 2`);
         }
         // D-D must be followed by R
         if (f0 && f1 && f2) {
-          lines.push(` ddr${n}_${d}: ${V(n,d,5)} + ${V(n,d+1,5)} - ${V(n,d+2,4)} <= 1`);
-        } else if (f0 && f1 && !f2 && pinned[n][d+2] !== 'R') {
+          lines.push(` ddr${n}_${d}: ${V(n, d, 5)} + ${V(n, d + 1, 5)} - ${V(n, d + 2, 4)} <= 1`);
+        } else if (f0 && f1 && !f2 && pinned[n][d + 2] !== 'R') {
           // Pinned d+2 is not R: D-D on d,d+1 forbidden
-          lines.push(` ddrp${n}_${d}: ${V(n,d,5)} + ${V(n,d+1,5)} <= 1`);
+          lines.push(` ddrp${n}_${d}: ${V(n, d, 5)} + ${V(n, d + 1, 5)} <= 1`);
         }
         // Handle pinned D followed by free slots
         if (!f0 && pinned[n][d] === 'D' && f1 && f2) {
-          lines.push(` pddr${n}_${d}: ${V(n,d+1,5)} - ${V(n,d+2,4)} <= 0`);
+          lines.push(` pddr${n}_${d}: ${V(n, d + 1, 5)} - ${V(n, d + 2, 4)} <= 0`);
         }
-        if (f0 && !f1 && pinned[n][d+1] === 'D' && f2) {
-          lines.push(` dpdr${n}_${d}: ${V(n,d,5)} - ${V(n,d+2,4)} <= 0`);
+        if (f0 && !f1 && pinned[n][d + 1] === 'D' && f2) {
+          lines.push(` dpdr${n}_${d}: ${V(n, d, 5)} - ${V(n, d + 2, 4)} <= 0`);
         }
       }
     }
@@ -398,9 +441,9 @@ function buildLP(ctx, perturbSeed) {
     if (nurseProps[n].noDiurni) continue; // noDiurni nurses only need N-S-R
     for (let d = 0; d < numDays - 3; d++) {
       if (isFree(n, d) && isFree(n, d + 3)) {
-        lines.push(` rr${n}_${d}: ${V(n,d,2)} - ${V(n,d+3,4)} <= 0`);
+        lines.push(` rr${n}_${d}: ${V(n, d, 2)} - ${V(n, d + 3, 4)} <= 0`);
       } else if (isFree(n, d) && !isFree(n, d + 3)) {
-        if (pinned[n][d + 3] !== 'R') lines.push(` rrp${n}_${d}: ${V(n,d,2)} <= 0`);
+        if (pinned[n][d + 3] !== 'R') lines.push(` rrp${n}_${d}: ${V(n, d, 2)} <= 0`);
       }
     }
   }
@@ -422,7 +465,7 @@ function buildLP(ctx, perturbSeed) {
   for (let n = 0; n < numNurses; n++) {
     if (nurseProps[n].noNotti) {
       for (let d = 0; d < numDays; d++) {
-        if (isFree(n, d)) lines.push(` noN${n}_${d}: ${V(n,d,2)} <= 0`);
+        if (isFree(n, d)) lines.push(` noN${n}_${d}: ${V(n, d, 2)} <= 0`);
       }
     }
   }
@@ -433,10 +476,10 @@ function buildLP(ctx, perturbSeed) {
       for (let d = 0; d < numDays; d++) {
         if (isFree(n, d)) {
           // Ban M, P, N, S (indices 0, 1, 2, 3)
-          lines.push(` sdM${n}_${d}: ${V(n,d,0)} <= 0`);
-          lines.push(` sdP${n}_${d}: ${V(n,d,1)} <= 0`);
-          lines.push(` sdN${n}_${d}: ${V(n,d,2)} <= 0`);
-          lines.push(` sdS${n}_${d}: ${V(n,d,3)} <= 0`);
+          lines.push(` sdM${n}_${d}: ${V(n, d, 0)} <= 0`);
+          lines.push(` sdP${n}_${d}: ${V(n, d, 1)} <= 0`);
+          lines.push(` sdN${n}_${d}: ${V(n, d, 2)} <= 0`);
+          lines.push(` sdS${n}_${d}: ${V(n, d, 3)} <= 0`);
         }
       }
     }
@@ -447,9 +490,9 @@ function buildLP(ctx, perturbSeed) {
     if (nurseProps[n].soloNotti) {
       for (let d = 0; d < numDays; d++) {
         if (isFree(n, d)) {
-          lines.push(` snM${n}_${d}: ${V(n,d,0)} <= 0`);
-          lines.push(` snP${n}_${d}: ${V(n,d,1)} <= 0`);
-          lines.push(` snD${n}_${d}: ${V(n,d,5)} <= 0`);
+          lines.push(` snM${n}_${d}: ${V(n, d, 0)} <= 0`);
+          lines.push(` snP${n}_${d}: ${V(n, d, 1)} <= 0`);
+          lines.push(` snD${n}_${d}: ${V(n, d, 5)} <= 0`);
         }
       }
     }
@@ -459,7 +502,7 @@ function buildLP(ctx, perturbSeed) {
   for (let n = 0; n < numNurses; n++) {
     if (nurseProps[n].noDiurni) {
       for (let d = 0; d < numDays; d++) {
-        if (isFree(n, d)) lines.push(` ndD${n}_${d}: ${V(n,d,5)} <= 0`);
+        if (isFree(n, d)) lines.push(` ndD${n}_${d}: ${V(n, d, 5)} <= 0`);
       }
     }
   }
@@ -470,8 +513,8 @@ function buildLP(ctx, perturbSeed) {
       for (let d = 0; d < numDays; d++) {
         if (isFree(n, d)) {
           // Ban M, P (indices 0, 1)
-          lines.push(` denBanM${n}_${d}: ${V(n,d,0)} <= 0`);
-          lines.push(` denBanP${n}_${d}: ${V(n,d,1)} <= 0`);
+          lines.push(` denBanM${n}_${d}: ${V(n, d, 0)} <= 0`);
+          lines.push(` denBanP${n}_${d}: ${V(n, d, 1)} <= 0`);
         }
       }
     }
@@ -513,7 +556,7 @@ function buildLP(ctx, perturbSeed) {
       for (let d = 0; d < numDays; d++) {
         if (isFree(n1, d) && isFree(n2, d)) {
           for (let s = 0; s < SHIFTS.length; s++) {
-            lines.push(` cp${n1}_${n2}_${d}_${s}: ${V(n1,d,s)} - ${V(n2,d,s)} = 0`);
+            lines.push(` cp${n1}_${n2}_${d}_${s}: ${V(n1, d, s)} - ${V(n2, d, s)} = 0`);
           }
         }
       }
@@ -544,12 +587,16 @@ function parseSolution(result, ctx) {
   let pinnedCells = 0;
   for (let n = 0; n < numNurses; n++) {
     for (let d = 0; d < numDays; d++) {
-      if (pinned[n][d]) { schedule[n][d] = pinned[n][d]; pinnedCells++; }
+      if (pinned[n][d]) {
+        schedule[n][d] = pinned[n][d];
+        pinnedCells++;
+      }
     }
   }
 
   // Fill from MILP solution
-  let assignedCells = 0, skippedFractional = 0;
+  let assignedCells = 0,
+    skippedFractional = 0;
   const shiftCounts = { M: 0, P: 0, N: 0, S: 0, R: 0, D: 0 };
   for (const [name, col] of Object.entries(result.Columns)) {
     if (!name.startsWith('x')) continue;
@@ -558,7 +605,9 @@ function parseSolution(result, ctx) {
       continue;
     }
     const parts = name.substring(1).split('_');
-    const n = parseInt(parts[0]), d = parseInt(parts[1]), s = parseInt(parts[2]);
+    const n = parseInt(parts[0]),
+      d = parseInt(parts[1]),
+      s = parseInt(parts[2]);
     if (n >= 0 && n < numNurses && d >= 0 && d < numDays) {
       schedule[n][d] = SHIFTS[s];
       assignedCells++;
@@ -570,12 +619,19 @@ function parseSolution(result, ctx) {
   let filledWithR = 0;
   for (let n = 0; n < numNurses; n++) {
     for (let d = 0; d < numDays; d++) {
-      if (schedule[n][d] === null) { schedule[n][d] = 'R'; filledWithR++; }
+      if (schedule[n][d] === null) {
+        schedule[n][d] = 'R';
+        filledWithR++;
+      }
     }
   }
 
-  console.log(`[HiGHS Parse] pinned=${pinnedCells}, assigned=${assignedCells}, filledR=${filledWithR}, fractional=${skippedFractional}`);
-  console.log(`[HiGHS Parse] Shift distribution: M=${shiftCounts.M} P=${shiftCounts.P} N=${shiftCounts.N} S=${shiftCounts.S} R=${shiftCounts.R} D=${shiftCounts.D}`);
+  console.log(
+    `[HiGHS Parse] pinned=${pinnedCells}, assigned=${assignedCells}, filledR=${filledWithR}, fractional=${skippedFractional}`
+  );
+  console.log(
+    `[HiGHS Parse] Shift distribution: M=${shiftCounts.M} P=${shiftCounts.P} N=${shiftCounts.N} S=${shiftCounts.S} R=${shiftCounts.R} D=${shiftCounts.D}`
+  );
 
   return schedule;
 }
@@ -585,7 +641,10 @@ function parseSolution(result, ctx) {
  */
 function parseLPTerms(expr) {
   const terms = [];
-  const s = expr.replace(/\+\s*-/g, '- ').replace(/-\s*-/g, '+ ').trim();
+  const s = expr
+    .replace(/\+\s*-/g, '- ')
+    .replace(/-\s*-/g, '+ ')
+    .trim();
   const re = /([+-])?\s*(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)?\s*([a-zA-Z_]\w*)/g;
   let m;
   while ((m = re.exec(s)) !== null) {
@@ -603,7 +662,10 @@ function lpToGLPKModel(lpString, glpk) {
   const lines = lpString.split('\n');
   let section = null;
   // GLP constants: GLP_MIN=1, GLP_MAX=2, GLP_LO=2, GLP_UP=3, GLP_FX=5
-  const GLP_MIN = glpk.GLP_MIN, GLP_LO = glpk.GLP_LO, GLP_UP = glpk.GLP_UP, GLP_FX = glpk.GLP_FX;
+  const GLP_MIN = glpk.GLP_MIN,
+    GLP_LO = glpk.GLP_LO,
+    GLP_UP = glpk.GLP_UP,
+    GLP_FX = glpk.GLP_FX;
   const objective = { direction: GLP_MIN, name: 'obj', vars: [] };
   const subjectTo = [];
   const modelBounds = [];
@@ -614,11 +676,27 @@ function lpToGLPKModel(lpString, glpk) {
     const line = rawLine.trim();
     if (!line) continue;
     const lower = line.toLowerCase();
-    if (lower === 'minimize' || lower === 'min') { section = 'obj'; continue; }
-    if (lower === 'maximize' || lower === 'max') { section = 'obj'; objective.direction = glpk.GLP_MAX; continue; }
-    if (lower === 'subject to' || lower === 'st' || lower.startsWith('subject to')) { section = 'st'; continue; }
-    if (lower === 'bounds') { section = 'bounds'; continue; }
-    if (lower === 'binary' || lower === 'binaries' || lower === 'bin') { section = 'bin'; continue; }
+    if (lower === 'minimize' || lower === 'min') {
+      section = 'obj';
+      continue;
+    }
+    if (lower === 'maximize' || lower === 'max') {
+      section = 'obj';
+      objective.direction = glpk.GLP_MAX;
+      continue;
+    }
+    if (lower === 'subject to' || lower === 'st' || lower.startsWith('subject to')) {
+      section = 'st';
+      continue;
+    }
+    if (lower === 'bounds') {
+      section = 'bounds';
+      continue;
+    }
+    if (lower === 'binary' || lower === 'binaries' || lower === 'bin') {
+      section = 'bin';
+      continue;
+    }
     if (lower === 'end') break;
 
     switch (section) {
@@ -653,9 +731,12 @@ function lpToGLPKModel(lpString, glpk) {
         if (isNaN(rhsVal)) continue;
         const vars = parseLPTerms(lhsStr);
         if (vars.length === 0) continue;
-        const bnds = op === GLP_UP ? { type: op, ub: rhsVal, lb: 0 }
-                   : op === GLP_LO ? { type: op, lb: rhsVal, ub: 0 }
-                   : { type: op, lb: rhsVal, ub: rhsVal };
+        const bnds =
+          op === GLP_UP
+            ? { type: op, ub: rhsVal, lb: 0 }
+            : op === GLP_LO
+              ? { type: op, lb: rhsVal, ub: 0 }
+              : { type: op, lb: rhsVal, ub: rhsVal };
         subjectTo.push({ name: cName, vars, bnds });
         break;
       }
@@ -667,7 +748,9 @@ function lpToGLPKModel(lpString, glpk) {
         break;
       }
       case 'bin':
-        line.split(/\s+/).forEach(v => { if (v && /^[a-zA-Z_]/.test(v)) binaries.push(v); });
+        line.split(/\s+/).forEach(v => {
+          if (v && /^[a-zA-Z_]/.test(v)) binaries.push(v);
+        });
         break;
     }
   }
@@ -680,7 +763,9 @@ function lpToGLPKModel(lpString, glpk) {
 
   const model = { name: 'nurse_scheduling', objective, subjectTo, binaries };
   if (modelBounds.length > 0) model.bounds = modelBounds;
-  console.log(`[GLPK] LP-to-GLPK conversion: obj_vars=${objective.vars.length}, constraints=${subjectTo.length}, binaries=${binaries.length}, bounds=${modelBounds.length}`);
+  console.log(
+    `[GLPK] LP-to-GLPK conversion: obj_vars=${objective.vars.length}, constraints=${subjectTo.length}, binaries=${binaries.length}, bounds=${modelBounds.length}`
+  );
   return model;
 }
 
@@ -705,11 +790,15 @@ function parseGLPKSolution(vars, ctx) {
   let pinnedCells = 0;
   for (let n = 0; n < numNurses; n++) {
     for (let d = 0; d < numDays; d++) {
-      if (pinned[n][d]) { schedule[n][d] = pinned[n][d]; pinnedCells++; }
+      if (pinned[n][d]) {
+        schedule[n][d] = pinned[n][d];
+        pinnedCells++;
+      }
     }
   }
 
-  let assignedCells = 0, skippedFractional = 0;
+  let assignedCells = 0,
+    skippedFractional = 0;
   const shiftCounts = { M: 0, P: 0, N: 0, S: 0, R: 0, D: 0 };
   for (const [name, value] of Object.entries(vars)) {
     if (!name.startsWith('x')) continue;
@@ -718,7 +807,9 @@ function parseGLPKSolution(vars, ctx) {
       continue;
     }
     const parts = name.substring(1).split('_');
-    const n = parseInt(parts[0]), d = parseInt(parts[1]), s = parseInt(parts[2]);
+    const n = parseInt(parts[0]),
+      d = parseInt(parts[1]),
+      s = parseInt(parts[2]);
     if (n >= 0 && n < numNurses && d >= 0 && d < numDays && s >= 0 && s < SHIFTS.length) {
       schedule[n][d] = SHIFTS[s];
       assignedCells++;
@@ -729,12 +820,19 @@ function parseGLPKSolution(vars, ctx) {
   let filledWithR = 0;
   for (let n = 0; n < numNurses; n++) {
     for (let d = 0; d < numDays; d++) {
-      if (schedule[n][d] === null) { schedule[n][d] = 'R'; filledWithR++; }
+      if (schedule[n][d] === null) {
+        schedule[n][d] = 'R';
+        filledWithR++;
+      }
     }
   }
 
-  console.log(`[GLPK Parse] pinned=${pinnedCells}, assigned=${assignedCells}, filledR=${filledWithR}, fractional=${skippedFractional}`);
-  console.log(`[GLPK Parse] Shift distribution: M=${shiftCounts.M} P=${shiftCounts.P} N=${shiftCounts.N} S=${shiftCounts.S} R=${shiftCounts.R} D=${shiftCounts.D}`);
+  console.log(
+    `[GLPK Parse] pinned=${pinnedCells}, assigned=${assignedCells}, filledR=${filledWithR}, fractional=${skippedFractional}`
+  );
+  console.log(
+    `[GLPK Parse] Shift distribution: M=${shiftCounts.M} P=${shiftCounts.P} N=${shiftCounts.N} S=${shiftCounts.S} R=${shiftCounts.R} D=${shiftCounts.D}`
+  );
 
   return schedule;
 }

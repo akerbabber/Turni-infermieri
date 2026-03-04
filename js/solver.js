@@ -50,13 +50,16 @@ importScripts(
 
 self.onmessage = async function (e) {
   if (e.data.type === 'solve') {
-    console.log('[Worker] Received solve message:', JSON.stringify({
-      solverChoice: e.data.solverChoice,
-      numSolutions: e.data.numSolutions,
-      timeBudget: e.data.timeBudget,
-      untilZeroViolations: e.data.untilZeroViolations,
-      numNurses: e.data.config?.nurses?.length,
-    }));
+    console.log(
+      '[Worker] Received solve message:',
+      JSON.stringify({
+        solverChoice: e.data.solverChoice,
+        numSolutions: e.data.numSolutions,
+        timeBudget: e.data.timeBudget,
+        untilZeroViolations: e.data.untilZeroViolations,
+        numNurses: e.data.config?.nurses?.length,
+      })
+    );
     try {
       const numSolutions = e.data.numSolutions || 1;
       const timeBudget = e.data.timeBudget || 0;
@@ -64,7 +67,9 @@ self.onmessage = async function (e) {
       const solverChoice = e.data.solverChoice || 'auto';
       const solutions = await solve(e.data.config, numSolutions, timeBudget, untilZeroViolations, solverChoice);
       const best = solutions[0] || {};
-      console.log(`[Worker] Solve complete: ${solutions.length} solutions, best method="${best.solverMethod}", best score=${best.score}`);
+      console.log(
+        `[Worker] Solve complete: ${solutions.length} solutions, best method="${best.solverMethod}", best score=${best.score}`
+      );
       self.postMessage({
         type: 'result',
         schedule: best.schedule,

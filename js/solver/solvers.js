@@ -18,23 +18,25 @@ function loadHiGHS() {
   if (_highsPromise) return _highsPromise;
   console.log('[HiGHS] Starting load...');
   const t0 = Date.now();
-  _highsPromise = new Promise((resolve) => {
+  _highsPromise = new Promise(resolve => {
     try {
       importScripts('https://cdn.jsdelivr.net/npm/highs@1.8.0/build/highs.js');
       const initHiGHS = self.Module;
       if (typeof initHiGHS === 'function') {
         const inst = initHiGHS({
-          locateFile: (file) => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file
+          locateFile: file => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file,
         });
         // initHiGHS might return a promise
         if (inst && typeof inst.then === 'function') {
-          inst.then(h => {
-            console.log(`[HiGHS] Loaded successfully in ${Date.now() - t0}ms, solve=${typeof h?.solve}`);
-            resolve(h);
-          }).catch(err => {
-            console.error('[HiGHS] Init promise rejected:', err);
-            resolve(null);
-          });
+          inst
+            .then(h => {
+              console.log(`[HiGHS] Loaded successfully in ${Date.now() - t0}ms, solve=${typeof h?.solve}`);
+              resolve(h);
+            })
+            .catch(err => {
+              console.error('[HiGHS] Init promise rejected:', err);
+              resolve(null);
+            });
         } else {
           console.log(`[HiGHS] Loaded (sync) in ${Date.now() - t0}ms, solve=${typeof inst?.solve}`);
           resolve(inst);
@@ -59,11 +61,13 @@ function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
   const lpLines = lp.split('\n');
   const binCount = lpLines.filter(l => l.trim().startsWith('x')).length;
   const constraintCount = lpLines.filter(l => l.includes(':')).length;
-  console.log(`[HiGHS] Building LP: ~${constraintCount} constraints, ~${binCount} binary var lines, seed=${perturbSeed}, timeLimit=${timeLimit}s`);
+  console.log(
+    `[HiGHS] Building LP: ~${constraintCount} constraints, ~${binCount} binary var lines, seed=${perturbSeed}, timeLimit=${timeLimit}s`
+  );
 
   const opts = {
     time_limit: timeLimit,
-    mip_rel_gap: 0.05,         // relaxed from 0.02 to find feasible solutions faster
+    mip_rel_gap: 0.05, // relaxed from 0.02 to find feasible solutions faster
     mip_feasibility_tolerance: 1e-4,
     random_seed: perturbSeed * 137,
     output_flag: false,
@@ -98,7 +102,9 @@ function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
   if (result.Columns && Object.keys(result.Columns).length > 0) {
     const assignedCount = Object.values(result.Columns).filter(c => Math.round(c.Primal) === 1).length;
     if (assignedCount > 0) {
-      console.warn(`[HiGHS]   → Status "${result.Status}" is non-standard, but found ${assignedCount} assigned columns — attempting to parse solution anyway`);
+      console.warn(
+        `[HiGHS]   → Status "${result.Status}" is non-standard, but found ${assignedCount} assigned columns — attempting to parse solution anyway`
+      );
       return parseSolution(result, ctx);
     }
   }
@@ -116,20 +122,22 @@ function loadGLPK() {
   if (_glpkPromise) return _glpkPromise;
   console.log('[GLPK] Starting load...');
   const t0 = Date.now();
-  _glpkPromise = new Promise((resolve) => {
+  _glpkPromise = new Promise(resolve => {
     try {
       importScripts('https://cdn.jsdelivr.net/npm/glpk.js/dist/glpk.min.js');
       const initGLPK = self.GLPK || self.glpk;
       if (typeof initGLPK === 'function') {
         const inst = initGLPK();
         if (inst && typeof inst.then === 'function') {
-          inst.then(g => {
-            console.log(`[GLPK] Loaded successfully in ${Date.now() - t0}ms, solve=${typeof g?.solve}`);
-            resolve(g);
-          }).catch(err => {
-            console.error('[GLPK] Init promise rejected:', err);
-            resolve(null);
-          });
+          inst
+            .then(g => {
+              console.log(`[GLPK] Loaded successfully in ${Date.now() - t0}ms, solve=${typeof g?.solve}`);
+              resolve(g);
+            })
+            .catch(err => {
+              console.error('[GLPK] Init promise rejected:', err);
+              resolve(null);
+            });
         } else {
           console.log(`[GLPK] Loaded (sync) in ${Date.now() - t0}ms, solve=${typeof inst?.solve}`);
           resolve(inst);
@@ -157,7 +165,9 @@ async function solveOneGLPK(glpk, ctx, perturbSeed, timeLimit) {
     return null;
   }
 
-  console.log(`[GLPK] Model built: ${model.subjectTo?.length || 0} constraints, ${model.binaries?.length || 0} binaries, seed=${perturbSeed}, timeLimit=${timeLimit}s`);
+  console.log(
+    `[GLPK] Model built: ${model.subjectTo?.length || 0} constraints, ${model.binaries?.length || 0} binaries, seed=${perturbSeed}, timeLimit=${timeLimit}s`
+  );
 
   try {
     const t0 = Date.now();
@@ -197,7 +207,9 @@ async function solveOneGLPK(glpk, ctx, perturbSeed, timeLimit) {
 
     // For other statuses, try to extract a solution if variables exist
     if (vars && assignedCount > 0) {
-      console.warn(`[GLPK]   → Status "${statusName}" is non-optimal, but found ${assignedCount} assigned vars — attempting to parse solution anyway`);
+      console.warn(
+        `[GLPK]   → Status "${statusName}" is non-optimal, but found ${assignedCount} assigned vars — attempting to parse solution anyway`
+      );
       return parseGLPKSolution(vars, ctx);
     }
 
@@ -218,19 +230,18 @@ function solveFallback(config) {
   const ctx = buildContext(config);
 
   let bestSchedule = null;
-  let bestScore    = { total: Infinity, hard: Infinity, soft: Infinity };
+  let bestScore = { total: Infinity, hard: Infinity, soft: Infinity };
 
   for (let r = 0; r < NUM_RESTARTS; r++) {
-    progress(5 + Math.floor(r * (80 / NUM_RESTARTS)),
-             `Tentativo ${r + 1}/${NUM_RESTARTS}…`);
+    progress(5 + Math.floor(r * (80 / NUM_RESTARTS)), `Tentativo ${r + 1}/${NUM_RESTARTS}…`);
 
     const schedule = construct(ctx);
     const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS);
-    const score    = computeScore(improved, ctx);
+    const score = computeScore(improved, ctx);
 
     if (score.total < bestScore.total) {
       bestSchedule = improved;
-      bestScore    = score;
+      bestScore = score;
     }
 
     // Early exit when no hard violations remain and soft penalty is low
@@ -240,7 +251,7 @@ function solveFallback(config) {
   progress(90, 'Validazione…');
 
   const violations = collectViolations(bestSchedule, ctx);
-  const stats      = computeStats(bestSchedule, ctx);
+  const stats = computeStats(bestSchedule, ctx);
 
   progress(100, 'Fatto!');
   return { schedule: bestSchedule, violations, stats, score: bestScore.total };
@@ -261,16 +272,22 @@ function solveFallback(config) {
 async function solve(config, numSolutions, timeBudget, untilZeroViolations, solverChoice) {
   solverChoice = solverChoice || 'auto';
   numSolutions = Math.max(1, Math.min(numSolutions || 1, 20));
-  const totalBudget = (timeBudget && timeBudget > 0) ? timeBudget : MILP_DEFAULT_TOTAL_TIME_BUDGET;
+  const totalBudget = timeBudget && timeBudget > 0 ? timeBudget : MILP_DEFAULT_TOTAL_TIME_BUDGET;
   const ctx = buildContext(config);
   const solutions = [];
 
-  console.log(`[Solver] Starting solve: solverChoice="${solverChoice}", numSolutions=${numSolutions}, timeBudget=${totalBudget}s, untilZeroViolations=${untilZeroViolations}`);
-  console.log(`[Solver] Problem: ${ctx.numNurses} nurses, ${ctx.numDays} days, coverage M:${ctx.minCovM}-${ctx.maxCovM} P:${ctx.minCovP}-${ctx.maxCovP} N:${ctx.minCovN}-${ctx.maxCovN} D:${ctx.minCovD}-${ctx.maxCovD}`);
+  console.log(
+    `[Solver] Starting solve: solverChoice="${solverChoice}", numSolutions=${numSolutions}, timeBudget=${totalBudget}s, untilZeroViolations=${untilZeroViolations}`
+  );
+  console.log(
+    `[Solver] Problem: ${ctx.numNurses} nurses, ${ctx.numDays} days, coverage M:${ctx.minCovM}-${ctx.maxCovM} P:${ctx.minCovP}-${ctx.maxCovP} N:${ctx.minCovN}-${ctx.maxCovN} D:${ctx.minCovD}-${ctx.maxCovD}`
+  );
 
   // Load solvers based on user choice
-  let highs = null, glpk = null;
-  let milpAvailable = false, glpkAvailable = false;
+  let highs = null,
+    glpk = null;
+  let milpAvailable = false,
+    glpkAvailable = false;
 
   if (solverChoice === 'auto' || solverChoice === 'milp') {
     progress(1, 'Caricamento solver HiGHS MILP…');
@@ -303,12 +320,14 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
 
   /** Generate one batch of solutions */
   async function generateBatch(batchSolutions, batchLabel, seedOffset) {
-    const milpTimeLimitSec = Math.max(MILP_MIN_TIME_PER_SOLUTION,
-      Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions)));
+    const milpTimeLimitSec = Math.max(
+      MILP_MIN_TIME_PER_SOLUTION,
+      Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions))
+    );
     const perSolutionBudgetSec = Math.max(1, totalBudget / numSolutions);
 
     for (let i = 0; i < numSolutions; i++) {
-      const pctBase = 5 + Math.floor(i * 80 / numSolutions);
+      const pctBase = 5 + Math.floor((i * 80) / numSolutions);
       const seed = seedOffset + i;
       let solved = false;
 
@@ -329,7 +348,9 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
             const violations = collectViolations(polished, ctx);
             const stats = computeStats(polished, ctx);
             const score = computeScore(polished, ctx);
-            console.log(`[Solver] HiGHS solution: score=${score.total} (hard=${score.hard}, soft=${score.soft}), violations=${violations.length}`);
+            console.log(
+              `[Solver] HiGHS solution: score=${score.total} (hard=${score.hard}, soft=${score.soft}), violations=${violations.length}`
+            );
             batchSolutions.push({ schedule: polished, violations, stats, score: score.total, solverMethod: 'milp' });
             solved = true;
           } else {
@@ -356,7 +377,9 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
             const violations = collectViolations(polished, ctx);
             const stats = computeStats(polished, ctx);
             const score = computeScore(polished, ctx);
-            console.log(`[Solver] GLPK solution: score=${score.total} (hard=${score.hard}, soft=${score.soft}), violations=${violations.length}`);
+            console.log(
+              `[Solver] GLPK solution: score=${score.total} (hard=${score.hard}, soft=${score.soft}), violations=${violations.length}`
+            );
             batchSolutions.push({ schedule: polished, violations, stats, score: score.total, solverMethod: 'glpk' });
             solved = true;
           } else {
@@ -370,7 +393,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
 
       // Greedy + SA fallback
       if (!solved) {
-        const label = (useHiGHS || useGLPK) ? 'Fallback euristica' : 'Euristica';
+        const label = useHiGHS || useGLPK ? 'Fallback euristica' : 'Euristica';
         console.log(`[Solver] Both MILP solvers failed/unavailable, using ${label}`);
         progress(pctBase, `${batchLabel}${label} ${i + 1}/${numSolutions}…`);
         const schedule = construct(ctx);
@@ -378,7 +401,9 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
         const violations = collectViolations(improved, ctx);
         const stats = computeStats(improved, ctx);
         const score = computeScore(improved, ctx);
-        console.log(`[Solver] Fallback solution: score=${score.total} (hard=${score.hard}, soft=${score.soft}), violations=${violations.length}`);
+        console.log(
+          `[Solver] Fallback solution: score=${score.total} (hard=${score.hard}, soft=${score.soft}), violations=${violations.length}`
+        );
         batchSolutions.push({ schedule: improved, violations, stats, score: score.total, solverMethod: 'fallback' });
       }
     }
@@ -391,9 +416,12 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
   if (availSolvers.length > 0) {
     progress(5, `Solver disponibili: ${availSolvers.join(', ')}. Generazione soluzioni…`);
   } else {
-    progress(5, solverChoice === 'fallback'
-      ? 'Euristica selezionata manualmente…'
-      : 'Nessun solver MILP disponibile, euristica classica…');
+    progress(
+      5,
+      solverChoice === 'fallback'
+        ? 'Euristica selezionata manualmente…'
+        : 'Nessun solver MILP disponibile, euristica classica…'
+    );
   }
 
   if (untilZeroViolations) {
@@ -430,7 +458,9 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
 
   console.log(`[Solver] Final results: ${solutions.length} solutions generated`);
   solutions.forEach((sol, idx) => {
-    console.log(`[Solver]   #${idx + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations.length}`);
+    console.log(
+      `[Solver]   #${idx + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations.length}`
+    );
   });
 
   progress(95, 'Validazione…');
