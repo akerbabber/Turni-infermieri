@@ -41,7 +41,6 @@ const NUM_RESTARTS = 10;
 const LOCAL_SEARCH_ITERS = 4000;
 
 const MILP_MIN_TIME_PER_SOLUTION = 5;
-const MILP_MAX_TIME_PER_SOLUTION = 30;
 const MILP_DEFAULT_TOTAL_TIME_BUDGET = 60;
 
 // Safety cap to prevent indefinite runs in zero-violations mode (10 minutes)

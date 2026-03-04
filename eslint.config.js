@@ -23,7 +23,6 @@ const solverSharedGlobals = {
   NUM_RESTARTS: 'writable',
   LOCAL_SEARCH_ITERS: 'writable',
   MILP_MIN_TIME_PER_SOLUTION: 'writable',
-  MILP_MAX_TIME_PER_SOLUTION: 'writable',
   MILP_DEFAULT_TOTAL_TIME_BUDGET: 'writable',
   UNTIL_ZERO_MAX_TIME: 'writable',
   shuffle: 'writable',
