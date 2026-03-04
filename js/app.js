@@ -637,6 +637,12 @@ function startSolver() {
       if (bar) bar.style.width = data.percent + '%';
       if (msg) msg.textContent = data.message;
     } else if (data.type === 'result') {
+      console.log(`[App] Solver result received: ${data.solutions?.length || 0} solutions, method="${data.solverMethod}"`);
+      if (data.solutions) {
+        data.solutions.forEach((sol, i) => {
+          console.log(`[App]   Solution #${i + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations?.length}`);
+        });
+      }
       state.solutions = data.solutions || [];
       state.selectedSolution = 0;
       state.solverMethod = data.solverMethod || null;
@@ -657,6 +663,7 @@ function startSolver() {
       if (btnG) { btnG.disabled = false; btnG.textContent = 'GENERA TURNI'; }
       goToStep(4);
     } else if (data.type === 'error') {
+      console.error('[App] Solver error:', data.message);
       alert('Errore nel solver: ' + data.message);
       const btnG = document.getElementById('btn-generate');
       if (btnG) { btnG.disabled = false; btnG.textContent = 'GENERA TURNI'; }
@@ -666,6 +673,7 @@ function startSolver() {
   };
 
   worker.onerror = (err) => {
+    console.error('[App] Worker error:', err.message, err);
     alert('Errore Worker: ' + err.message);
     const btnG = document.getElementById('btn-generate');
     if (btnG) { btnG.disabled = false; btnG.textContent = 'GENERA TURNI'; }
@@ -710,6 +718,12 @@ function regenerateTurni() {
     if (data.type === 'progress') {
       // Progress can be shown if needed
     } else if (data.type === 'result') {
+      console.log(`[App Regen] Solver result received: ${data.solutions?.length || 0} solutions, method="${data.solverMethod}"`);
+      if (data.solutions) {
+        data.solutions.forEach((sol, i) => {
+          console.log(`[App Regen]   Solution #${i + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations?.length}`);
+        });
+      }
       state.solutions = data.solutions || [];
       state.selectedSolution = 0;
       state.solverMethod = data.solverMethod || null;
@@ -730,6 +744,7 @@ function regenerateTurni() {
       if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
       renderStep4();
     } else if (data.type === 'error') {
+      console.error('[App Regen] Solver error:', data.message);
       alert('Errore nel solver: ' + data.message);
       const btnR = document.getElementById('btn-regenerate');
       if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
@@ -739,6 +754,7 @@ function regenerateTurni() {
   };
 
   worker.onerror = (err) => {
+    console.error('[App Regen] Worker error:', err.message, err);
     alert('Errore Worker: ' + err.message);
     const btnR = document.getElementById('btn-regenerate');
     if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
