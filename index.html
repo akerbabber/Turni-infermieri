@@ -571,6 +571,63 @@
             </div>
           </div>
 
+          <!-- Previous month schedule import -->
+          <div class="rule-card mb-6">
+            <h3 class="font-semibold mb-4 text-base">📅 Turni mese precedente</h3>
+            <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
+              Importa i turni del mese corrente per compensare deficit/eccesso ore nel mese successivo. Gli infermieri
+              che hanno lavorato meno ore saranno favoriti con più ore nel prossimo mese.
+            </p>
+            <div class="flex flex-wrap gap-3 mb-3">
+              <button
+                id="btn-import-prev-csv"
+                class="btn px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow transition-colors"
+              >
+                📋 Incolla CSV turni
+              </button>
+              <button
+                id="btn-clear-prev"
+                class="btn px-4 py-2 text-sm border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 font-semibold rounded-lg transition-colors"
+              >
+                🗑️ Rimuovi dati
+              </button>
+            </div>
+            <div id="prev-month-status" class="text-xs text-gray-500 dark:text-slate-400 mb-2"></div>
+            <div id="prev-month-deltas" class="hidden"></div>
+          </div>
+
+          <!-- CSV paste modal for previous month -->
+          <div id="csv-paste-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div
+              class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+            >
+              <h3 class="text-lg font-bold mb-2">📋 Incolla i turni del mese precedente</h3>
+              <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
+                Incolla i turni in formato CSV (dal file esportato). Ogni riga: Nome;T1;T2;...;Tn<br />
+                I turni validi sono: M, P, D, N, S, R, F, MA, L104, PR, MT
+              </p>
+              <textarea
+                id="csv-paste-area"
+                class="w-full h-48 border border-gray-300 dark:border-slate-600 rounded-lg p-3 text-xs font-mono bg-white dark:bg-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                placeholder="Rossi Mario;M;P;D;N;S;R;R;M;P;...&#10;Bianchi Anna;P;M;N;S;R;R;M;P;D;..."
+              ></textarea>
+              <div class="flex justify-end gap-3 mt-4">
+                <button
+                  id="btn-csv-cancel"
+                  class="btn px-4 py-2 text-sm border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 font-semibold rounded-lg transition-colors"
+                >
+                  Annulla
+                </button>
+                <button
+                  id="btn-csv-confirm"
+                  class="btn px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow transition-colors"
+                >
+                  ✅ Importa
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- Navigation -->
           <div class="flex justify-between no-print">
             <button
@@ -613,6 +670,8 @@
               <span id="summary-cov" class="font-medium">—</span>
               <span class="text-gray-500 dark:text-slate-400">Notti target:</span>
               <span id="summary-nights" class="font-medium">—</span>
+              <span class="text-gray-500 dark:text-slate-400">Compensazione mese prec.:</span>
+              <span id="summary-prev-month" class="font-medium">—</span>
             </div>
           </div>
 

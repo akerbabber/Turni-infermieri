@@ -176,6 +176,8 @@ let state = {
   solverChoice: 'auto', // 'auto'|'milp'|'glpk'|'fallback'
   worker: null,
   darkMode: false,
+  previousMonthSchedule: null, // 2D array [nurse][day] of shift codes from prev month
+  previousMonthHours: null, // array of total hours per nurse from prev month
 };
 
 // ---------------------------------------------------------------------------
@@ -610,6 +612,9 @@ function renderStep2() {
 
   // Nurse pairing dropdown
   renderNursePairingDropdown();
+
+  // Previous month status
+  renderPrevMonthStatus();
 }
 
 function bindRange(inputId, labelId, value, onChange) {
@@ -671,6 +676,220 @@ function renderNursePairingDropdown() {
 }
 
 // ---------------------------------------------------------------------------
+// Previous month schedule import
+// ---------------------------------------------------------------------------
+
+const VALID_SHIFTS = new Set(['M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT']);
+
+/**
+ * Render the status of previous month import in Step 2.
+ */
+function renderPrevMonthStatus() {
+  const statusEl = document.getElementById('prev-month-status');
+  const deltasEl = document.getElementById('prev-month-deltas');
+  if (!statusEl || !deltasEl) return;
+
+  if (!state.previousMonthSchedule || !state.previousMonthHours) {
+    statusEl.innerHTML =
+      '<span class="text-gray-400 dark:text-slate-500">Nessun dato del mese precedente importato.</span>';
+    deltasEl.classList.add('hidden');
+    return;
+  }
+
+  const numNurses = state.previousMonthSchedule.length;
+  const numDays = state.previousMonthSchedule[0]?.length || 0;
+  statusEl.innerHTML = `<span class="text-green-600 dark:text-green-400 font-semibold">✅ Importati turni di ${numNurses} infermieri × ${numDays} giorni</span>`;
+
+  const deltas = computePrevMonthDeltas();
+  if (!deltas || Object.keys(deltas).length === 0) {
+    deltasEl.classList.add('hidden');
+    return;
+  }
+
+  deltasEl.classList.remove('hidden');
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  let html =
+    '<div class="mt-2 p-3 bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-lg max-h-48 overflow-y-auto">';
+  html +=
+    '<p class="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-2">📊 Delta ore mese precedente:</p>';
+  html += '<div class="grid grid-cols-2 sm:grid-cols-3 gap-1">';
+  for (let n = 0; n < activeNurses.length; n++) {
+    const name = activeNurses[n].name;
+    const d = deltas[name];
+    if (d === undefined) continue;
+    const color =
+      d > 0
+        ? 'text-red-600 dark:text-red-400'
+        : d < 0
+          ? 'text-blue-600 dark:text-blue-400'
+          : 'text-gray-500 dark:text-slate-400';
+    const sign = d > 0 ? '+' : '';
+    const label = d > 0 ? '(meno ore prossimo mese)' : d < 0 ? '(più ore prossimo mese)' : '';
+    html += `<div class="text-xs"><span class="font-medium">${escHtml(name)}:</span> <span class="${color}">${sign}${d}h</span> <span class="text-gray-400 text-[10px]">${label}</span></div>`;
+  }
+  html += '</div></div>';
+  deltasEl.innerHTML = html;
+}
+
+/**
+ * Parse pasted CSV text into previous month schedule data.
+ * Expected format: each row is "Name;shift1;shift2;...;shiftN[;ore;D;N;WE]"
+ * Supports both semicolon and comma separators. Header row is auto-detected and skipped.
+ */
+function parsePrevMonthCSV(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+  if (lines.length === 0) return { error: 'Nessun dato trovato.' };
+
+  // Detect separator
+  const sep = lines[0].includes(';') ? ';' : ',';
+
+  // Skip header row if first cell looks like a header
+  let startIdx = 0;
+  const firstCells = lines[0].split(sep).map(c => c.replace(/^"|"$/g, '').trim());
+  if (
+    firstCells[0].toLowerCase().includes('infermiere') ||
+    firstCells[0].toLowerCase().includes('nome') ||
+    firstCells[0].toLowerCase() === 'name'
+  ) {
+    startIdx = 1;
+  }
+
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  const scheduleData = [];
+  const hoursData = [];
+  const matched = [];
+
+  for (let i = startIdx; i < lines.length; i++) {
+    const cells = lines[i].split(sep).map(c => c.replace(/^"|"$/g, '').trim());
+    if (cells.length < 2) continue;
+
+    const name = cells[0];
+    // Extract shift cells — stop when we hit a non-shift value (stats columns)
+    const shifts = [];
+    for (let j = 1; j < cells.length; j++) {
+      const val = cells[j].toUpperCase().trim();
+      if (VALID_SHIFTS.has(val)) {
+        shifts.push(val);
+      } else if (shifts.length > 0) {
+        break; // Hit stats columns
+      }
+    }
+
+    if (shifts.length === 0) continue;
+
+    // Match to active nurse by name
+    const nurseIdx = activeNurses.findIndex(n => n.name.toLowerCase().trim() === name.toLowerCase().trim());
+
+    scheduleData.push({ name, shifts, nurseIdx });
+    // Compute hours from shifts
+    let h = 0;
+    for (const s of shifts) h += SHIFT_HOURS[s] || 0;
+    hoursData.push(Math.round(h * 10) / 10);
+    matched.push(nurseIdx >= 0);
+  }
+
+  if (scheduleData.length === 0) return { error: 'Nessun turno valido trovato nel CSV.' };
+
+  // Check that all rows have the same number of days
+  const numDays = scheduleData[0].shifts.length;
+  const inconsistent = scheduleData.some(r => r.shifts.length !== numDays);
+  if (inconsistent) return { error: 'Le righe hanno un numero diverso di giorni. Verifica il formato.' };
+
+  const matchedCount = matched.filter(Boolean).length;
+
+  return { scheduleData, hoursData, numDays, matchedCount, total: scheduleData.length };
+}
+
+/**
+ * Import parsed CSV data into state, mapping nurses by name order.
+ */
+function importPrevMonthData(scheduleData) {
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  const numDays = scheduleData[0].shifts.length;
+
+  // Build schedule and hours arrays aligned to active nurses order
+  const schedule = [];
+  const hours = [];
+
+  for (let n = 0; n < activeNurses.length; n++) {
+    const entry = scheduleData.find(r => r.name.toLowerCase().trim() === activeNurses[n].name.toLowerCase().trim());
+    if (entry) {
+      schedule.push([...entry.shifts]);
+      let h = 0;
+      for (const s of entry.shifts) h += SHIFT_HOURS[s] || 0;
+      hours.push(Math.round(h * 10) / 10);
+    } else {
+      // No match — fill with nulls (will be ignored in delta computation)
+      schedule.push(new Array(numDays).fill(null));
+      hours.push(null);
+    }
+  }
+
+  state.previousMonthSchedule = schedule;
+  state.previousMonthHours = hours;
+  saveState();
+}
+
+function clearPrevMonth() {
+  state.previousMonthSchedule = null;
+  state.previousMonthHours = null;
+  saveState();
+  renderPrevMonthStatus();
+}
+
+// ---------------------------------------------------------------------------
+// Previous month hour deltas
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute per-nurse hour deltas from the previous month schedule.
+ * Returns an object mapping nurse name → delta (actual - target).
+ * Positive delta means nurse worked MORE than target (should work less next month).
+ * Negative delta means nurse worked LESS than target (should work more next month).
+ */
+function computePrevMonthDeltas() {
+  if (!state.previousMonthSchedule || !state.previousMonthHours) return null;
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  const targetH = state.rules.targetHours;
+  // Previous month had 4 or 5 weeks — compute monthly target from weekly
+  const prevNumDays = state.previousMonthSchedule[0]?.length || 0;
+  if (prevNumDays === 0) return null;
+  // Monthly target approximation: targetHours (weekly) × numDays/7.
+  // This is an approximation since months have 28–31 days (4–4.4 weeks),
+  // but the relative differences between nurses remain accurate.
+  const monthlyTarget = targetH * (prevNumDays / 7);
+  const deltas = {};
+  for (let n = 0; n < activeNurses.length; n++) {
+    const name = activeNurses[n].name;
+    const h = state.previousMonthHours[n];
+    if (h !== undefined && h !== null) {
+      deltas[name] = Math.round((h - monthlyTarget) * 10) / 10;
+    }
+  }
+  return deltas;
+}
+
+/**
+ * Build hourDeltas array for active nurses to pass to solver.
+ * Each entry is the hour adjustment: negative means nurse should work more this month.
+ */
+function buildHourDeltas() {
+  const deltas = computePrevMonthDeltas();
+  if (!deltas) return null;
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  // Negate: if nurse worked +5h MORE last month (positive delta from computePrevMonthDeltas),
+  // they should work LESS this month → solver needs negative adjustment (hourDeltas = -5).
+  // The solver interprets positive hourDeltas as "nurse should work more hours".
+  const hourDeltas = activeNurses.map(n => -(deltas[n.name] || 0));
+  // Only return if at least one delta is nonzero
+  if (hourDeltas.every(d => d === 0)) return null;
+  return hourDeltas;
+}
+
+// ---------------------------------------------------------------------------
 // Step 3 — Genera
 // ---------------------------------------------------------------------------
 
@@ -720,6 +939,7 @@ function renderStep3() {
     `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`
   );
   setEl('summary-nights', `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
+  setEl('summary-prev-month', state.previousMonthSchedule ? '✅ Attiva' : '— Non configurata');
 
   // Bind num solutions slider
   bindRange('inp-num-solutions', 'val-num-solutions', state.numSolutions, v => {
@@ -775,6 +995,7 @@ function startSolver() {
     month: state.month,
     nurses: activeNurses,
     rules: state.rules,
+    hourDeltas: buildHourDeltas(),
   };
 
   const worker = new Worker('js/solver.js');
@@ -878,6 +1099,7 @@ function regenerateTurni() {
     month: state.month,
     nurses: activeNurses,
     rules: regenerationRules,
+    hourDeltas: buildHourDeltas(),
   };
 
   const worker = new Worker('js/solver.js');
@@ -1539,6 +1761,38 @@ function init() {
   // ---- Step 2 ----
   document.getElementById('btn-step2-back')?.addEventListener('click', () => goToStep(1));
   document.getElementById('btn-step2-next')?.addEventListener('click', () => goToStep(3));
+
+  // Previous month CSV import
+  document.getElementById('btn-import-prev-csv')?.addEventListener('click', () => {
+    const modal = document.getElementById('csv-paste-modal');
+    if (modal) modal.classList.remove('hidden');
+  });
+  document.getElementById('btn-csv-cancel')?.addEventListener('click', () => {
+    const modal = document.getElementById('csv-paste-modal');
+    if (modal) modal.classList.add('hidden');
+  });
+  document.getElementById('btn-csv-confirm')?.addEventListener('click', () => {
+    const area = document.getElementById('csv-paste-area');
+    const modal = document.getElementById('csv-paste-modal');
+    if (!area) return;
+    const text = area.value;
+    const result = parsePrevMonthCSV(text);
+    if (result.error) {
+      alert(result.error);
+      return;
+    }
+    importPrevMonthData(result.scheduleData);
+    if (modal) modal.classList.add('hidden');
+    area.value = '';
+    renderPrevMonthStatus();
+    alert(
+      `Importati ${result.total} infermieri × ${result.numDays} giorni. ` +
+        `${result.matchedCount}/${result.total} corrispondenti ai nomi attuali.`
+    );
+  });
+  document.getElementById('btn-clear-prev')?.addEventListener('click', () => {
+    clearPrevMonth();
+  });
 
   // ---- Step 3 ----
   document.getElementById('btn-step3-back')?.addEventListener('click', () => goToStep(2));
