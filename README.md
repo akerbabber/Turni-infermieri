@@ -1,90 +1,126 @@
-# 🏥 Turni Infermieri — Pronto Soccorso
+# Turni Infermieri — Pronto Soccorso
+
+[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![Deploy](../../actions/workflows/deploy.yml/badge.svg)](../../actions/workflows/deploy.yml)
 
 Applicazione web per la **generazione automatica dei turni infermieristici** in Pronto Soccorso.
 Nessun server, nessuna installazione: basta aprire `index.html` nel browser.
 
 ---
 
-## ✨ Funzionalità
+## Funzionalita
 
 - **Wizard a 4 step** — Organico → Regole → Genera → Risultati
 - **Motore di scheduling ibrido** — MILP (HiGHS via WASM) come solver primario, con fallback a euristica greedy + simulated annealing
 - **Modifica interattiva** — click su una cella per cambiare turno manualmente
-- **Soluzioni multiple** — genera e confronta diverse proposte, ordinate per qualità
+- **Soluzioni multiple** — genera e confronta diverse proposte, ordinate per qualita
 - **Export** — CSV, JSON configurazione, stampa ottimizzata per A4 landscape
 - **Dark mode** — tema chiaro/scuro con toggle
-- **Persistenza locale** — tutto il lavoro è salvato in `localStorage`
+- **Persistenza locale** — tutto il lavoro e salvato in `localStorage`
 - **100% offline** — funziona anche senza connessione (Tailwind CSS e HiGHS hanno fallback)
 
-## 🚀 Come usare
+## Quick Start
 
-1. **Apri `index.html`** in un browser moderno (Chrome, Firefox, Edge, Safari)
-2. **Step 1 — Organico**: configura mese/anno, lista infermieri, tag (solo mattine, no notti, assenze…)
-3. **Step 2 — Regole**: imposta coperture min/max per turno, ore target, limiti notti, vincoli aggiuntivi
-4. **Step 3 — Genera**: scegli numero soluzioni e tempo di elaborazione, poi premi "Genera Turni"
-5. **Step 4 — Risultati**: visualizza griglia turni, violazioni, statistiche; modifica manualmente se necessario
+```bash
+# Just open in browser — no install needed
+open index.html
 
-## 📁 Struttura del progetto
-
-```
-index.html        — Pagina unica: UI wizard a 4 step
-js/app.js         — Logica applicativa: stato, rendering, eventi
-js/solver.js      — Web Worker: motore di scheduling (MILP + euristica)
-css/custom.css    — Stili CSS con variabili per temi chiaro/scuro
+# Or serve locally
+npx http-server -p 8080 -c-1
+# or
+python3 -m http.server 8080
 ```
 
-Nessun framework, nessun bundler, nessun `npm install`.
+## Development Setup
 
-## 🔧 Codici turno
+```bash
+# Install dev dependencies (linting, formatting, testing)
+npm install
 
-| Codice | Nome                   | Ore   |
-|--------|------------------------|-------|
-| M      | Mattina                | 6.2   |
-| P      | Pomeriggio             | 6.2   |
-| D      | Diurno (giornata)      | 12.2  |
-| N      | Notte                  | 12.2  |
-| S      | Smonto (post-notte)    | 0     |
-| R      | Riposo                 | 0     |
-| F      | Ferie                  | 6.12  |
-| MA     | Malattia               | 6.12  |
-| L104   | Legge 104              | 6.12  |
-| PR     | Permesso Retribuito    | 6.12  |
-| MT     | Maternità              | 6.12  |
+# Run all checks
+npm run validate
 
-## ⚙️ Motore di scheduling
+# Individual commands
+npm test              # Run solver unit tests
+npm run lint          # ESLint check
+npm run lint:fix      # ESLint auto-fix
+npm run format        # Prettier format
+npm run format:check  # Prettier check
+npm run serve         # Local dev server on port 8080
+```
 
-Il solver gira in un **Web Worker** e usa una strategia a doppio livello:
+## Project Structure
 
-1. **HiGHS MILP** (primario) — Costruisce una formulazione LP in formato CPLEX con variabili binarie di decisione, vincoli hard (copertura, transizioni, blocchi notte) e obiettivo di equità. Usa più seed con perturbazione dell'obiettivo per soluzioni diverse.
+```
+index.html              Single-page UI: 4-step wizard
+js/
+  app.js                Main application logic: state, rendering, events
+  solver.js             Web Worker: scheduling solver (MILP + heuristic)
+css/
+  custom.css            Styles with CSS variables for light/dark themes
+test/
+  solver.test.js        Unit tests for solver pure functions
+.github/
+  workflows/
+    ci.yml              CI pipeline: lint + format + test
+    deploy.yml          GitHub Pages deployment
+  copilot-instructions.md  AI assistant guidelines
+CLAUDE.md               Agent development guide
+```
 
-2. **Greedy + Simulated Annealing** (fallback) — Costruzione euristica multi-restart seguita da ricerca locale (swap, cambio turno, equità, riposo settimanale) con accettazione simulated annealing.
+No framework, no bundler, no build step. Runtime dependencies load from CDN with offline fallbacks.
 
-### Vincoli hard
+## Shift Codes
 
-- Copertura minima/massima giornaliera per tipo di turno
-- Transizioni vietate (es. P→M, N deve essere seguito da S→R→R)
-- Gap minimo 11 ore tra turni
-- Riposo settimanale minimo
-- Limite massimo notti per infermiere
+| Code | Name                   | Hours |
+|------|------------------------|-------|
+| M    | Mattina (Morning)      | 6.2   |
+| P    | Pomeriggio (Afternoon) | 6.2   |
+| D    | Diurno (Day-long)      | 12.2  |
+| N    | Notte (Night)          | 12.2  |
+| S    | Smonto (Post-night)    | 0     |
+| R    | Riposo (Rest)          | 0     |
+| F    | Ferie (Holiday)        | 6.12  |
+| MA   | Malattia (Sick)        | 6.12  |
+| L104 | Legge 104              | 6.12  |
+| PR   | Permesso Retribuito    | 6.12  |
+| MT   | Maternita              | 6.12  |
 
-### Obiettivi soft
+## Scheduling Engine
 
-- Equità ore lavorate tra infermieri
-- Equità turni notturni
-- Equità weekend lavorati
+The solver runs in a **Web Worker** and uses a triple-strategy approach:
 
-## 🖨️ Stampa ed export
+1. **HiGHS MILP** (primary) — Mathematical optimization via WASM. Binary decision variables, hard constraints, fairness objective with multiple seeds.
 
-- **Stampa**: la griglia è ottimizzata per stampa A4 landscape
-- **CSV**: esporta la tabella turni in formato CSV
-- **JSON**: salva/carica la configurazione completa (organico + regole)
+2. **GLPK.js** (secondary) — Alternative MILP solver. Same LP formulation, JavaScript implementation.
 
-## 💻 Requisiti tecnici
+3. **Greedy + Simulated Annealing** (fallback) — Multi-restart construction heuristic with local search. Always available, works offline.
 
-- Qualsiasi browser moderno con supporto Web Worker e ES6+
-- Nessun server necessario — apri direttamente il file HTML
-- Connessione internet opzionale (per Tailwind CSS CDN e HiGHS WASM CDN; in assenza vengono usati i fallback locali)
+### Hard Constraints
+- Daily coverage min/max per shift type (M, P, D, N)
+- Forbidden transitions (P->M, N must be followed by S->R->R)
+- 11-hour minimum gap between consecutive shifts
+- Weekly rest minimums (2+ real rest days per week)
+- Night shift caps per nurse (soft + hard limits)
 
-## 📄 Licenza
+### Soft Objectives
+- Hour equity across nurses (minimax fairness)
+- Night shift distribution fairness
+- D-shift (12h) equity among eligible nurses
+- M/P balance for restricted nurses
 
-Questo progetto è distribuito come software libero.
+## Tech Requirements
+
+- Any modern browser with ES6+, Web Workers, and localStorage
+- No server needed — open the HTML file directly
+- Internet optional (CDN resources have local fallbacks)
+- WebAssembly support recommended (for MILP solvers; heuristic fallback always works)
+
+## CI/CD
+
+- **Pull requests**: Automated linting, format checking, and unit tests via GitHub Actions
+- **Main branch pushes**: Automatic deployment to GitHub Pages (only when runtime files change)
+
+## License
+
+This project is distributed as free software.

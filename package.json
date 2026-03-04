@@ -1,0 +1,22 @@
+{
+  "name": "turni-infermieri",
+  "version": "1.0.0",
+  "description": "Nurse shift scheduling app for emergency rooms",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/solver.test.js",
+    "lint": "eslint js/",
+    "lint:fix": "eslint js/ --fix",
+    "format": "prettier --write 'js/**/*.js' 'css/**/*.css' '*.html'",
+    "format:check": "prettier --check 'js/**/*.js' 'css/**/*.css' '*.html'",
+    "validate": "npm run lint && npm run format:check && npm test",
+    "serve": "npx http-server -p 8080 -c-1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0",
+    "prettier": "^3.2.0"
+  }
+}

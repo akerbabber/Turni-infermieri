@@ -79,7 +79,9 @@ The UI is a 4-step wizard:
 
 1. Open `index.html` in any modern browser — no build step required
 2. To test the solver in isolation, the Web Worker can be loaded directly
-3. There is no automated test suite; manual browser testing is the norm
+3. Run automated tests: `npm test` (Node.js test runner, tests solver pure functions)
+4. Lint: `npm run lint` / Format: `npm run format:check`
+5. Run all checks: `npm run validate`
 
 ## Important Patterns
 

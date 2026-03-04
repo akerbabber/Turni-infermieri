@@ -1,24 +1,16 @@
 /**
- * solver.js — Web Worker for nursing shift scheduling
+ * @file solver.js — Web Worker for nursing shift scheduling
+ * @description Runs in a Web Worker context (no DOM access).
+ * @version 1.0.0
  *
- * Uses a multi-restart local-search approach:
- *   1. Pin fixed assignments (absences, solo_mattine)
- *   2. Construct initial solution via greedy heuristic
- *   3. Optimise via simulated-annealing local search
- *   4. Repeat with different random seeds, keep best
+ * Implements a dual-strategy solver for the Nurse Scheduling Problem (NSP):
+ * 1. HiGHS MILP — Mathematical optimization via WASM (primary)
+ * 2. GLPK.js — Alternative MILP solver (secondary)
+ * 3. Greedy + Simulated Annealing — Heuristic fallback (always available)
  *
- * Shift codes:
- *   M     Mattina    08:00–14:12  (6.2 h)
- *   P     Pomeriggio 14:00–20:12  (6.2 h)
- *   D     Diurno     08:00–20:12  (12.2 h)
- *   N     Notte      20:00–08:12  (12.2 h)
- *   S     Smonto     (post-notte, 0 h, non-rest)
- *   R     Riposo     (0 h, real rest)
- *   F     Ferie      (6.12 h)
- *   MA    Malattia   (6.12 h)
- *   L104  104        (6.12 h)
- *   PR    Permesso Retribuito (6.12 h)
- *   MT    Maternità  (6.12 h)
+ * Communication with main thread via postMessage/onmessage:
+ *   IN:  {type: 'solve', config, numSolutions, timeBudget, solverMethod}
+ *   OUT: {type: 'progress'|'result'|'error', ...}
  */
 
 'use strict';
@@ -28,6 +20,8 @@
 // ---------------------------------------------------------------------------
 
 const SHIFT_HOURS = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 };
+
+const DEBUG = false; // Set to true for verbose solver logging
 
 const EQUITY_THRESHOLD_HOURS = 2;        // ±hours from average before equity move triggers
 const HOUR_EQUITY_MILP_WEIGHT = 0.3;     // weight for minimax hour equity in MILP objective
@@ -772,7 +766,7 @@ function trySwapMP(schedule, n, srcDays, dstDays, mid, srcIsM, ctx) {
 
 function localSearch(schedule, ctx, maxIter, timeLimitSec) {
   const { numDays, numNurses } = ctx;
-  let current     = deepCopy(schedule);
+  const current     = deepCopy(schedule);
   let currentScore = computeScore(current, ctx);
   let best         = deepCopy(current);
   let bestScore    = currentScore;
@@ -1816,7 +1810,7 @@ function loadHiGHS() {
   _highsPromise = new Promise((resolve) => {
     try {
       importScripts('https://cdn.jsdelivr.net/npm/highs@1.8.0/build/highs.js');
-      const initHiGHS = Module || self.Module;
+      const initHiGHS = self.Module;
       if (typeof initHiGHS === 'function') {
         const inst = initHiGHS({
           locateFile: (file) => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file
