@@ -44,6 +44,7 @@ function buildLP(ctx, perturbSeed) {
     consente2D,
     coppiaTurni,
     hourDeltas,
+    prevTail,
   } = ctx;
 
   // Shift indices: M=0, P=1, N=2, S=3, R=4, D=5
@@ -408,6 +409,27 @@ function buildLP(ctx, perturbSeed) {
         if (p1 === 'D' && isDDForbidden) lines.push(` fdd${n}_${d}: ${V(n, d, 5)} <= 0`);
         if (p1 === 'D' && isPDForbidden) lines.push(` fpd${n}_${d}: ${V(n, d, 1)} <= 0`);
       }
+    }
+  }
+
+  // --- Previous month tail: transition constraints for day 0 ---
+  if (prevTail) {
+    for (let n = 0; n < numNurses; n++) {
+      if (!isFree(n, 0)) continue; // day 0 already pinned
+      const tail = prevTail[n];
+      if (!tail || tail.length === 0) continue;
+      const last = tail[tail.length - 1];
+      if (!last) continue;
+      // Forbidden transitions from previous month's last shift to day 0
+      if (last === 'P' && isPMForbidden) lines.push(` ptm${n}: ${V(n, 0, 0)} <= 0`);
+      if (last === 'P' && isPDForbidden) lines.push(` ptd${n}: ${V(n, 0, 5)} <= 0`);
+      if (last === 'D' && isDMForbidden) lines.push(` dtm${n}: ${V(n, 0, 0)} <= 0`);
+      if (last === 'D' && isDPForbidden) lines.push(` dtp${n}: ${V(n, 0, 1)} <= 0`);
+      if (last === 'D' && isDDForbidden) lines.push(` dtd${n}: ${V(n, 0, 5)} <= 0`);
+      // N must be followed by S (already handled by pinning, but add safety)
+      if (last === 'N') lines.push(` ptn${n}: ${V(n, 0, 3)} = 1`);
+      // S must be followed by R
+      if (last === 'S') lines.push(` pts${n}: ${V(n, 0, 4)} = 1`);
     }
   }
 

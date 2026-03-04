@@ -10,7 +10,20 @@
 // ---------------------------------------------------------------------------
 
 function transitionOk(prev, next, ctx, schedule, nurseIdx, dayIdx) {
-  if (!prev) return true;
+  if (!prev) {
+    // Day 0: check previous month tail if available
+    if (ctx.prevTail && nurseIdx !== undefined && dayIdx === 0) {
+      const tail = ctx.prevTail[nurseIdx];
+      if (tail && tail.length > 0) {
+        prev = tail[tail.length - 1];
+        if (!prev) return true;
+      } else {
+        return true;
+      }
+    } else {
+      return true;
+    }
+  }
   const fb = ctx.forbidden[prev];
   if (fb && fb.includes(next)) return false;
   if (ctx.rules.minGap11h && SHIFT_END[prev] !== undefined && SHIFT_START[next] !== undefined) {
@@ -108,6 +121,20 @@ function computeScore(schedule, ctx) {
 
   // Per-nurse hard constraints
   for (let n = 0; n < numNurses; n++) {
+    // Check transition from previous month to day 0
+    if (ctx.prevTail) {
+      const tail = ctx.prevTail[n];
+      if (tail && tail.length > 0) {
+        const lastShift = tail[tail.length - 1];
+        if (lastShift) {
+          const day0 = schedule[n][0];
+          const fb0 = forbidden[lastShift];
+          if (fb0 && fb0.includes(day0)) hard++;
+          if (lastShift === 'N' && day0 !== 'S') hard++;
+          if (lastShift === 'S' && day0 !== 'R') hard++;
+        }
+      }
+    }
     for (let d = 0; d < numDays - 1; d++) {
       const cur = schedule[n][d],
         nxt = schedule[n][d + 1];
@@ -264,6 +291,38 @@ function collectViolations(schedule, ctx) {
   }
 
   for (let n = 0; n < numNurses; n++) {
+    // Check transition from previous month to day 0
+    if (ctx.prevTail) {
+      const tail = ctx.prevTail[n];
+      if (tail && tail.length > 0) {
+        const lastShift = tail[tail.length - 1];
+        if (lastShift) {
+          const day0 = schedule[n][0];
+          const fb0 = forbidden[lastShift];
+          if (fb0 && fb0.includes(day0))
+            violations.push({
+              nurse: n,
+              day: -1,
+              type: 'transition',
+              msg: `Infermiere ${n + 1}, confine mese: transizione vietata ${lastShift}→${day0}`,
+            });
+          if (lastShift === 'N' && day0 !== 'S')
+            violations.push({
+              nurse: n,
+              day: -1,
+              type: 'N_no_S',
+              msg: `Infermiere ${n + 1}, confine mese: N non seguito da S`,
+            });
+          if (lastShift === 'S' && day0 !== 'R')
+            violations.push({
+              nurse: n,
+              day: -1,
+              type: 'S_no_R',
+              msg: `Infermiere ${n + 1}, confine mese: S non seguito da R`,
+            });
+        }
+      }
+    }
     for (let d = 0; d < numDays - 1; d++) {
       const cur = schedule[n][d],
         nxt = schedule[n][d + 1];

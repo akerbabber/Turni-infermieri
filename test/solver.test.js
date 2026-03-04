@@ -864,3 +864,156 @@ describe('computeScore with hourDeltas', () => {
     assert.equal(scoreWith.hard, scoreWithout.hard, 'Hard violations should not change with hourDeltas');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Previous month tail — continuity across months
+// ---------------------------------------------------------------------------
+
+describe('buildContext with previousMonthTail', () => {
+  it('should store prevTail in context when provided', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'R'], ['R', 'N', 'S']];
+    const bctx = ctx.buildContext(config);
+    assert.ok(bctx.prevTail);
+    assert.equal(bctx.prevTail.length, 2);
+  });
+
+  it('should store null prevTail when not provided', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.prevTail, null);
+  });
+
+  it('should pin S on day 0 when previous month ends with N', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'N'], null];
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], 'S');
+    assert.equal(bctx.pinned[0][1], 'R');
+    assert.equal(bctx.pinned[0][2], 'R');
+  });
+
+  it('should pin R on day 0 when previous month ends with N-S', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['R', 'N', 'S'], null];
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], 'R');
+    assert.equal(bctx.pinned[0][1], 'R');
+  });
+
+  it('should pin R on day 0 when previous month ends with N-S-R (non-noDiurni)', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['N', 'S', 'R'], null];
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], 'R');
+  });
+
+  it('should not pin extra R for noDiurni nurse when ending with N-S-R', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      nurseOverrides: { 0: { tags: ['no_diurni'] } },
+    });
+    config.previousMonthTail = [['N', 'S', 'R'], null];
+    const bctx = ctx.buildContext(config);
+    // noDiurni nurse only needs N-S-R, so day 0 should NOT be pinned
+    assert.equal(bctx.pinned[0][0], null);
+  });
+
+  it('should not overwrite existing pinned cells from absences', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      nurseOverrides: {
+        0: {
+          tags: ['ferie'],
+          absencePeriods: { ferie: { start: '2025-01-01', end: '2025-01-05' } },
+        },
+      },
+    });
+    config.previousMonthTail = [['M', 'P', 'N'], null];
+    const bctx = ctx.buildContext(config);
+    // Day 0 (Jan 1) is pinned to F due to absence — should NOT be overwritten
+    assert.equal(bctx.pinned[0][0], 'F');
+  });
+});
+
+describe('transitionOk with previousMonthTail', () => {
+  it('should reject P→M transition at month boundary', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'P'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    // P→M is a forbidden transition
+    assert.equal(ctx.transitionOk(null, 'M', bctx, schedule, 0, 0), false);
+  });
+
+  it('should allow R→M transition at month boundary', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'R'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    assert.equal(ctx.transitionOk(null, 'M', bctx, schedule, 0, 0), true);
+  });
+
+  it('should allow any transition when no prevTail', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    assert.equal(ctx.transitionOk(null, 'M', bctx, schedule, 0, 0), true);
+  });
+
+  it('should reject D→M transition at month boundary', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['R', 'R', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    assert.equal(ctx.transitionOk(null, 'M', bctx, schedule, 0, 0), false);
+  });
+});
+
+describe('computeScore with previousMonthTail', () => {
+  it('should add hard penalties for forbidden transitions at month boundary', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    const bctxNo = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctxNo.numDays).fill('R'));
+    schedule[0][0] = 'M';
+    const scoreNo = ctx.computeScore(schedule, bctxNo);
+
+    // Now with prevTail where nurse 0 had P on last day → P→M forbidden
+    const configWith = makeMinimalConfig({ numNurses: 2 });
+    configWith.previousMonthTail = [['R', 'R', 'P'], null];
+    const bctxWith = ctx.buildContext(configWith);
+    const scoreWith = ctx.computeScore(schedule, bctxWith);
+
+    assert.ok(scoreWith.hard > scoreNo.hard, 'Should have more hard violations with forbidden boundary transition');
+  });
+
+  it('should not add penalties when boundary transition is valid', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    const bctxNo = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctxNo.numDays).fill('R'));
+    schedule[0][0] = 'M';
+    const scoreNo = ctx.computeScore(schedule, bctxNo);
+
+    // prevTail with R on last day → R→M is OK
+    const configWith = makeMinimalConfig({ numNurses: 2 });
+    configWith.previousMonthTail = [['M', 'P', 'R'], null];
+    const bctxWith = ctx.buildContext(configWith);
+    const scoreWith = ctx.computeScore(schedule, bctxWith);
+
+    assert.equal(scoreWith.hard, scoreNo.hard, 'Should have same hard violations when boundary transition is valid');
+  });
+});
+
+describe('collectViolations with previousMonthTail', () => {
+  it('should report boundary transition violations', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['R', 'R', 'P'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'M'; // P→M is forbidden
+    const violations = ctx.collectViolations(schedule, bctx);
+    const boundaryViolations = violations.filter(v => v.day === -1 && v.type === 'transition');
+    assert.ok(boundaryViolations.length > 0, 'Should have boundary transition violations');
+    assert.ok(boundaryViolations[0].msg.includes('confine mese'));
+  });
+});
