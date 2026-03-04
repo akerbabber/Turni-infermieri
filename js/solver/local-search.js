@@ -12,10 +12,10 @@
 
 function localSearch(schedule, ctx, maxIter, timeLimitSec) {
   const { numDays, numNurses } = ctx;
-  const current     = deepCopy(schedule);
+  const current = deepCopy(schedule);
   let currentScore = computeScore(current, ctx);
-  let best         = deepCopy(current);
-  let bestScore    = currentScore;
+  let best = deepCopy(current);
+  let bestScore = currentScore;
 
   const changes = []; // reusable array for tracking cell changes
 
@@ -30,12 +30,12 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
   // Adaptive move selection: track acceptance rates per move type
   const moveStats = [
     { attempts: 0, accepts: 0, weight: 0.25 }, // 0: swap
-    { attempts: 0, accepts: 0, weight: 0.20 }, // 1: change
-    { attempts: 0, accepts: 0, weight: 0.30 }, // 2: equity
+    { attempts: 0, accepts: 0, weight: 0.2 }, // 1: change
+    { attempts: 0, accepts: 0, weight: 0.3 }, // 2: equity
     { attempts: 0, accepts: 0, weight: 0.25 }, // 3: weekly rest
   ];
-  const ADAPT_INTERVAL = 500;  // recalculate weights every N iterations
-  const MIN_WEIGHT = 0.05;     // floor to prevent starving any move type
+  const ADAPT_INTERVAL = 500; // recalculate weights every N iterations
+  const MIN_WEIGHT = 0.05; // floor to prevent starving any move type
 
   const useTimeLimit = timeLimitSec > 0;
   const startMs = useTimeLimit ? Date.now() : 0;
@@ -54,16 +54,14 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     }
 
     // Temperature: use time fraction when time-limited, else iteration fraction
-    const fraction = useTimeLimit
-      ? Math.min(1, (now - startMs) / timeLimitMs)
-      : iter / maxIter;
+    const fraction = useTimeLimit ? Math.min(1, (now - startMs) / timeLimitMs) : iter / maxIter;
     const temp = 2000 * (1 - fraction);
 
     changes.length = 0;
 
     // Adaptive move selection with hard-violation priority
     let moveType;
-    if (currentScore.hard > 0 && Math.random() < 0.30) {
+    if (currentScore.hard > 0 && Math.random() < 0.3) {
       moveType = 3; // weekly rest fix when hard violations exist
     } else {
       // Weighted random selection using adaptive weights
@@ -72,16 +70,27 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
       moveType = 0;
       for (let i = 0; i < moveStats.length; i++) {
         r -= moveStats[i].weight;
-        if (r <= 0) { moveType = i; break; }
+        if (r <= 0) {
+          moveType = i;
+          break;
+        }
       }
     }
 
     let moved = false;
     switch (moveType) {
-      case 0: moved = trySwapMove(current, ctx, changes); break;
-      case 1: moved = tryChangeMove(current, ctx, changes); break;
-      case 2: moved = tryEquityMove(current, ctx, changes, cachedHours, _dayIndices); break;
-      case 3: moved = tryWeeklyRestMove(current, ctx, changes, _nurseIndices); break;
+      case 0:
+        moved = trySwapMove(current, ctx, changes);
+        break;
+      case 1:
+        moved = tryChangeMove(current, ctx, changes);
+        break;
+      case 2:
+        moved = tryEquityMove(current, ctx, changes, cachedHours, _dayIndices);
+        break;
+      case 3:
+        moved = tryWeeklyRestMove(current, ctx, changes, _nurseIndices);
+        break;
     }
 
     moveStats[moveType].attempts++;
@@ -119,7 +128,10 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
         }
       }
       // Reset counters for next adaptation window
-      for (const ms of moveStats) { ms.attempts = 0; ms.accepts = 0; }
+      for (const ms of moveStats) {
+        ms.attempts = 0;
+        ms.accepts = 0;
+      }
     }
   }
   return best;
@@ -138,7 +150,8 @@ function trySwapMove(schedule, ctx, changes) {
   const n2 = Math.floor(Math.random() * numNurses);
   if (n1 === n2) return false;
   if (pinned[n1][d] || pinned[n2][d]) return false;
-  const s1 = schedule[n1][d], s2 = schedule[n2][d];
+  const s1 = schedule[n1][d],
+    s2 = schedule[n2][d];
   if (s1 === s2) return false;
   if (s1 === 'N' || s1 === 'S' || s2 === 'N' || s2 === 'S') return false;
   // solo_diurni: can only have D or R
@@ -150,8 +163,10 @@ function trySwapMove(schedule, ctx, changes) {
   // diurni_e_notturni: can only have D, N, S, R (N/S already handled above)
   if (nurseProps[n1].diurniENotturni && s2 !== 'D' && s2 !== 'R') return false;
   if (nurseProps[n2].diurniENotturni && s1 !== 'D' && s1 !== 'R') return false;
-  const prev1 = d > 0 ? schedule[n1][d - 1] : null, next1 = d < numDays - 1 ? schedule[n1][d + 1] : null;
-  const prev2 = d > 0 ? schedule[n2][d - 1] : null, next2 = d < numDays - 1 ? schedule[n2][d + 1] : null;
+  const prev1 = d > 0 ? schedule[n1][d - 1] : null,
+    next1 = d < numDays - 1 ? schedule[n1][d + 1] : null;
+  const prev2 = d > 0 ? schedule[n2][d - 1] : null,
+    next2 = d < numDays - 1 ? schedule[n2][d + 1] : null;
   if (!transitionOk(prev1, s2, ctx, schedule, n1, d)) return false;
   if (!transitionOk(s2, next1, ctx, schedule, n1, d)) return false;
   if (!transitionOk(prev2, s1, ctx, schedule, n2, d)) return false;
@@ -217,8 +232,20 @@ function tryChangeMove(schedule, ctx, changes) {
 }
 
 function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
-  const { numDays, numNurses, pinned, nurseProps, minCovM, maxCovM, minCovP, maxCovP,
-          minRPerWeek, weekDaysList, weekOf, consente2D } = ctx;
+  const {
+    numDays,
+    numNurses,
+    pinned,
+    nurseProps,
+    minCovM,
+    maxCovM,
+    minCovP,
+    maxCovP,
+    minRPerWeek,
+    weekDaysList,
+    weekOf,
+    consente2D,
+  } = ctx;
   const n = Math.floor(Math.random() * numNurses);
   if (nurseProps[n].soloMattine || nurseProps[n].soloNotti) return false;
 
@@ -324,7 +351,13 @@ function tryWeeklyRestMove(schedule, ctx, changes, nurseIndices) {
         const others = shuffle(Array.from({ length: numNurses }, (_, i) => i).filter(i => i !== n));
         for (const o of others) {
           if (pinned[o][d] || schedule[o][d] !== 'R') continue;
-          if (nurseProps[o].soloMattine || nurseProps[o].soloDiurni || nurseProps[o].soloNotti || nurseProps[o].diurniENotturni) continue;
+          if (
+            nurseProps[o].soloMattine ||
+            nurseProps[o].soloDiurni ||
+            nurseProps[o].soloNotti ||
+            nurseProps[o].diurniENotturni
+          )
+            continue;
           // Check other nurse doesn't go below weekly rest minimum
           const oHave = countWeekRest(schedule, o, wDays);
           const oNeed = requiredRest(wDays.length, minRPerWeek);
@@ -332,12 +365,14 @@ function tryWeeklyRestMove(schedule, ctx, changes, nurseIndices) {
           // Check tag constraints
           if (sN === 'D' && nurseProps[o].noDiurni) continue;
           // Check transitions for both
-          const prevN = d > 0 ? schedule[n][d-1] : null, nextN = d < numDays-1 ? schedule[n][d+1] : null;
-          const prevO = d > 0 ? schedule[o][d-1] : null, nextO = d < numDays-1 ? schedule[o][d+1] : null;
+          const prevN = d > 0 ? schedule[n][d - 1] : null,
+            nextN = d < numDays - 1 ? schedule[n][d + 1] : null;
+          const prevO = d > 0 ? schedule[o][d - 1] : null,
+            nextO = d < numDays - 1 ? schedule[o][d + 1] : null;
           if (!transitionOk(prevN, 'R', ctx, schedule, n, d)) continue;
-          if (!transitionOk('R', nextN, ctx, schedule, n, d+1)) continue;
+          if (!transitionOk('R', nextN, ctx, schedule, n, d + 1)) continue;
           if (!transitionOk(prevO, sN, ctx, schedule, o, d)) continue;
-          if (!transitionOk(sN, nextO, ctx, schedule, o, d+1)) continue;
+          if (!transitionOk(sN, nextO, ctx, schedule, o, d + 1)) continue;
           setCell(schedule, n, d, 'R', changes);
           setCell(schedule, o, d, sN, changes);
           return true;

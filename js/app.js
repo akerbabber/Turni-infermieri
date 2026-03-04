@@ -14,25 +14,88 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const SHIFT_COLORS = { M: 'shift-M', P: 'shift-P', D: 'shift-D', N: 'shift-N', S: 'shift-S', R: 'shift-R', F: 'shift-F', MA: 'shift-MA', L104: 'shift-L104', PR: 'shift-PR', MT: 'shift-MT' };
-const SHIFT_LABELS = { M: 'Mattina', P: 'Pomeriggio', D: 'Diurno', N: 'Notte', S: 'Smonto', R: 'Riposo', F: 'Ferie', MA: 'Malattia', L104: '104', PR: 'Perm.Retr.', MT: 'Maternità' };
-const SHIFT_HOURS  = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 };
-const DOW_LABELS   = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
-const MONTHS_IT    = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
-                      'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const SHIFT_COLORS = {
+  M: 'shift-M',
+  P: 'shift-P',
+  D: 'shift-D',
+  N: 'shift-N',
+  S: 'shift-S',
+  R: 'shift-R',
+  F: 'shift-F',
+  MA: 'shift-MA',
+  L104: 'shift-L104',
+  PR: 'shift-PR',
+  MT: 'shift-MT',
+};
+const SHIFT_LABELS = {
+  M: 'Mattina',
+  P: 'Pomeriggio',
+  D: 'Diurno',
+  N: 'Notte',
+  S: 'Smonto',
+  R: 'Riposo',
+  F: 'Ferie',
+  MA: 'Malattia',
+  L104: '104',
+  PR: 'Perm.Retr.',
+  MT: 'Maternità',
+};
+const SHIFT_HOURS = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 };
+const DOW_LABELS = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+const MONTHS_IT = [
+  'Gennaio',
+  'Febbraio',
+  'Marzo',
+  'Aprile',
+  'Maggio',
+  'Giugno',
+  'Luglio',
+  'Agosto',
+  'Settembre',
+  'Ottobre',
+  'Novembre',
+  'Dicembre',
+];
 
 const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('debug') === 'true';
 
 const DEFAULT_NURSE_NAMES = [
-  'Rossi Marco','Bianchi Laura','Ferrari Giovanni','Esposito Sofia',
-  'Conti Luca','Ricci Anna','Colombo Pietro','Russo Elena',
-  'Marinelli Sara','Greco Alberto','Bruno Claudia','Romano Fabio',
-  'Costa Valentina','Fontana Roberto','Ferrara Giulia','Galli Stefano',
-  'Coppola Marta','Rizzo Davide','Lombardi Chiara','Barbieri Simone',
-  'Moretti Paola','Caruso Marco','De Luca Francesca','Fiore Alessandro',
-  'Pellegrini Ilaria','Monti Nicola','Poli Carmen','Testa Giorgio',
-  'Riva Serena','Sala Massimo','Villa Roberta','Sergi Luigi',
-  'Palumbo Elisa','Messina Diego','Cattaneo Nadia','Rinaldi Lorenzo',
+  'Rossi Marco',
+  'Bianchi Laura',
+  'Ferrari Giovanni',
+  'Esposito Sofia',
+  'Conti Luca',
+  'Ricci Anna',
+  'Colombo Pietro',
+  'Russo Elena',
+  'Marinelli Sara',
+  'Greco Alberto',
+  'Bruno Claudia',
+  'Romano Fabio',
+  'Costa Valentina',
+  'Fontana Roberto',
+  'Ferrara Giulia',
+  'Galli Stefano',
+  'Coppola Marta',
+  'Rizzo Davide',
+  'Lombardi Chiara',
+  'Barbieri Simone',
+  'Moretti Paola',
+  'Caruso Marco',
+  'De Luca Francesca',
+  'Fiore Alessandro',
+  'Pellegrini Ilaria',
+  'Monti Nicola',
+  'Poli Carmen',
+  'Testa Giorgio',
+  'Riva Serena',
+  'Sala Massimo',
+  'Villa Roberta',
+  'Sergi Luigi',
+  'Palumbo Elisa',
+  'Messina Diego',
+  'Cattaneo Nadia',
+  'Rinaldi Lorenzo',
   'Fabbri Agnese',
 ];
 
@@ -85,10 +148,10 @@ function buildDefaultNurses(count) {
     absencePeriods: {
       ferie: { start: null, end: null },
       malattia: { start: null, end: null },
-      '104': { start: null, end: null },
+      104: { start: null, end: null },
       permesso_retribuito: { start: null, end: null },
-      maternita: { start: null, end: null }
-    }
+      maternita: { start: null, end: null },
+    },
   }));
 }
 
@@ -109,8 +172,8 @@ let state = {
   selectedSolution: 0,
   solverMethod: null,
   numSolutions: 3,
-  timeBudget: 0,          // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
-  solverChoice: 'auto',   // 'auto'|'milp'|'glpk'|'fallback'
+  timeBudget: 0, // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
+  solverChoice: 'auto', // 'auto'|'milp'|'glpk'|'fallback'
   worker: null,
   darkMode: false,
 };
@@ -136,16 +199,16 @@ function loadState() {
     // Ensure rules have all keys
     state.rules = { ...DEFAULT_RULES, ...saved.rules };
     // Re-hydrate nurses (ensure tags array and absencePeriods)
-    state.nurses = (saved.nurses || []).map(n => ({ 
-      ...n, 
+    state.nurses = (saved.nurses || []).map(n => ({
+      ...n,
       tags: n.tags || [],
       absencePeriods: n.absencePeriods || {
         ferie: { start: null, end: null },
         malattia: { start: null, end: null },
-        '104': { start: null, end: null },
+        104: { start: null, end: null },
         permesso_retribuito: { start: null, end: null },
-        maternita: { start: null, end: null }
-      }
+        maternita: { start: null, end: null },
+      },
     }));
   } catch (_) {}
 }
@@ -217,9 +280,7 @@ function renderStepNav() {
   steps.forEach(i => {
     const ind = document.getElementById(`btn-nav-${i}`);
     if (!ind) return;
-    ind.className = 'step-indicator ' + (
-      i < state.step ? 'done' : i === state.step ? 'active' : 'pending'
-    );
+    ind.className = 'step-indicator ' + (i < state.step ? 'done' : i === state.step ? 'active' : 'pending');
     if (i < state.step) ind.innerHTML = '✓';
     else ind.textContent = i;
 
@@ -228,7 +289,7 @@ function renderStepNav() {
   });
 
   // Nav buttons
-  ['btn-nav-1','btn-nav-2','btn-nav-3','btn-nav-4'].forEach((id, idx) => {
+  ['btn-nav-1', 'btn-nav-2', 'btn-nav-3', 'btn-nav-4'].forEach((id, idx) => {
     const btn = document.getElementById(id);
     if (btn) {
       btn.classList.toggle('font-bold', idx + 1 === state.step);
@@ -270,7 +331,7 @@ function renderNurseList() {
     { key: 'malattia', label: 'Malattia', shiftCode: 'MA' },
     { key: '104', label: '104', shiftCode: 'L104' },
     { key: 'permesso_retribuito', label: 'Permesso retribuito', shiftCode: 'PR' },
-    { key: 'maternita', label: 'Maternità', shiftCode: 'MT' }
+    { key: 'maternita', label: 'Maternità', shiftCode: 'MT' },
   ];
 
   activeNurses.forEach((nurse, idx) => {
@@ -279,9 +340,9 @@ function renderNurseList() {
       nurse.absencePeriods = {
         ferie: { start: null, end: null },
         malattia: { start: null, end: null },
-        '104': { start: null, end: null },
+        104: { start: null, end: null },
         permesso_retribuito: { start: null, end: null },
-        maternita: { start: null, end: null }
+        maternita: { start: null, end: null },
       };
     }
 
@@ -292,30 +353,34 @@ function renderNurseList() {
 
     const tagDefs = [
       { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine', isAbsence: false },
-      { key: 'solo_diurni',  label: 'Solo diurni 12h',      cls: 'tag-solo_diurni', isAbsence: false },
-      { key: 'solo_notti',   label: 'Solo notti',           cls: 'tag-solo_notti', isAbsence: false },
+      { key: 'solo_diurni', label: 'Solo diurni 12h', cls: 'tag-solo_diurni', isAbsence: false },
+      { key: 'solo_notti', label: 'Solo notti', cls: 'tag-solo_notti', isAbsence: false },
       { key: 'diurni_e_notturni', label: 'Diurni e Notturni', cls: 'tag-diurni_e_notturni', isAbsence: false },
-      { key: 'no_notti',     label: 'No notti',            cls: 'tag-no_notti', isAbsence: false },
-      { key: 'no_diurni',   label: 'No diurni 12h',       cls: 'tag-no_diurni', isAbsence: false },
-      { key: 'ferie',       label: 'Ferie',               cls: 'tag-ferie', isAbsence: true },
-      { key: 'malattia',    label: 'Malattia',            cls: 'tag-malattia', isAbsence: true },
-      { key: '104',         label: '104',                 cls: 'tag-104', isAbsence: true },
+      { key: 'no_notti', label: 'No notti', cls: 'tag-no_notti', isAbsence: false },
+      { key: 'no_diurni', label: 'No diurni 12h', cls: 'tag-no_diurni', isAbsence: false },
+      { key: 'ferie', label: 'Ferie', cls: 'tag-ferie', isAbsence: true },
+      { key: 'malattia', label: 'Malattia', cls: 'tag-malattia', isAbsence: true },
+      { key: '104', label: '104', cls: 'tag-104', isAbsence: true },
       { key: 'permesso_retribuito', label: 'Permesso retribuito', cls: 'tag-permesso_retribuito', isAbsence: true },
-      { key: 'maternita',   label: 'Maternità',           cls: 'tag-maternita', isAbsence: true },
+      { key: 'maternita', label: 'Maternità', cls: 'tag-maternita', isAbsence: true },
     ];
 
-    const tagsHTML = tagDefs.map(t => {
-      const active = nurse.tags.includes(t.key);
-      return `<button class="tag ${t.cls} ${active ? 'active' : 'inactive'}"
+    const tagsHTML = tagDefs
+      .map(t => {
+        const active = nurse.tags.includes(t.key);
+        return `<button class="tag ${t.cls} ${active ? 'active' : 'inactive'}"
                 data-nurse="${idx}" data-tag="${t.key}"
                 title="${t.label}">${t.label}</button>`;
-    }).join('');
+      })
+      .join('');
 
     // Build absence period inputs for active absence tags
     let absencePeriodsHTML = '';
-    tagDefs.filter(t => t.isAbsence && nurse.tags.includes(t.key)).forEach(t => {
-      const period = nurse.absencePeriods[t.key] || { start: null, end: null };
-      absencePeriodsHTML += `
+    tagDefs
+      .filter(t => t.isAbsence && nurse.tags.includes(t.key))
+      .forEach(t => {
+        const period = nurse.absencePeriods[t.key] || { start: null, end: null };
+        absencePeriodsHTML += `
         <div class="absence-period mt-2 p-2 bg-gray-50 dark:bg-slate-800 rounded-lg text-xs" data-nurse="${idx}" data-type="${t.key}">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-semibold ${t.cls.replace('tag-', 'text-')}">${t.label}:</span>
@@ -331,7 +396,7 @@ function renderNurseList() {
           </div>
         </div>
       `;
-    });
+      });
 
     item.innerHTML = `
       <div class="flex items-center gap-2 w-full">
@@ -353,7 +418,12 @@ function renderNurseList() {
       state.nurses[idx].name = nameEl.textContent.trim() || `Infermiere ${idx + 1}`;
       saveState();
     });
-    nameEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); } });
+    nameEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        nameEl.blur();
+      }
+    });
 
     // Tag toggle
     item.querySelectorAll('.tag').forEach(tagBtn => {
@@ -362,7 +432,8 @@ function renderNurseList() {
         const tKey = tagBtn.dataset.tag;
         const tags = state.nurses[nIdx].tags;
         const pos = tags.indexOf(tKey);
-        if (pos >= 0) tags.splice(pos, 1); else tags.push(tKey);
+        if (pos >= 0) tags.splice(pos, 1);
+        else tags.push(tKey);
         saveState();
         renderNurseList();
       });
@@ -427,7 +498,7 @@ function renderNurseList() {
 }
 
 function escHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ---------------------------------------------------------------------------
@@ -438,42 +509,105 @@ function renderStep2() {
   const r = state.rules;
 
   // Coverage sliders - Mattina
-  bindRange('sl-min-cov-m', 'val-min-cov-m', r.minCoverageM, v => { state.rules.minCoverageM = v; saveState(); });
-  bindRange('sl-max-cov-m', 'val-max-cov-m', r.maxCoverageM, v => { state.rules.maxCoverageM = v; saveState(); });
+  bindRange('sl-min-cov-m', 'val-min-cov-m', r.minCoverageM, v => {
+    state.rules.minCoverageM = v;
+    saveState();
+  });
+  bindRange('sl-max-cov-m', 'val-max-cov-m', r.maxCoverageM, v => {
+    state.rules.maxCoverageM = v;
+    saveState();
+  });
 
   // Coverage sliders - Pomeriggio
-  bindRange('sl-min-cov-p', 'val-min-cov-p', r.minCoverageP, v => { state.rules.minCoverageP = v; saveState(); });
-  bindRange('sl-max-cov-p', 'val-max-cov-p', r.maxCoverageP, v => { state.rules.maxCoverageP = v; saveState(); });
+  bindRange('sl-min-cov-p', 'val-min-cov-p', r.minCoverageP, v => {
+    state.rules.minCoverageP = v;
+    saveState();
+  });
+  bindRange('sl-max-cov-p', 'val-max-cov-p', r.maxCoverageP, v => {
+    state.rules.maxCoverageP = v;
+    saveState();
+  });
 
   // Coverage sliders - Diurno
-  bindRange('sl-min-cov-d', 'val-min-cov-d', r.minCoverageD, v => { state.rules.minCoverageD = v; saveState(); });
-  bindRange('sl-max-cov-d', 'val-max-cov-d', r.maxCoverageD, v => { state.rules.maxCoverageD = v; saveState(); });
+  bindRange('sl-min-cov-d', 'val-min-cov-d', r.minCoverageD, v => {
+    state.rules.minCoverageD = v;
+    saveState();
+  });
+  bindRange('sl-max-cov-d', 'val-max-cov-d', r.maxCoverageD, v => {
+    state.rules.maxCoverageD = v;
+    saveState();
+  });
 
   // Coverage sliders - Notte
-  bindRange('sl-min-cov-n', 'val-min-cov-n', r.minCoverageN, v => { state.rules.minCoverageN = v; saveState(); });
-  bindRange('sl-max-cov-n', 'val-max-cov-n', r.maxCoverageN, v => { state.rules.maxCoverageN = v; saveState(); });
+  bindRange('sl-min-cov-n', 'val-min-cov-n', r.minCoverageN, v => {
+    state.rules.minCoverageN = v;
+    saveState();
+  });
+  bindRange('sl-max-cov-n', 'val-max-cov-n', r.maxCoverageN, v => {
+    state.rules.maxCoverageN = v;
+    saveState();
+  });
 
   // Hours
-  bindRange('sl-target-hours', 'val-target-hours', r.targetHours, v => { state.rules.targetHours = v; saveState(); });
-  bindRange('sl-min-hours',    'val-min-hours',    r.minHours,    v => { state.rules.minHours = v; saveState(); });
-  bindRange('sl-max-hours',    'val-max-hours',    r.maxHours,    v => { state.rules.maxHours = v; saveState(); });
+  bindRange('sl-target-hours', 'val-target-hours', r.targetHours, v => {
+    state.rules.targetHours = v;
+    saveState();
+  });
+  bindRange('sl-min-hours', 'val-min-hours', r.minHours, v => {
+    state.rules.minHours = v;
+    saveState();
+  });
+  bindRange('sl-max-hours', 'val-max-hours', r.maxHours, v => {
+    state.rules.maxHours = v;
+    saveState();
+  });
 
   // Nights
-  bindRange('sl-target-nights', 'val-target-nights', r.targetNights,   v => { state.rules.targetNights = v; saveState(); });
-  bindRange('sl-max-nights',    'val-max-nights',    r.maxNights,      v => { state.rules.maxNights = v; saveState(); });
-  bindRange('sl-hard-nights',   'val-hard-nights',   r.hardMaxNights,  v => { state.rules.hardMaxNights = v; saveState(); });
+  bindRange('sl-target-nights', 'val-target-nights', r.targetNights, v => {
+    state.rules.targetNights = v;
+    saveState();
+  });
+  bindRange('sl-max-nights', 'val-max-nights', r.maxNights, v => {
+    state.rules.maxNights = v;
+    saveState();
+  });
+  bindRange('sl-hard-nights', 'val-hard-nights', r.hardMaxNights, v => {
+    state.rules.hardMaxNights = v;
+    saveState();
+  });
 
   // Toggles
-  bindToggle('tog-no-consec-d',   r.noConsecD,    v => { state.rules.noConsecD = v; saveState(); });
-  bindToggle('tog-mandatory-s',   r.mandatoryS,   v => { state.rules.mandatoryS = v; saveState(); });
-  bindToggle('tog-min-gap',       r.minGap11h,    v => { state.rules.minGap11h = v; saveState(); });
-  bindToggle('tog-forward-only',  r.forwardOnly,  v => { state.rules.forwardOnly = v; saveState(); });
-  bindToggle('tog-min-r-week',    r.minRPerWeek > 0, v => { state.rules.minRPerWeek = v ? 2 : 0; saveState(); });
-  
+  bindToggle('tog-no-consec-d', r.noConsecD, v => {
+    state.rules.noConsecD = v;
+    saveState();
+  });
+  bindToggle('tog-mandatory-s', r.mandatoryS, v => {
+    state.rules.mandatoryS = v;
+    saveState();
+  });
+  bindToggle('tog-min-gap', r.minGap11h, v => {
+    state.rules.minGap11h = v;
+    saveState();
+  });
+  bindToggle('tog-forward-only', r.forwardOnly, v => {
+    state.rules.forwardOnly = v;
+    saveState();
+  });
+  bindToggle('tog-min-r-week', r.minRPerWeek > 0, v => {
+    state.rules.minRPerWeek = v ? 2 : 0;
+    saveState();
+  });
+
   // New toggles for additional rules
-  bindToggle('tog-consente-pom-diurno', r.consentePomeriggioDiurno, v => { state.rules.consentePomeriggioDiurno = v; saveState(); });
-  bindToggle('tog-consente-2d', r.consente2DiurniConsecutivi, v => { state.rules.consente2DiurniConsecutivi = v; saveState(); });
-  
+  bindToggle('tog-consente-pom-diurno', r.consentePomeriggioDiurno, v => {
+    state.rules.consentePomeriggioDiurno = v;
+    saveState();
+  });
+  bindToggle('tog-consente-2d', r.consente2DiurniConsecutivi, v => {
+    state.rules.consente2DiurniConsecutivi = v;
+    saveState();
+  });
+
   // Nurse pairing dropdown
   renderNursePairingDropdown();
 }
@@ -503,24 +637,24 @@ function renderNursePairingDropdown() {
   const sel1 = document.getElementById('sel-coppia-1');
   const sel2 = document.getElementById('sel-coppia-2');
   if (!sel1 || !sel2) return;
-  
+
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
-  
+
   // Build options
   let optionsHtml = '<option value="">-- Nessuno --</option>';
   activeNurses.forEach((nurse, idx) => {
     optionsHtml += `<option value="${idx}">${escHtml(nurse.name)}</option>`;
   });
-  
+
   sel1.innerHTML = optionsHtml;
   sel2.innerHTML = optionsHtml;
-  
+
   // Set current values
   if (state.rules.coppiaTurni && Array.isArray(state.rules.coppiaTurni) && state.rules.coppiaTurni.length === 2) {
     sel1.value = state.rules.coppiaTurni[0];
     sel2.value = state.rules.coppiaTurni[1];
   }
-  
+
   // Event handlers
   sel1.onchange = sel2.onchange = () => {
     const v1 = sel1.value;
@@ -547,12 +681,11 @@ function renderNursePairingDropdown() {
 function estimateTimeBudget() {
   const activeCount = state.totalNurses - state.absentNurses;
   const daysInMonth = new Date(state.year, state.month + 1, 0).getDate();
-  const avgCoverage = (
+  const avgCoverage =
     (state.rules.minCoverageM + state.rules.maxCoverageM) / 2 +
     (state.rules.minCoverageP + state.rules.maxCoverageP) / 2 +
     (state.rules.minCoverageD + state.rules.maxCoverageD) / 2 +
-    (state.rules.minCoverageN + state.rules.maxCoverageN) / 2
-  );
+    (state.rules.minCoverageN + state.rules.maxCoverageN) / 2;
   // Complexity proxy: nurses × days × coverage density
   const complexity = activeCount * daysInMonth * avgCoverage;
   // Empirical mapping: ~5000 complexity ≈ 30s, scale linearly
@@ -564,8 +697,8 @@ function estimateTimeBudget() {
 /** Label for the time-budget select dropdown */
 function timeBudgetLabel(value) {
   if (value === -1) return 'Fino a 0 violazioni';
-  if (value === 0)  return 'Auto';
-  if (value < 60)   return `${value} secondi`;
+  if (value === 0) return 'Auto';
+  if (value < 60) return `${value} secondi`;
   return `${value / 60} ${value / 60 === 1 ? 'minuto' : 'minuti'}`;
 }
 
@@ -576,14 +709,23 @@ function renderStep3() {
   if (msg) msg.textContent = '';
 
   const activeCount = state.totalNurses - state.absentNurses;
-  const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  setEl('summary-period',  `${MONTHS_IT[state.month]} ${state.year}`);
-  setEl('summary-nurses',  `${activeCount} / ${state.totalNurses}`);
-  setEl('summary-cov',     `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`);
-  setEl('summary-nights',  `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
+  const setEl = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+  setEl('summary-period', `${MONTHS_IT[state.month]} ${state.year}`);
+  setEl('summary-nurses', `${activeCount} / ${state.totalNurses}`);
+  setEl(
+    'summary-cov',
+    `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`
+  );
+  setEl('summary-nights', `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
 
   // Bind num solutions slider
-  bindRange('inp-num-solutions', 'val-num-solutions', state.numSolutions, v => { state.numSolutions = v; saveState(); });
+  bindRange('inp-num-solutions', 'val-num-solutions', state.numSolutions, v => {
+    state.numSolutions = v;
+    saveState();
+  });
 
   // Bind time budget selector
   const selTime = document.getElementById('sel-time-budget');
@@ -594,16 +736,12 @@ function renderStep3() {
       state.timeBudget = parseInt(selTime.value, 10);
       saveState();
       if (lblEstimate) {
-        lblEstimate.textContent = state.timeBudget === 0
-          ? `Tempo stimato: ~${estimateTimeBudget()} secondi`
-          : '';
+        lblEstimate.textContent = state.timeBudget === 0 ? `Tempo stimato: ~${estimateTimeBudget()} secondi` : '';
       }
     };
   }
   if (lblEstimate) {
-    lblEstimate.textContent = state.timeBudget === 0
-      ? `Tempo stimato: ~${estimateTimeBudget()} secondi`
-      : '';
+    lblEstimate.textContent = state.timeBudget === 0 ? `Tempo stimato: ~${estimateTimeBudget()} secondi` : '';
   }
 
   // Bind solver choice selector
@@ -619,10 +757,16 @@ function renderStep3() {
 
 function startSolver() {
   // Terminate existing worker
-  if (state.worker) { state.worker.terminate(); state.worker = null; }
+  if (state.worker) {
+    state.worker.terminate();
+    state.worker = null;
+  }
 
   const btn = document.getElementById('btn-generate');
-  if (btn) { btn.disabled = true; btn.textContent = 'Elaborazione...'; }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Elaborazione...';
+  }
 
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
 
@@ -636,7 +780,7 @@ function startSolver() {
   const worker = new Worker('js/solver.js');
   state.worker = worker;
 
-  worker.onmessage = (e) => {
+  worker.onmessage = e => {
     const data = e.data;
     if (data.type === 'progress') {
       const bar = document.getElementById('progress-bar');
@@ -644,10 +788,14 @@ function startSolver() {
       if (bar) bar.style.width = data.percent + '%';
       if (msg) msg.textContent = data.message;
     } else if (data.type === 'result') {
-      console.log(`[App] Solver result received: ${data.solutions?.length || 0} solutions, method="${data.solverMethod}"`);
+      console.log(
+        `[App] Solver result received: ${data.solutions?.length || 0} solutions, method="${data.solverMethod}"`
+      );
       if (data.solutions) {
         data.solutions.forEach((sol, i) => {
-          console.log(`[App]   Solution #${i + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations?.length}`);
+          console.log(
+            `[App]   Solution #${i + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations?.length}`
+          );
         });
       }
       state.solutions = data.solutions || [];
@@ -667,23 +815,32 @@ function startSolver() {
       worker.terminate();
       saveState();
       const btnG = document.getElementById('btn-generate');
-      if (btnG) { btnG.disabled = false; btnG.textContent = 'GENERA TURNI'; }
+      if (btnG) {
+        btnG.disabled = false;
+        btnG.textContent = 'GENERA TURNI';
+      }
       goToStep(4);
     } else if (data.type === 'error') {
       console.error('[App] Solver error:', data.message);
       alert('Errore nel solver: ' + data.message);
       const btnG = document.getElementById('btn-generate');
-      if (btnG) { btnG.disabled = false; btnG.textContent = 'GENERA TURNI'; }
+      if (btnG) {
+        btnG.disabled = false;
+        btnG.textContent = 'GENERA TURNI';
+      }
       state.worker = null;
       worker.terminate();
     }
   };
 
-  worker.onerror = (err) => {
+  worker.onerror = err => {
     console.error('[App] Worker error:', err.message, err);
     alert('Errore Worker: ' + err.message);
     const btnG = document.getElementById('btn-generate');
-    if (btnG) { btnG.disabled = false; btnG.textContent = 'GENERA TURNI'; }
+    if (btnG) {
+      btnG.disabled = false;
+      btnG.textContent = 'GENERA TURNI';
+    }
     state.worker = null;
   };
 
@@ -700,10 +857,16 @@ function startSolver() {
 
 function regenerateTurni() {
   // Terminate existing worker
-  if (state.worker) { state.worker.terminate(); state.worker = null; }
+  if (state.worker) {
+    state.worker.terminate();
+    state.worker = null;
+  }
 
   const btn = document.getElementById('btn-regenerate');
-  if (btn) { btn.disabled = true; btn.textContent = 'Rigenerando...'; }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Rigenerando...';
+  }
 
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
 
@@ -720,15 +883,19 @@ function regenerateTurni() {
   const worker = new Worker('js/solver.js');
   state.worker = worker;
 
-  worker.onmessage = (e) => {
+  worker.onmessage = e => {
     const data = e.data;
     if (data.type === 'progress') {
       // Progress can be shown if needed
     } else if (data.type === 'result') {
-      console.log(`[App Regen] Solver result received: ${data.solutions?.length || 0} solutions, method="${data.solverMethod}"`);
+      console.log(
+        `[App Regen] Solver result received: ${data.solutions?.length || 0} solutions, method="${data.solverMethod}"`
+      );
       if (data.solutions) {
         data.solutions.forEach((sol, i) => {
-          console.log(`[App Regen]   Solution #${i + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations?.length}`);
+          console.log(
+            `[App Regen]   Solution #${i + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations?.length}`
+          );
         });
       }
       state.solutions = data.solutions || [];
@@ -748,23 +915,32 @@ function regenerateTurni() {
       worker.terminate();
       saveState();
       const btnR = document.getElementById('btn-regenerate');
-      if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
+      if (btnR) {
+        btnR.disabled = false;
+        btnR.textContent = '🔄 Rigenera turni';
+      }
       renderStep4();
     } else if (data.type === 'error') {
       console.error('[App Regen] Solver error:', data.message);
       alert('Errore nel solver: ' + data.message);
       const btnR = document.getElementById('btn-regenerate');
-      if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
+      if (btnR) {
+        btnR.disabled = false;
+        btnR.textContent = '🔄 Rigenera turni';
+      }
       state.worker = null;
       worker.terminate();
     }
   };
 
-  worker.onerror = (err) => {
+  worker.onerror = err => {
     console.error('[App Regen] Worker error:', err.message, err);
     alert('Errore Worker: ' + err.message);
     const btnR = document.getElementById('btn-regenerate');
-    if (btnR) { btnR.disabled = false; btnR.textContent = '🔄 Rigenera turni'; }
+    if (btnR) {
+      btnR.disabled = false;
+      btnR.textContent = '🔄 Rigenera turni';
+    }
     state.worker = null;
   };
 
@@ -871,7 +1047,8 @@ function renderStep4() {
   renderSolverMethodBanner();
 
   if (!state.schedule) {
-    container.innerHTML = '<p class="text-gray-500 italic text-center py-12">Nessun turno generato. Torna al passo 3.</p>';
+    container.innerHTML =
+      '<p class="text-gray-500 italic text-center py-12">Nessun turno generato. Torna al passo 3.</p>';
     return;
   }
 
@@ -889,7 +1066,9 @@ function renderStep4() {
 
   // Build coverage per day
   function dayStats(d) {
-    let M = 0, P = 0, N = 0;
+    let M = 0,
+      P = 0,
+      N = 0;
     for (let n = 0; n < numNurses; n++) {
       const s = state.schedule[n][d];
       if (s === 'M' || s === 'D') M++;
@@ -941,7 +1120,8 @@ function renderStep4() {
   for (let d = 0; d < numDays; d++) {
     const cov = dayStats(d);
     const min = state.rules.minCoverage;
-    const warnM = cov.M < min, warnP = cov.P < min;
+    const warnM = cov.M < min,
+      warnP = cov.P < min;
     const wk = isWeekend(state.year, state.month, d + 1);
     bodyHTML += `<td class="${wk ? 'col-weekend' : ''}" title="M:${cov.M} P:${cov.P} N:${cov.N}">
       <div class="text-center leading-none">
@@ -954,13 +1134,17 @@ function renderStep4() {
   bodyHTML += `<td class="stats-col"></td></tr>`;
 
   // Build violations summary
-  const vioSummaryHTML = state.violations.length > 0
-    ? `<div class="mt-3 p-3 bg-red-50 dark:bg-red-950 border border-red-300 dark:border-red-700 rounded-lg max-h-32 overflow-y-auto">
+  const vioSummaryHTML =
+    state.violations.length > 0
+      ? `<div class="mt-3 p-3 bg-red-50 dark:bg-red-950 border border-red-300 dark:border-red-700 rounded-lg max-h-32 overflow-y-auto">
          <p class="font-semibold text-red-700 dark:text-red-400 text-sm mb-1">⚠️ Violazioni rilevate (${state.violations.length})</p>
-         ${state.violations.slice(0, 20).map(v => `<p class="text-xs text-red-600 dark:text-red-400">${escHtml(v.msg)}</p>`).join('')}
+         ${state.violations
+           .slice(0, 20)
+           .map(v => `<p class="text-xs text-red-600 dark:text-red-400">${escHtml(v.msg)}</p>`)
+           .join('')}
          ${state.violations.length > 20 ? `<p class="text-xs text-red-500">...e altre ${state.violations.length - 20}</p>` : ''}
        </div>`
-    : `<div class="mt-3 p-3 bg-green-50 dark:bg-green-950 border border-green-300 dark:border-green-700 rounded-lg">
+      : `<div class="mt-3 p-3 bg-green-50 dark:bg-green-950 border border-green-300 dark:border-green-700 rounded-lg">
          <p class="font-semibold text-green-700 dark:text-green-400 text-sm">✅ Nessuna violazione rilevata</p>
        </div>`;
 
@@ -973,17 +1157,21 @@ function renderStep4() {
     </div>
     ${vioSummaryHTML}
     <div class="mt-4 text-xs text-gray-500 flex flex-wrap gap-4 no-print">
-      ${Object.entries(SHIFT_LABELS).map(([k, v]) =>
-        `<span class="inline-flex items-center gap-1">
+      ${Object.entries(SHIFT_LABELS)
+        .map(
+          ([k, v]) =>
+            `<span class="inline-flex items-center gap-1">
            <span class="shift-cell ${SHIFT_COLORS[k]}" style="width:20px;height:18px;font-size:10px">${k}</span>
            <span>${v}</span>
-         </span>`).join('')}
+         </span>`
+        )
+        .join('')}
     </div>
   `;
 
   // Attach click listeners for inline shift editing
   container.querySelectorAll('.shift-cell').forEach(cell => {
-    cell.addEventListener('click', (e) => {
+    cell.addEventListener('click', e => {
       e.stopPropagation();
       const n = parseInt(cell.dataset.n);
       const d = parseInt(cell.dataset.d);
@@ -1007,7 +1195,7 @@ function openShiftDropdown(anchorEl, n, d) {
     btn.style.height = '36px';
     btn.title = SHIFT_LABELS[shift];
     btn.textContent = shift;
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', e => {
       e.stopPropagation();
       applyManualShift(n, d, shift);
       closeDropdown();
@@ -1049,7 +1237,9 @@ function applyManualShift(n, d, newShift) {
   if (old === 'N' && newShift !== 'N') {
     const numDays = daysInMonth(state.year, state.month);
     if (d + 1 < numDays && state.schedule[n][d + 1] === 'S') state.schedule[n][d + 1] = 'R';
-    if (d + 2 < numDays && state.schedule[n][d + 2] === 'R') {/* keep R */}
+    if (d + 2 < numDays && state.schedule[n][d + 2] === 'R') {
+      /* keep R */
+    }
   }
 
   // Recalculate stats for affected nurse
@@ -1064,7 +1254,10 @@ function applyManualShift(n, d, newShift) {
 
 function recalcNurseStats(n) {
   const numDays = daysInMonth(state.year, state.month);
-  let totalHours = 0, nights = 0, diurni = 0, weekends = 0;
+  let totalHours = 0,
+    nights = 0,
+    diurni = 0,
+    weekends = 0;
   for (let d = 0; d < numDays; d++) {
     const s = state.schedule[n][d];
     totalHours += SHIFT_HOURS[s] || 0;
@@ -1094,37 +1287,89 @@ function revalidate() {
       const nxt = state.schedule[n][d + 1];
       const forbidden = FORBIDDEN_NEXT[cur] || [];
       if (forbidden.includes(nxt)) {
-        violations.push({ nurse: n, day: d, type: 'transition', msg: `Inf. ${n + 1}, gg ${d + 1}-${d + 2}: ${cur}→${nxt} vietato` });
+        violations.push({
+          nurse: n,
+          day: d,
+          type: 'transition',
+          msg: `Inf. ${n + 1}, gg ${d + 1}-${d + 2}: ${cur}→${nxt} vietato`,
+        });
       }
     }
     // D-D specific checks when consecutive D shifts are allowed
     if (state.rules.consente2DiurniConsecutivi) {
       for (let d = 1; d < numDays - 1; d++) {
-        if (state.schedule[n][d-1] === 'D' && state.schedule[n][d] === 'D' && state.schedule[n][d+1] !== 'R')
-          violations.push({ nurse: n, day: d + 1, type: 'DD_no_R', msg: `Inf. ${n + 1}, gg ${d + 2}: dopo D-D serve R` });
+        if (state.schedule[n][d - 1] === 'D' && state.schedule[n][d] === 'D' && state.schedule[n][d + 1] !== 'R')
+          violations.push({
+            nurse: n,
+            day: d + 1,
+            type: 'DD_no_R',
+            msg: `Inf. ${n + 1}, gg ${d + 2}: dopo D-D serve R`,
+          });
       }
       for (let d = 2; d < numDays; d++) {
-        if (state.schedule[n][d-2] === 'D' && state.schedule[n][d-1] === 'D' && state.schedule[n][d] === 'D')
-          violations.push({ nurse: n, day: d, type: 'DDD', msg: `Inf. ${n + 1}, gg ${d + 1}: 3 diurni consecutivi non consentiti` });
+        if (state.schedule[n][d - 2] === 'D' && state.schedule[n][d - 1] === 'D' && state.schedule[n][d] === 'D')
+          violations.push({
+            nurse: n,
+            day: d,
+            type: 'DDD',
+            msg: `Inf. ${n + 1}, gg ${d + 1}: 3 diurni consecutivi non consentiti`,
+          });
       }
     }
   }
 
   for (let d = 0; d < numDays; d++) {
-    let M = 0, P = 0, D = 0, N = 0;
+    let M = 0,
+      P = 0,
+      D = 0,
+      N = 0;
     for (let n = 0; n < numNurses; n++) {
       const s = state.schedule[n][d];
       if (s === 'M') M++;
       if (s === 'P') P++;
-      if (s === 'D') { D++; M++; P++; }
+      if (s === 'D') {
+        D++;
+        M++;
+        P++;
+      }
       if (s === 'N') N++;
     }
-    if (M < state.rules.minCoverageM) violations.push({ day: d, type: 'coverage_M', msg: `Giorno ${d + 1}: M insufficiente (${M}/${state.rules.minCoverageM})` });
-    if (M > state.rules.maxCoverageM) violations.push({ day: d, type: 'coverage_M_max', msg: `Giorno ${d + 1}: M eccessiva (${M}/${state.rules.maxCoverageM})` });
-    if (P < state.rules.minCoverageP) violations.push({ day: d, type: 'coverage_P', msg: `Giorno ${d + 1}: P insufficiente (${P}/${state.rules.minCoverageP})` });
-    if (P > state.rules.maxCoverageP) violations.push({ day: d, type: 'coverage_P_max', msg: `Giorno ${d + 1}: P eccessiva (${P}/${state.rules.maxCoverageP})` });
-    if (N < state.rules.minCoverageN) violations.push({ day: d, type: 'coverage_N', msg: `Giorno ${d + 1}: N insufficiente (${N}/${state.rules.minCoverageN})` });
-    if (N > state.rules.maxCoverageN) violations.push({ day: d, type: 'coverage_N_max', msg: `Giorno ${d + 1}: N eccessiva (${N}/${state.rules.maxCoverageN})` });
+    if (M < state.rules.minCoverageM)
+      violations.push({
+        day: d,
+        type: 'coverage_M',
+        msg: `Giorno ${d + 1}: M insufficiente (${M}/${state.rules.minCoverageM})`,
+      });
+    if (M > state.rules.maxCoverageM)
+      violations.push({
+        day: d,
+        type: 'coverage_M_max',
+        msg: `Giorno ${d + 1}: M eccessiva (${M}/${state.rules.maxCoverageM})`,
+      });
+    if (P < state.rules.minCoverageP)
+      violations.push({
+        day: d,
+        type: 'coverage_P',
+        msg: `Giorno ${d + 1}: P insufficiente (${P}/${state.rules.minCoverageP})`,
+      });
+    if (P > state.rules.maxCoverageP)
+      violations.push({
+        day: d,
+        type: 'coverage_P_max',
+        msg: `Giorno ${d + 1}: P eccessiva (${P}/${state.rules.maxCoverageP})`,
+      });
+    if (N < state.rules.minCoverageN)
+      violations.push({
+        day: d,
+        type: 'coverage_N',
+        msg: `Giorno ${d + 1}: N insufficiente (${N}/${state.rules.minCoverageN})`,
+      });
+    if (N > state.rules.maxCoverageN)
+      violations.push({
+        day: d,
+        type: 'coverage_N_max',
+        msg: `Giorno ${d + 1}: N eccessiva (${N}/${state.rules.maxCoverageN})`,
+      });
   }
 
   state.violations = violations;
@@ -1140,22 +1385,33 @@ function exportCSV() {
   const activeNurses = state.nurses.slice(0, state.schedule.length);
 
   // Header row
-  const headers = ['Infermiere', ...Array.from({ length: numDays }, (_, i) => {
-    const dow = DOW_LABELS[dayOfWeek(state.year, state.month, i + 1)];
-    return `${i + 1} ${dow}`;
-  }), 'Ore', 'Diurni', 'Notti', 'Weekend'];
+  const headers = [
+    'Infermiere',
+    ...Array.from({ length: numDays }, (_, i) => {
+      const dow = DOW_LABELS[dayOfWeek(state.year, state.month, i + 1)];
+      return `${i + 1} ${dow}`;
+    }),
+    'Ore',
+    'Diurni',
+    'Notti',
+    'Weekend',
+  ];
 
   const rows = [headers];
   activeNurses.forEach((nurse, n) => {
     const st = state.stats[n] || { totalHours: 0, nights: 0, diurni: 0, weekends: 0 };
-    const row = [nurse.name,
+    const row = [
+      nurse.name,
       ...Array.from({ length: numDays }, (_, d) => state.schedule[n][d] || 'R'),
-      st.totalHours, st.diurni || 0, st.nights, st.weekends
+      st.totalHours,
+      st.diurni || 0,
+      st.nights,
+      st.weekends,
     ];
     rows.push(row);
   });
 
-  const csv = '\uFEFF' + rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(';')).join('\r\n');
+  const csv = '\uFEFF' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   downloadFile(csv, `turni_${MONTHS_IT[state.month]}_${state.year}.csv`, 'text/csv;charset=utf-8;');
 }
 
@@ -1177,15 +1433,15 @@ function saveConfig() {
 
 function loadConfig(file) {
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = e => {
     try {
       const cfg = JSON.parse(e.target.result);
-      state.month       = cfg.month       ?? state.month;
-      state.year        = cfg.year        ?? state.year;
+      state.month = cfg.month ?? state.month;
+      state.year = cfg.year ?? state.year;
       state.totalNurses = cfg.totalNurses ?? state.totalNurses;
       state.absentNurses = cfg.absentNurses ?? state.absentNurses;
-      state.nurses      = (cfg.nurses || []).map(n => ({ ...n, tags: n.tags || [] }));
-      state.rules       = { ...DEFAULT_RULES, ...cfg.rules };
+      state.nurses = (cfg.nurses || []).map(n => ({ ...n, tags: n.tags || [] }));
+      state.rules = { ...DEFAULT_RULES, ...cfg.rules };
       saveState();
       renderAll();
       alert('Configurazione caricata con successo.');
@@ -1244,7 +1500,7 @@ function init() {
   document.addEventListener('click', closeDropdown);
 
   // ---- Step nav buttons ----
-  ['btn-nav-1','btn-nav-2','btn-nav-3','btn-nav-4'].forEach((id, idx) => {
+  ['btn-nav-1', 'btn-nav-2', 'btn-nav-3', 'btn-nav-4'].forEach((id, idx) => {
     document.getElementById(id)?.addEventListener('click', () => goToStep(idx + 1));
   });
 
@@ -1297,7 +1553,7 @@ function init() {
   document.getElementById('btn-load-config')?.addEventListener('click', () => {
     document.getElementById('inp-load-file')?.click();
   });
-  document.getElementById('inp-load-file')?.addEventListener('change', (e) => {
+  document.getElementById('inp-load-file')?.addEventListener('change', e => {
     const file = e.target.files?.[0];
     if (file) loadConfig(file);
     e.target.value = '';

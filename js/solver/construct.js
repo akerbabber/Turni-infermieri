@@ -20,10 +20,29 @@
 // ---------------------------------------------------------------------------
 
 function construct(ctx) {
-  const { numDays, numNurses, nurses, rules, nurseProps, pinned,
-          minCovM, maxCovM, minCovP, maxCovP, minCovD, maxCovD,
-          minCovN, maxCovN, targetNights, maxNights, preferDiurni,
-          coppiaTurni, consente2D, minRPerWeek, weekDaysList } = ctx;
+  const {
+    numDays,
+    numNurses,
+    nurses,
+    rules,
+    nurseProps,
+    pinned,
+    minCovM,
+    maxCovM,
+    minCovP,
+    maxCovP,
+    minCovD,
+    maxCovD,
+    minCovN,
+    maxCovN,
+    targetNights,
+    maxNights,
+    preferDiurni,
+    coppiaTurni,
+    consente2D,
+    minRPerWeek,
+    weekDaysList,
+  } = ctx;
 
   const schedule = Array.from({ length: numNurses }, () => new Array(numDays).fill(null));
 
@@ -104,8 +123,8 @@ function construct(ctx) {
           // Primary: prefer nurses whose offset matches their cycle
           const aCycle = nurseCycleLen.get(a);
           const bCycle = nurseCycleLen.get(b);
-          const aMatch = (d % aCycle === nurseStartOffset.get(a)) ? 0 : 1;
-          const bMatch = (d % bCycle === nurseStartOffset.get(b)) ? 0 : 1;
+          const aMatch = d % aCycle === nurseStartOffset.get(a) ? 0 : 1;
+          const bMatch = d % bCycle === nurseStartOffset.get(b) ? 0 : 1;
           if (aMatch !== bMatch) return aMatch - bMatch;
           // Secondary: prefer noDiurni nurses (shorter blocks, more efficient)
           const aNd = nurseProps[a].noDiurni ? 0 : 1;
@@ -156,13 +175,25 @@ function construct(ctx) {
       let canClear = true;
       for (let i = 0; i < needSlots; i++) {
         const slot = schedule[n][d + i];
-        if (pinned[n][d + i]) { canClear = false; break; }
-        if (slot !== null && slot !== 'R') { canClear = false; break; }
+        if (pinned[n][d + i]) {
+          canClear = false;
+          break;
+        }
+        if (slot !== null && slot !== 'R') {
+          canClear = false;
+          break;
+        }
         // If it's R, check it's not mandatory post-night rest
         if (slot === 'R' && d + i > 0) {
           const prevSlot = schedule[n][d + i - 1];
-          if (prevSlot === 'S') { canClear = false; break; }
-          if (prevSlot === 'R' && d + i > 1 && schedule[n][d + i - 2] === 'S') { canClear = false; break; }
+          if (prevSlot === 'S') {
+            canClear = false;
+            break;
+          }
+          if (prevSlot === 'R' && d + i > 1 && schedule[n][d + i - 2] === 'S') {
+            canClear = false;
+            break;
+          }
         }
       }
       if (!canClear) continue;
@@ -193,7 +224,10 @@ function construct(ctx) {
     let cov = 0;
     const nightNurses = [];
     for (let n = 0; n < numNurses; n++) {
-      if (schedule[n][d] === 'N') { cov++; nightNurses.push(n); }
+      if (schedule[n][d] === 'N') {
+        cov++;
+        nightNurses.push(n);
+      }
     }
     while (cov > maxCovN && nightNurses.length > 0) {
       // Find nurse with most nights to remove
@@ -210,7 +244,6 @@ function construct(ctx) {
       nightStarts[d]--;
     }
   }
-
 
   // Phase 3 — Day shifts (M, P, D)
   function eligible(n, d, s) {
@@ -240,8 +273,7 @@ function construct(ctx) {
   for (let d = 0; d < numDays; d++) {
     const cov = dayCoverage(schedule, d, numNurses);
     const avail = () => {
-      const nurses = shuffle(Array.from({ length: numNurses }, (_, i) => i)
-        .filter(n => schedule[n][d] === null));
+      const nurses = shuffle(Array.from({ length: numNurses }, (_, i) => i).filter(n => schedule[n][d] === null));
       // Primary sort: prefer nurses who still have weekly-rest budget for this day's week
       // Secondary sort: fewest hours first (equity)
       nurses.sort((a, b) => {
@@ -260,7 +292,8 @@ function construct(ctx) {
       const wIdx = ctx.weekOf(day);
       const wDays = weekDaysList[wIdx];
       const need = requiredRest(wDays.length, minRPerWeek);
-      let haveRest = 0, freeSlots = 0;
+      let haveRest = 0,
+        freeSlots = 0;
       for (const wd of wDays) {
         if (schedule[n][wd] === 'R') haveRest++;
         else if (schedule[n][wd] === null && wd !== day) freeSlots++;
@@ -269,10 +302,15 @@ function construct(ctx) {
     }
 
     if (preferDiurni) {
-      for (const n of avail().filter(n => !nurseProps[n].noDiurni && !nurseProps[n].soloMattine && !nurseProps[n].soloNotti)) {
+      for (const n of avail().filter(
+        n => !nurseProps[n].noDiurni && !nurseProps[n].soloMattine && !nurseProps[n].soloNotti
+      )) {
         if (cov.D >= maxCovD || cov.M >= maxCovM || cov.P >= maxCovP) break;
         if (!eligible(n, d, 'D')) continue;
-        schedule[n][d] = 'D'; cov.D++; cov.M++; cov.P++;
+        schedule[n][d] = 'D';
+        cov.D++;
+        cov.M++;
+        cov.P++;
       }
     }
 
@@ -280,9 +318,11 @@ function construct(ctx) {
     // Pre-compute M/P counts per nurse for balance sorting
     const mpCount = new Array(numNurses);
     for (let n = 0; n < numNurses; n++) {
-      let mc = 0, pc = 0;
+      let mc = 0,
+        pc = 0;
       for (let dd = 0; dd < numDays; dd++) {
-        if (schedule[n][dd] === 'M') mc++; else if (schedule[n][dd] === 'P') pc++;
+        if (schedule[n][dd] === 'M') mc++;
+        else if (schedule[n][dd] === 'P') pc++;
       }
       mpCount[n] = { m: mc, p: pc };
     }
@@ -297,18 +337,24 @@ function construct(ctx) {
         if (s === 'P' && cov.P >= maxCovP) continue;
         // Below minCov: prioritize coverage (ignore weekly budget)
         // At or above minCov: respect weekly budget
-        const belowMin = (s === 'M' ? cov.M < minCovM : cov.P < minCovP);
+        const belowMin = s === 'M' ? cov.M < minCovM : cov.P < minCovP;
         const candidates = avail().filter(n => eligible(n, d, s) && (belowMin || hasWeekBudget(n, d)));
         // Sort candidates: prefer nurses who need this shift type for personal M/P balance
         candidates.sort((a, b) => {
-          const aBal = s === 'M' ? (mpCount[a].m - mpCount[a].p) : (mpCount[a].p - mpCount[a].m);
-          const bBal = s === 'M' ? (mpCount[b].m - mpCount[b].p) : (mpCount[b].p - mpCount[b].m);
+          const aBal = s === 'M' ? mpCount[a].m - mpCount[a].p : mpCount[a].p - mpCount[a].m;
+          const bBal = s === 'M' ? mpCount[b].m - mpCount[b].p : mpCount[b].p - mpCount[b].m;
           return aBal - bBal;
         });
         if (candidates.length > 0) {
           const n = candidates[0];
           schedule[n][d] = s;
-          if (s === 'M') { cov.M++; mpCount[n].m++; } else { cov.P++; mpCount[n].p++; }
+          if (s === 'M') {
+            cov.M++;
+            mpCount[n].m++;
+          } else {
+            cov.P++;
+            mpCount[n].p++;
+          }
           assigned = true;
           break;
         }
@@ -319,19 +365,23 @@ function construct(ctx) {
     // If still short on M or P, try promoting to D (covers both M+P slots)
     // Only if D won't push either M or P over their maximum
     if (cov.M < minCovM || cov.P < minCovP) {
-      for (const n of avail().filter(n => !nurseProps[n].noDiurni && !nurseProps[n].soloMattine && !nurseProps[n].soloNotti)) {
+      for (const n of avail().filter(
+        n => !nurseProps[n].noDiurni && !nurseProps[n].soloMattine && !nurseProps[n].soloNotti
+      )) {
         if (cov.M >= maxCovM || cov.P >= maxCovP) break;
         if (cov.D >= maxCovD) break;
         if (!eligible(n, d, 'D')) continue;
-        schedule[n][d] = 'D'; cov.D++; cov.M++; cov.P++;
+        schedule[n][d] = 'D';
+        cov.D++;
+        cov.M++;
+        cov.P++;
       }
     }
   }
 
   // Phase 4 — Fill remaining with R
   for (let n = 0; n < numNurses; n++)
-    for (let d = 0; d < numDays; d++)
-      if (schedule[n][d] === null) schedule[n][d] = 'R';
+    for (let d = 0; d < numDays; d++) if (schedule[n][d] === null) schedule[n][d] = 'R';
 
   // Phase 4.5 — Weekly rest enforcement
   if (minRPerWeek > 0) {
@@ -349,7 +399,10 @@ function construct(ctx) {
             const prev = d > 0 ? schedule[n][d - 1] : null;
             const next = d < numDays - 1 ? schedule[n][d + 1] : null;
             if (transitionOk(prev, 'R', ctx, schedule, n, d) && transitionOk('R', next, ctx, schedule, n, d + 1)) {
-              schedule[n][d] = 'R'; rest++; converted = true; break;
+              schedule[n][d] = 'R';
+              rest++;
+              converted = true;
+              break;
             }
           }
           if (!converted) break;
@@ -360,14 +413,28 @@ function construct(ctx) {
 
   // Phase 4.6 — M/P balance for no_diurni and no_notti nurses
   for (let n = 0; n < numNurses; n++) {
-    if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti || nurseProps[n].diurniENotturni) continue;
+    if (
+      nurseProps[n].soloMattine ||
+      nurseProps[n].soloDiurni ||
+      nurseProps[n].soloNotti ||
+      nurseProps[n].diurniENotturni
+    )
+      continue;
     // Apply to no_diurni nurses and also to no_diurni+no_notti nurses
     if (!nurseProps[n].noDiurni) continue;
-    let mCount = 0, pCount = 0;
-    const mDays = [], pDays = [];
+    let mCount = 0,
+      pCount = 0;
+    const mDays = [],
+      pDays = [];
     for (let d = 0; d < numDays; d++) {
-      if (schedule[n][d] === 'M') { mCount++; mDays.push(d); }
-      if (schedule[n][d] === 'P') { pCount++; pDays.push(d); }
+      if (schedule[n][d] === 'M') {
+        mCount++;
+        mDays.push(d);
+      }
+      if (schedule[n][d] === 'P') {
+        pCount++;
+        pDays.push(d);
+      }
     }
     // Swap excess M to P or vice versa to balance
     const diff = mCount - pCount;
@@ -440,8 +507,8 @@ function trySwapMP(schedule, n, srcDays, dstDays, mid, srcIsM, ctx) {
       if (!transitionOk(newDst, nextD, ctx, schedule, n, dDay)) continue;
       const covS = dayCoverage(schedule, sDay, numNurses);
       const covD = dayCoverage(schedule, dDay, numNurses);
-      const okS = srcIsM ? (covS.M > minCovM && covS.P < maxCovP) : (covS.P > minCovP && covS.M < maxCovM);
-      const okD = srcIsM ? (covD.P > minCovP && covD.M < maxCovM) : (covD.M > minCovM && covD.P < maxCovP);
+      const okS = srcIsM ? covS.M > minCovM && covS.P < maxCovP : covS.P > minCovP && covS.M < maxCovM;
+      const okD = srcIsM ? covD.P > minCovP && covD.M < maxCovM : covD.M > minCovM && covD.P < maxCovP;
       if (okS && okD) {
         schedule[n][sDay] = newSrc;
         schedule[n][dDay] = newDst;

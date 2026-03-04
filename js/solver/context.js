@@ -11,7 +11,7 @@
 
 function buildContext(config) {
   const { year, month, nurses, rules } = config;
-  const numDays   = daysInMonth(year, month);
+  const numDays = daysInMonth(year, month);
   const numNurses = nurses.length;
 
   // Forbidden-transition table (may be relaxed by rule flags)
@@ -21,17 +21,17 @@ function buildContext(config) {
     N: [...BASE_FORBIDDEN_NEXT.N],
     S: [...BASE_FORBIDDEN_NEXT.S],
   };
-  if (rules.consentePomeriggioDiurno)  forbidden.P = forbidden.P.filter(s => s !== 'D');
+  if (rules.consentePomeriggioDiurno) forbidden.P = forbidden.P.filter(s => s !== 'D');
   if (rules.consente2DiurniConsecutivi) forbidden.D = forbidden.D.filter(s => s !== 'D');
 
   // Per-nurse properties
   const nurseProps = nurses.map(n => ({
     soloMattine: n.tags.includes('solo_mattine'),
-    soloDiurni:  n.tags.includes('solo_diurni'),
-    soloNotti:   n.tags.includes('solo_notti'),
+    soloDiurni: n.tags.includes('solo_diurni'),
+    soloNotti: n.tags.includes('solo_notti'),
     diurniENotturni: n.tags.includes('diurni_e_notturni'),
-    noNotti:     n.tags.includes('no_notti'),
-    noDiurni:    n.tags.includes('no_diurni'),
+    noNotti: n.tags.includes('no_notti'),
+    noDiurni: n.tags.includes('no_diurni'),
   }));
 
   // Day-of-week cache & week index helpers
@@ -43,17 +43,21 @@ function buildContext(config) {
   const numWeeks = weekOf(numDays - 1) + 1;
 
   // Coverage targets
-  const minCovM = rules.minCoverageM ?? 6, maxCovM = rules.maxCoverageM ?? 7;
-  const minCovP = rules.minCoverageP ?? 6, maxCovP = rules.maxCoverageP ?? 7;
-  const minCovD = rules.minCoverageD ?? 0, maxCovD = rules.maxCoverageD ?? 4;
-  const minCovN = rules.minCoverageN ?? 6, maxCovN = rules.maxCoverageN ?? 6;
+  const minCovM = rules.minCoverageM ?? 6,
+    maxCovM = rules.maxCoverageM ?? 7;
+  const minCovP = rules.minCoverageP ?? 6,
+    maxCovP = rules.maxCoverageP ?? 7;
+  const minCovD = rules.minCoverageD ?? 0,
+    maxCovD = rules.maxCoverageD ?? 4;
+  const minCovN = rules.minCoverageN ?? 6,
+    maxCovN = rules.maxCoverageN ?? 6;
 
   const targetNights = rules.targetNights ?? 4;
-  const maxNights    = rules.maxNights ?? 7;
-  const minRPerWeek  = rules.minRPerWeek ?? 2;
+  const maxNights = rules.maxNights ?? 7;
+  const minRPerWeek = rules.minRPerWeek ?? 2;
   const preferDiurni = rules.preferDiurni ?? false;
-  const coppiaTurni  = rules.coppiaTurni ?? null;
-  const consente2D   = rules.consente2DiurniConsecutivi ?? false;
+  const coppiaTurni = rules.coppiaTurni ?? null;
+  const consente2D = rules.consente2DiurniConsecutivi ?? false;
 
   // Pre-compute pinned cells (absences + solo_mattine)
   // pinned[n][d] = shift code or null
@@ -62,9 +66,12 @@ function buildContext(config) {
     const nurse = nurses[n];
     for (let d = 0; d < numDays; d++) {
       const abs = getAbsenceShift(nurse, d + 1, year, month);
-      if (abs) { pinned[n][d] = abs; continue; }
+      if (abs) {
+        pinned[n][d] = abs;
+        continue;
+      }
       if (nurseProps[n].soloMattine) {
-        pinned[n][d] = (dows[d] === 0 || dows[d] === 6) ? 'R' : 'M';
+        pinned[n][d] = dows[d] === 0 || dows[d] === 6 ? 'R' : 'M';
       }
     }
   }
@@ -74,11 +81,33 @@ function buildContext(config) {
   for (let d = 0; d < numDays; d++) weekDaysList[weekOf(d)].push(d);
 
   return {
-    year, month, nurses, rules, numDays, numNurses,
-    forbidden, nurseProps, dows, weekOf, numWeeks, pinned, weekDaysList,
-    minCovM, maxCovM, minCovP, maxCovP, minCovD, maxCovD,
-    minCovN, maxCovN, targetNights, maxNights, minRPerWeek,
-    preferDiurni, coppiaTurni, consente2D,
+    year,
+    month,
+    nurses,
+    rules,
+    numDays,
+    numNurses,
+    forbidden,
+    nurseProps,
+    dows,
+    weekOf,
+    numWeeks,
+    pinned,
+    weekDaysList,
+    minCovM,
+    maxCovM,
+    minCovP,
+    maxCovP,
+    minCovD,
+    maxCovD,
+    minCovN,
+    maxCovN,
+    targetNights,
+    maxNights,
+    minRPerWeek,
+    preferDiurni,
+    coppiaTurni,
+    consente2D,
   };
 }
 
