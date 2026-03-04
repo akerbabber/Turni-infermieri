@@ -31,6 +31,7 @@ function buildContext(config) {
     soloNotti: n.tags.includes('solo_notti'),
     diurniENotturni: n.tags.includes('diurni_e_notturni'),
     noNotti: n.tags.includes('no_notti'),
+    diurniNoNotti: n.tags.includes('diurni_no_notti'),
     noDiurni: n.tags.includes('no_diurni'),
   }));
 

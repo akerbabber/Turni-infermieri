@@ -419,6 +419,19 @@ describe('buildContext', () => {
     assert.equal(bctx.pinned[1][0], null);
   });
 
+  it('should set diurniNoNotti property for diurni_no_notti nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      nurseOverrides: {
+        0: { tags: ['diurni_no_notti'] },
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.nurseProps[0].diurniNoNotti, true);
+    assert.equal(bctx.nurseProps[0].noNotti, false);
+    assert.equal(bctx.nurseProps[1].diurniNoNotti, false);
+  });
+
   it('should populate coverage targets from rules', () => {
     const config = makeMinimalConfig({
       rules: { minCoverageM: 5, maxCoverageP: 10 },
