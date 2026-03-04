@@ -1762,7 +1762,36 @@ function init() {
   document.getElementById('btn-step2-back')?.addEventListener('click', () => goToStep(1));
   document.getElementById('btn-step2-next')?.addEventListener('click', () => goToStep(3));
 
-  // Previous month CSV import
+  // Previous month CSV import — file upload
+  document.getElementById('btn-upload-prev-csv')?.addEventListener('click', () => {
+    document.getElementById('inp-prev-csv-file')?.click();
+  });
+  document.getElementById('inp-prev-csv-file')?.addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      e.target.value = '';
+      const text = reader.result;
+      const result = parsePrevMonthCSV(text);
+      if (result.error) {
+        alert(result.error);
+        return;
+      }
+      importPrevMonthData(result.scheduleData);
+      renderPrevMonthStatus();
+      alert(
+        `Importati ${result.total} infermieri × ${result.numDays} giorni. ` +
+          `${result.matchedCount}/${result.total} corrispondenti ai nomi attuali.`
+      );
+    };
+    reader.onerror = () => {
+      e.target.value = '';
+      alert('Errore durante la lettura del file. Riprova.');
+    };
+    reader.readAsText(file, 'UTF-8');
+  });
+  // Previous month CSV import — paste text
   document.getElementById('btn-import-prev-csv')?.addEventListener('click', () => {
     const modal = document.getElementById('csv-paste-modal');
     if (modal) modal.classList.remove('hidden');
