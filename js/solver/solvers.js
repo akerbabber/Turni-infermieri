@@ -29,9 +29,11 @@ function _patchHighsSolve(h) {
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       const isParseErr = msg.includes('parse solution') || msg.includes('Too few lines');
+      // Mark instance as corrupted — WASM state may be inconsistent after any error
+      _highsCorrupted = true;
       if (isParseErr) {
         console.warn('[HiGHS] Caught solution parse error (highs-js bug): ' + msg);
-        console.warn('[HiGHS] Returning empty result — model likely infeasible or presolve-reduced');
+        console.warn('[HiGHS] Instance marked as corrupted — will reload for next attempt');
         return { Status: 'Infeasible (solution parse failed)', Columns: {} };
       }
       throw err;
@@ -40,32 +42,28 @@ function _patchHighsSolve(h) {
   console.log('[HiGHS] Patched solve() to handle solution parse errors');
 }
 
+let _highsFactory = null; // saved Emscripten factory function (survives instance reloads)
 let _highsPromise = null;
+let _highsCorrupted = false; // set to true after any solve error (WASM state unreliable)
 let _highsLoadDiag = ''; // diagnostic message from last load attempt
-function loadHiGHS() {
-  if (_highsPromise) return _highsPromise;
-  console.log('[HiGHS] Starting load...');
-  const t0 = Date.now();
-  _highsPromise = new Promise(resolve => {
-    try {
-      importScripts('https://cdn.jsdelivr.net/npm/highs@1.8.0/build/highs.js');
-      console.log(`[HiGHS] importScripts completed in ${Date.now() - t0}ms`);
 
-      // Emscripten MODULARIZE=1 sets the factory on self.Module (default EXPORT_NAME)
-      const initHiGHS = self.Module;
-      if (typeof initHiGHS !== 'function') {
-        // Log all globals that look like they could be HiGHS
-        const candidates = Object.keys(self).filter(
-          k => /highs|module|solver/i.test(k) && typeof self[k] === 'function'
-        );
-        const msg = `self.Module is ${typeof initHiGHS}, not a function. Candidate globals: [${candidates.join(', ')}]`;
+/**
+ * Create a fresh HiGHS WASM instance from the saved factory.
+ * Returns a promise that resolves to the highs object or null.
+ */
+function _createHighsInstance() {
+  const t0 = Date.now();
+  return new Promise(resolve => {
+    try {
+      if (typeof _highsFactory !== 'function') {
+        const msg = `HiGHS factory is ${typeof _highsFactory}, not a function`;
         console.error('[HiGHS]', msg);
         _highsLoadDiag = msg;
         resolve(null);
         return;
       }
 
-      const inst = initHiGHS({
+      const inst = _highsFactory({
         locateFile: file => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file,
       });
 
@@ -100,6 +98,53 @@ function loadHiGHS() {
         resolve(inst);
       }
     } catch (e) {
+      const msg = `Instance creation failed: ${e.message || e}`;
+      console.error('[HiGHS]', msg);
+      _highsLoadDiag = msg;
+      resolve(null);
+    }
+  });
+}
+
+function loadHiGHS() {
+  // Return cached instance if valid
+  if (_highsPromise && !_highsCorrupted) return _highsPromise;
+
+  // If corrupted, discard old instance and create fresh one
+  if (_highsCorrupted) {
+    console.log('[HiGHS] Previous instance corrupted, creating fresh WASM instance...');
+    _highsPromise = null;
+    _highsCorrupted = false;
+  }
+
+  console.log('[HiGHS] Starting load...');
+  const t0 = Date.now();
+  _highsPromise = new Promise(resolve => {
+    try {
+      // Load the script only once; save the factory for re-instantiation
+      if (!_highsFactory) {
+        importScripts('https://cdn.jsdelivr.net/npm/highs@1.8.0/build/highs.js');
+        console.log(`[HiGHS] importScripts completed in ${Date.now() - t0}ms`);
+
+        // Emscripten MODULARIZE=1 sets the factory on self.Module (default EXPORT_NAME)
+        _highsFactory = self.Module;
+        if (typeof _highsFactory !== 'function') {
+          const candidates = Object.keys(self).filter(
+            k => /highs|module|solver/i.test(k) && typeof self[k] === 'function'
+          );
+          const msg = `self.Module is ${typeof _highsFactory}, not a function. Candidate globals: [${candidates.join(', ')}]`;
+          console.error('[HiGHS]', msg);
+          _highsLoadDiag = msg;
+          _highsFactory = null;
+          resolve(null);
+          return;
+        }
+      } else {
+        console.log('[HiGHS] Script already loaded, creating fresh WASM instance...');
+      }
+
+      _createHighsInstance().then(resolve);
+    } catch (e) {
       const msg = `importScripts failed: ${e.message || e}`;
       console.error('[HiGHS]', msg);
       _highsLoadDiag = msg;
@@ -124,6 +169,7 @@ function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
 
   const opts = {
     time_limit: timeLimit,
+    presolve: 'off', // avoid highs-js solution parse bug when presolve reduces the problem
     mip_rel_gap: 0.05, // relaxed from 0.02 to find feasible solutions faster
     mip_feasibility_tolerance: 1e-4,
     random_seed: perturbSeed * 137,
@@ -391,7 +437,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
   }
 
   // Determine which solvers to try
-  const useHiGHS =
+  let useHiGHS =
     milpAvailable && (solverChoice === 'auto' || solverChoice === 'milp' || solverChoice === 'milp_strict');
   const useGLPK = glpkAvailable && (solverChoice === 'auto' || solverChoice === 'glpk');
   const strictMode = solverChoice === 'milp_strict';
@@ -447,6 +493,20 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
               );
             }
             progress(pctBase, `${batchLabel}HiGHS fallito: ${reason}`);
+            // Reload corrupted instance for next attempt
+            if (_highsCorrupted) {
+              try {
+                console.log('[Solver] Reloading corrupted HiGHS instance after parse failure...');
+                highs = await loadHiGHS();
+                if (!highs || typeof highs.solve !== 'function') {
+                  console.error('[Solver] HiGHS reload failed after parse failure');
+                  useHiGHS = false;
+                }
+              } catch (reloadErr) {
+                console.error('[Solver] HiGHS reload exception:', reloadErr.message);
+                useHiGHS = false;
+              }
+            }
           }
         } catch (highsErr) {
           if (strictMode && highsErr.message.includes('HiGHS MILP non ha trovato')) {
@@ -461,6 +521,21 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
             );
           }
           progress(pctBase, `${batchLabel}HiGHS errore: ${highsErr.message || highsErr}`);
+        }
+
+        // Reload HiGHS if corrupted (for next solution attempt)
+        if (_highsCorrupted && !solved) {
+          try {
+            console.log('[Solver] Reloading corrupted HiGHS instance...');
+            highs = await loadHiGHS();
+            if (!highs || typeof highs.solve !== 'function') {
+              console.error('[Solver] HiGHS reload failed, disabling for remaining solutions');
+              useHiGHS = false;
+            }
+          } catch (reloadErr) {
+            console.error('[Solver] HiGHS reload exception:', reloadErr.message);
+            useHiGHS = false;
+          }
         }
       }
 
