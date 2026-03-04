@@ -103,6 +103,7 @@ let state = {
   solverMethod: null,
   numSolutions: 3,
   timeBudget: 0,          // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
+  solverChoice: 'auto',   // 'auto'|'milp'|'glpk'|'fallback'
   worker: null,
   darkMode: false,
 };
@@ -597,6 +598,16 @@ function renderStep3() {
       ? `Tempo stimato: ~${estimateTimeBudget()} secondi`
       : '';
   }
+
+  // Bind solver choice selector
+  const selSolver = document.getElementById('sel-solver-method');
+  if (selSolver) {
+    selSolver.value = state.solverChoice || 'auto';
+    selSolver.onchange = () => {
+      state.solverChoice = selSolver.value;
+      saveState();
+    };
+  }
 }
 
 function startSolver() {
@@ -668,6 +679,7 @@ function startSolver() {
     numSolutions: state.numSolutions,
     timeBudget: effectiveTimeBudget,
     untilZeroViolations: state.timeBudget === -1,
+    solverChoice: state.solverChoice || 'auto',
   });
 }
 
@@ -740,6 +752,7 @@ function regenerateTurni() {
     numSolutions: state.numSolutions,
     timeBudget: effectiveTimeBudget,
     untilZeroViolations: state.timeBudget === -1,
+    solverChoice: state.solverChoice || 'auto',
   });
 }
 
@@ -815,9 +828,13 @@ function renderSolverMethodBanner() {
     banner.innerHTML = `<div class="p-3 bg-green-50 dark:bg-green-950 border border-green-300 dark:border-green-700 rounded-lg">
       <p class="font-semibold text-green-700 dark:text-green-400 text-sm">✅ Algoritmo utilizzato: <strong>HiGHS MILP</strong> (ottimizzazione matematica)</p>
     </div>`;
+  } else if (method === 'glpk') {
+    banner.innerHTML = `<div class="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-300 dark:border-blue-700 rounded-lg">
+      <p class="font-semibold text-blue-700 dark:text-blue-400 text-sm">✅ Algoritmo utilizzato: <strong>GLPK.js</strong> (ottimizzazione matematica)</p>
+    </div>`;
   } else {
     banner.innerHTML = `<div class="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 rounded-lg">
-      <p class="font-semibold text-amber-700 dark:text-amber-400 text-sm">⚠️ Algoritmo utilizzato: <strong>Euristica fallback</strong> — il solver MILP (HiGHS) non era disponibile o non ha trovato una soluzione. I risultati potrebbero essere meno ottimali.</p>
+      <p class="font-semibold text-amber-700 dark:text-amber-400 text-sm">⚠️ Algoritmo utilizzato: <strong>Euristica</strong> (greedy + simulated annealing) — nessun solver MILP ha trovato una soluzione.</p>
     </div>`;
   }
 }

@@ -1821,87 +1821,314 @@ const MILP_DEFAULT_TOTAL_TIME_BUDGET = 30;
 // Safety cap to prevent indefinite runs in zero-violations mode (10 minutes)
 const UNTIL_ZERO_MAX_TIME = 600;
 
+// ---------------------------------------------------------------------------
+// GLPK.js solver loading and LP-to-GLPK conversion
+// ---------------------------------------------------------------------------
+
+let _glpkPromise = null;
+function loadGLPK() {
+  if (_glpkPromise) return _glpkPromise;
+  _glpkPromise = new Promise((resolve) => {
+    try {
+      importScripts('https://cdn.jsdelivr.net/npm/glpk.js/dist/glpk.min.js');
+      const initGLPK = self.GLPK || self.glpk;
+      if (typeof initGLPK === 'function') {
+        const inst = initGLPK();
+        if (inst && typeof inst.then === 'function') {
+          inst.then(g => resolve(g)).catch(() => resolve(null));
+        } else {
+          resolve(inst);
+        }
+      } else {
+        resolve(null);
+      }
+    } catch (_e) {
+      resolve(null);
+    }
+  });
+  return _glpkPromise;
+}
+
 /**
- * Multi-solution solver using HiGHS MILP + fallback to greedy.
+ * Parse LP-format linear expression into array of {name, coef} terms.
+ */
+function parseLPTerms(expr) {
+  const terms = [];
+  const s = expr.replace(/\+\s*-/g, '- ').replace(/-\s*-/g, '+ ').trim();
+  const re = /([+-])?\s*(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)?\s*([a-zA-Z_]\w*)/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const sign = m[1] === '-' ? -1 : 1;
+    const coef = m[2] ? parseFloat(m[2]) : 1;
+    terms.push({ name: m[3], coef: sign * coef });
+  }
+  return terms;
+}
+
+/**
+ * Convert a CPLEX LP format string (from buildLP) into a GLPK.js JSON model.
+ */
+function lpToGLPKModel(lpString, glpk) {
+  const lines = lpString.split('\n');
+  let section = null;
+  // GLP constants: GLP_MIN=1, GLP_MAX=2, GLP_LO=2, GLP_UP=3, GLP_FX=5
+  const GLP_MIN = glpk.GLP_MIN, GLP_LO = glpk.GLP_LO, GLP_UP = glpk.GLP_UP, GLP_FX = glpk.GLP_FX;
+  const objective = { direction: GLP_MIN, name: 'obj', vars: [] };
+  const subjectTo = [];
+  const modelBounds = [];
+  const binaries = [];
+  let objExpr = '';
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const lower = line.toLowerCase();
+    if (lower === 'minimize' || lower === 'min') { section = 'obj'; continue; }
+    if (lower === 'maximize' || lower === 'max') { section = 'obj'; objective.direction = glpk.GLP_MAX; continue; }
+    if (lower === 'subject to' || lower === 'st' || lower.startsWith('subject to')) { section = 'st'; continue; }
+    if (lower === 'bounds') { section = 'bounds'; continue; }
+    if (lower === 'binary' || lower === 'binaries' || lower === 'bin') { section = 'bin'; continue; }
+    if (lower === 'end') break;
+
+    switch (section) {
+      case 'obj': {
+        const part = line.includes(':') ? line.split(':').slice(1).join(':') : line;
+        objExpr += ' ' + part;
+        break;
+      }
+      case 'st': {
+        const colonIdx = line.indexOf(':');
+        if (colonIdx < 0) continue;
+        const cName = line.substring(0, colonIdx).trim();
+        const rest = line.substring(colonIdx + 1).trim();
+        let op, lhsStr, rhsVal;
+        const leIdx = rest.indexOf('<=');
+        const geIdx = rest.indexOf('>=');
+        if (leIdx >= 0) {
+          lhsStr = rest.substring(0, leIdx).trim();
+          rhsVal = parseFloat(rest.substring(leIdx + 2).trim());
+          op = GLP_UP;
+        } else if (geIdx >= 0) {
+          lhsStr = rest.substring(0, geIdx).trim();
+          rhsVal = parseFloat(rest.substring(geIdx + 2).trim());
+          op = GLP_LO;
+        } else {
+          const eqIdx = rest.indexOf('=');
+          if (eqIdx < 0) continue;
+          lhsStr = rest.substring(0, eqIdx).trim();
+          rhsVal = parseFloat(rest.substring(eqIdx + 1).trim());
+          op = GLP_FX;
+        }
+        if (isNaN(rhsVal)) continue;
+        const vars = parseLPTerms(lhsStr);
+        if (vars.length === 0) continue;
+        const bnds = op === GLP_UP ? { type: op, ub: rhsVal, lb: 0 }
+                   : op === GLP_LO ? { type: op, lb: rhsVal, ub: 0 }
+                   : { type: op, lb: rhsVal, ub: rhsVal };
+        subjectTo.push({ name: cName, vars, bnds });
+        break;
+      }
+      case 'bounds': {
+        const bMatch = line.match(/^\s*([\d.]+)\s*<=\s*([a-zA-Z_]\w*)\s*$/);
+        if (bMatch) {
+          modelBounds.push({ name: bMatch[2], type: GLP_LO, lb: parseFloat(bMatch[1]), ub: 0 });
+        }
+        break;
+      }
+      case 'bin':
+        line.split(/\s+/).forEach(v => { if (v && /^[a-zA-Z_]/.test(v)) binaries.push(v); });
+        break;
+    }
+  }
+
+  objective.vars = parseLPTerms(objExpr);
+  if (objective.vars.length === 0) return null;
+
+  const model = { name: 'nurse_scheduling', objective, subjectTo, binaries };
+  if (modelBounds.length > 0) model.bounds = modelBounds;
+  return model;
+}
+
+/**
+ * Solve a single MILP instance with GLPK.js.
+ */
+async function solveOneGLPK(glpk, ctx, perturbSeed, timeLimit) {
+  const lp = buildLP(ctx, perturbSeed);
+  const model = lpToGLPKModel(lp, glpk);
+  if (!model) return null;
+
+  try {
+    let result = glpk.solve(model, {
+      msglev: glpk.GLP_MSG_OFF,
+      tmlim: Math.ceil(timeLimit),
+      mipgap: 0.02,
+    });
+    // Handle both sync and async solve
+    if (result && typeof result.then === 'function') {
+      result = await result;
+    }
+    if (!result || !result.result) return null;
+    const status = result.result.status;
+    // GLP_OPT = 5, GLP_FEAS = 2
+    if (status !== 5 && status !== 2) return null;
+    return parseGLPKSolution(result.result.vars, ctx);
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
+ * Parse GLPK solution variables into schedule array.
+ */
+function parseGLPKSolution(vars, ctx) {
+  const { numDays, numNurses, pinned } = ctx;
+  const SHIFTS = ['M', 'P', 'N', 'S', 'R', 'D'];
+  const schedule = Array.from({ length: numNurses }, () => new Array(numDays).fill(null));
+
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (pinned[n][d]) schedule[n][d] = pinned[n][d];
+    }
+  }
+
+  for (const [name, value] of Object.entries(vars)) {
+    if (!name.startsWith('x')) continue;
+    if (Math.round(value) !== 1) continue;
+    const parts = name.substring(1).split('_');
+    const n = parseInt(parts[0]), d = parseInt(parts[1]), s = parseInt(parts[2]);
+    if (n >= 0 && n < numNurses && d >= 0 && d < numDays && s >= 0 && s < SHIFTS.length) {
+      schedule[n][d] = SHIFTS[s];
+    }
+  }
+
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (schedule[n][d] === null) schedule[n][d] = 'R';
+    }
+  }
+
+  return schedule;
+}
+
+// ---------------------------------------------------------------------------
+// Main solver — async, with configurable algorithm selection
+// ---------------------------------------------------------------------------
+
+/**
+ * Multi-solution solver with configurable algorithm: HiGHS MILP / GLPK.js / heuristic.
  * @param {object} config
  * @param {number} numSolutions
  * @param {number} timeBudget  – total seconds allocated; 0 or undefined = default 30s
  * @param {boolean} untilZeroViolations – keep generating until a 0-violation solution is found
+ * @param {string} solverChoice – 'auto'|'milp'|'glpk'|'fallback'
  */
-function solve(config, numSolutions, timeBudget, untilZeroViolations) {
+async function solve(config, numSolutions, timeBudget, untilZeroViolations, solverChoice) {
+  solverChoice = solverChoice || 'auto';
   numSolutions = Math.max(1, Math.min(numSolutions || 1, 20));
   const totalBudget = (timeBudget && timeBudget > 0) ? timeBudget : MILP_DEFAULT_TOTAL_TIME_BUDGET;
   const ctx = buildContext(config);
   const solutions = [];
 
-  // Try HiGHS MILP first
-  let highs = null;
-  let milpAvailable = false;
-  try {
-    progress(2, 'Caricamento solver MILP…');
-    // Try synchronous load (importScripts is synchronous in workers)
-    try {
-      importScripts('https://cdn.jsdelivr.net/npm/highs@1.8.0/build/highs.js');
-    } catch (_e) { /* may already be loaded */ }
+  // Load solvers based on user choice
+  let highs = null, glpk = null;
+  let milpAvailable = false, glpkAvailable = false;
 
-    if (typeof Module === 'function') {
-      highs = Module({
-        locateFile: (file) => 'https://cdn.jsdelivr.net/npm/highs@1.8.0/build/' + file
-      });
+  if (solverChoice === 'auto' || solverChoice === 'milp') {
+    progress(1, 'Caricamento solver HiGHS MILP…');
+    try {
+      highs = await loadHiGHS();
       milpAvailable = highs && typeof highs.solve === 'function';
-    }
-  } catch (_e) {
-    milpAvailable = false;
+    } catch (_e) { milpAvailable = false; }
   }
 
+  if (solverChoice === 'auto' || solverChoice === 'glpk') {
+    progress(2, 'Caricamento solver GLPK…');
+    try {
+      glpk = await loadGLPK();
+      glpkAvailable = glpk && typeof glpk.solve === 'function';
+    } catch (_e) { glpkAvailable = false; }
+  }
+
+  // Determine which solvers to try
+  const useHiGHS = milpAvailable && (solverChoice === 'auto' || solverChoice === 'milp');
+  const useGLPK = glpkAvailable && (solverChoice === 'auto' || solverChoice === 'glpk');
+
   /** Generate one batch of solutions */
-  function generateBatch(batchSolutions, batchLabel, seedOffset) {
+  async function generateBatch(batchSolutions, batchLabel, seedOffset) {
     const milpTimeLimitSec = Math.max(MILP_MIN_TIME_PER_SOLUTION,
       Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions)));
-    // Total wall-clock time budget per solution (includes MILP + polish or greedy)
     const perSolutionBudgetSec = Math.max(1, totalBudget / numSolutions);
 
     for (let i = 0; i < numSolutions; i++) {
       const pctBase = 5 + Math.floor(i * 80 / numSolutions);
-      if (milpAvailable) {
-        progress(pctBase, `${batchLabel}MILP: soluzione ${i + 1}/${numSolutions}…`);
+      const seed = seedOffset + i;
+      let solved = false;
+
+      // Try HiGHS MILP
+      if (useHiGHS && !solved) {
+        progress(pctBase, `${batchLabel}HiGHS MILP: soluzione ${i + 1}/${numSolutions}…`);
         try {
-          const seed = seedOffset + i;
           const milpStart = Date.now();
           const schedule = solveOneMILP(highs, ctx, seed, milpTimeLimitSec);
           const milpElapsed = (Date.now() - milpStart) / 1000;
           if (schedule) {
-            // Polish with remaining time after actual MILP elapsed time
             const polishTimeSec = Math.max(1, perSolutionBudgetSec - milpElapsed);
             const polished = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, polishTimeSec);
             const violations = collectViolations(polished, ctx);
             const stats = computeStats(polished, ctx);
             const score = computeScore(polished, ctx);
             batchSolutions.push({ schedule: polished, violations, stats, score: score.total, solverMethod: 'milp' });
-            continue;
+            solved = true;
           }
-        } catch (_e) { /* fall through to greedy */ }
+        } catch (_e) { /* fall through */ }
       }
-      // Greedy fallback — use full per-solution time budget for local search
-      progress(pctBase,
-               `${batchLabel}${milpAvailable ? 'Fallback euristica' : 'Euristica'} ${i + 1}/${numSolutions}…`);
-      const schedule = construct(ctx);
-      const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec);
-      const violations = collectViolations(improved, ctx);
-      const stats = computeStats(improved, ctx);
-      const score = computeScore(improved, ctx);
-      batchSolutions.push({ schedule: improved, violations, stats, score: score.total, solverMethod: 'fallback' });
+
+      // Try GLPK
+      if (useGLPK && !solved) {
+        progress(pctBase, `${batchLabel}GLPK: soluzione ${i + 1}/${numSolutions}…`);
+        try {
+          const glpkStart = Date.now();
+          const schedule = await solveOneGLPK(glpk, ctx, seed, milpTimeLimitSec);
+          const glpkElapsed = (Date.now() - glpkStart) / 1000;
+          if (schedule) {
+            const polishTimeSec = Math.max(1, perSolutionBudgetSec - glpkElapsed);
+            const polished = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, polishTimeSec);
+            const violations = collectViolations(polished, ctx);
+            const stats = computeStats(polished, ctx);
+            const score = computeScore(polished, ctx);
+            batchSolutions.push({ schedule: polished, violations, stats, score: score.total, solverMethod: 'glpk' });
+            solved = true;
+          }
+        } catch (_e) { /* fall through */ }
+      }
+
+      // Greedy + SA fallback
+      if (!solved) {
+        const label = (useHiGHS || useGLPK) ? 'Fallback euristica' : 'Euristica';
+        progress(pctBase, `${batchLabel}${label} ${i + 1}/${numSolutions}…`);
+        const schedule = construct(ctx);
+        const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec);
+        const violations = collectViolations(improved, ctx);
+        const stats = computeStats(improved, ctx);
+        const score = computeScore(improved, ctx);
+        batchSolutions.push({ schedule: improved, violations, stats, score: score.total, solverMethod: 'fallback' });
+      }
     }
   }
 
-  if (!milpAvailable) {
-    progress(5, 'MILP non disponibile, euristica classica…');
+  // Status message
+  const availSolvers = [];
+  if (useHiGHS) availSolvers.push('HiGHS');
+  if (useGLPK) availSolvers.push('GLPK');
+  if (availSolvers.length > 0) {
+    progress(5, `Solver disponibili: ${availSolvers.join(', ')}. Generazione soluzioni…`);
   } else {
-    progress(5, 'Solver MILP caricato, generazione soluzioni…');
+    progress(5, solverChoice === 'fallback'
+      ? 'Euristica selezionata manualmente…'
+      : 'Nessun solver MILP disponibile, euristica classica…');
   }
 
   if (untilZeroViolations) {
-    // Run in a loop until we find a solution with 0 violations or safety time expires
     const startTime = Date.now();
     let round = 1;
     let foundZero = false;
@@ -1913,15 +2140,14 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
       }
       const prevLen = solutions.length;
       progress(5, `Tentativo #${round} — ricerca soluzione senza violazioni…`);
-      generateBatch(solutions, `[#${round}] `, (round - 1) * numSolutions);
-      // Check only newly added solutions from this batch
+      await generateBatch(solutions, `[#${round}] `, (round - 1) * numSolutions);
       for (let j = prevLen; j < solutions.length; j++) {
         if (solutions[j].violations.length === 0) { foundZero = true; break; }
       }
       round++;
     }
   } else {
-    generateBatch(solutions, '', 0);
+    await generateBatch(solutions, '', 0);
   }
 
   // Sort by score (best first)
@@ -1937,14 +2163,14 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
 // Worker interface
 // ---------------------------------------------------------------------------
 
-self.onmessage = function (e) {
+self.onmessage = async function (e) {
   if (e.data.type === 'solve') {
     try {
       const numSolutions = e.data.numSolutions || 1;
       const timeBudget = e.data.timeBudget || 0;
       const untilZeroViolations = !!e.data.untilZeroViolations;
-      const solutions = solve(e.data.config, numSolutions, timeBudget, untilZeroViolations);
-      // Send all solutions; first one is the best
+      const solverChoice = e.data.solverChoice || 'auto';
+      const solutions = await solve(e.data.config, numSolutions, timeBudget, untilZeroViolations, solverChoice);
       const best = solutions[0] || {};
       self.postMessage({
         type: 'result',
