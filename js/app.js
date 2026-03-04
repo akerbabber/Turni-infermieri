@@ -1771,6 +1771,7 @@ function init() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
+      e.target.value = '';
       const text = reader.result;
       const result = parsePrevMonthCSV(text);
       if (result.error) {
@@ -1784,8 +1785,11 @@ function init() {
           `${result.matchedCount}/${result.total} corrispondenti ai nomi attuali.`
       );
     };
+    reader.onerror = () => {
+      e.target.value = '';
+      alert('Errore durante la lettura del file. Riprova.');
+    };
     reader.readAsText(file, 'UTF-8');
-    e.target.value = '';
   });
   // Previous month CSV import — paste text
   document.getElementById('btn-import-prev-csv')?.addEventListener('click', () => {
