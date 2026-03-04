@@ -90,6 +90,7 @@ function computeScore(schedule, ctx) {
     forbidden,
     nurseProps,
     weekDaysList,
+    hourDeltas,
   } = ctx;
   let hard = 0,
     soft = 0;
@@ -147,10 +148,15 @@ function computeScore(schedule, ctx) {
   }
 
   // Soft: hours equity (weight 3 — on par with night fairness)
+  // When hourDeltas from previous month are available, each nurse has an individual
+  // target (avg + delta) so that nurses who worked less before work more now.
   const hours = [];
   for (let n = 0; n < numNurses; n++) hours.push(nurseHours(schedule, n, numDays));
   const avg = hours.reduce((a, b) => a + b, 0) / numNurses;
-  for (const h of hours) soft += Math.abs(h - avg) * 3;
+  for (let n = 0; n < numNurses; n++) {
+    const target = avg + (hourDeltas ? hourDeltas[n] || 0 : 0);
+    soft += Math.abs(hours[n] - target) * 3;
+  }
 
   // Soft: night-count fairness
   for (let n = 0; n < numNurses; n++) {

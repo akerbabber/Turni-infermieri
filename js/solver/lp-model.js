@@ -43,6 +43,7 @@ function buildLP(ctx, perturbSeed) {
     forbidden,
     consente2D,
     coppiaTurni,
+    hourDeltas,
   } = ctx;
 
   // Shift indices: M=0, P=1, N=2, S=3, R=4, D=5
@@ -113,8 +114,10 @@ function buildLP(ctx, perturbSeed) {
     }
   }
 
-  // --- Hour equity via minimax: minimize (hmax - hmin) of total hours ---
-  // Identify nurses whose hours the MILP can meaningfully control
+  // --- Hour equity via minimax: minimize (hmax - hmin) of adjusted hours ---
+  // When hourDeltas from previous month are available, each nurse's effective hours
+  // are offset: adjusted = actual - delta, so nurses who should work more (positive delta)
+  // appear to have fewer hours, driving the solver to assign them more work.
   const contVars = [];
   const controllable = [];
   for (let n = 0; n < numNurses; n++) {
@@ -143,10 +146,11 @@ function buildLP(ctx, perturbSeed) {
         }
       }
       if (hTerms.length === 0) continue;
-      // totalHrs_n = pinnedHrs[n] + freeHrs_n <= hmax
-      eqConstraints.push(` eqMx${n}: ${hTerms.join(' + ')} - hmax <= ${(-pinnedHrs[n]).toFixed(2)}`);
-      // totalHrs_n = pinnedHrs[n] + freeHrs_n >= hmin
-      eqConstraints.push(` eqMn${n}: hmin - ${hTerms.join(' - ')} <= ${pinnedHrs[n].toFixed(2)}`);
+      const delta = hourDeltas ? hourDeltas[n] || 0 : 0;
+      // adjusted_hours_n = pinnedHrs[n] + freeHrs_n - delta <= hmax
+      eqConstraints.push(` eqMx${n}: ${hTerms.join(' + ')} - hmax <= ${(-(pinnedHrs[n] - delta)).toFixed(2)}`);
+      // adjusted_hours_n = pinnedHrs[n] + freeHrs_n - delta >= hmin
+      eqConstraints.push(` eqMn${n}: hmin - ${hTerms.join(' - ')} <= ${(pinnedHrs[n] - delta).toFixed(2)}`);
     }
   }
 

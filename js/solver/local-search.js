@@ -245,6 +245,7 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
     weekDaysList,
     weekOf,
     consente2D,
+    hourDeltas,
   } = ctx;
   const n = Math.floor(Math.random() * numNurses);
   if (nurseProps[n].soloMattine || nurseProps[n].soloNotti) return false;
@@ -262,12 +263,15 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
     avg = allH.reduce((a, b) => a + b, 0) / numNurses;
   }
 
+  // Per-nurse target adjusted by previous month delta
+  const target = avg + (hourDeltas ? hourDeltas[n] || 0 : 0);
+
   const isDiurniOnly = nurseProps[n].soloDiurni || nurseProps[n].diurniENotturni;
 
   // Reuse pre-allocated day indices array instead of allocating new ones
   const days = dayIndices ? shuffle([...dayIndices]) : shuffle(Array.from({ length: numDays }, (_, i) => i));
 
-  if (h > avg + EQUITY_THRESHOLD_HOURS) {
+  if (h > target + EQUITY_THRESHOLD_HOURS) {
     for (const d of days) {
       if (pinned[n][d]) continue;
       const s = schedule[n][d];
@@ -287,7 +291,7 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
       setCell(schedule, n, d, 'R', changes);
       return true;
     }
-  } else if (h < avg - EQUITY_THRESHOLD_HOURS) {
+  } else if (h < target - EQUITY_THRESHOLD_HOURS) {
     for (const d of days) {
       if (pinned[n][d] || schedule[n][d] !== 'R') continue;
       if (minRPerWeek > 0) {

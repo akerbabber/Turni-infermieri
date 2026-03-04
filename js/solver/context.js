@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 function buildContext(config) {
-  const { year, month, nurses, rules } = config;
+  const { year, month, nurses, rules, hourDeltas } = config;
   const numDays = daysInMonth(year, month);
   const numNurses = nurses.length;
 
@@ -108,6 +108,7 @@ function buildContext(config) {
     preferDiurni,
     coppiaTurni,
     consente2D,
+    hourDeltas: hourDeltas || null,
   };
 }
 

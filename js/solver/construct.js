@@ -275,12 +275,15 @@ function construct(ctx) {
     const avail = () => {
       const nurses = shuffle(Array.from({ length: numNurses }, (_, i) => i).filter(n => schedule[n][d] === null));
       // Primary sort: prefer nurses who still have weekly-rest budget for this day's week
-      // Secondary sort: fewest hours first (equity)
+      // Secondary sort: fewest adjusted hours first (equity + previous month compensation)
+      const hd = ctx.hourDeltas;
       nurses.sort((a, b) => {
         const aOk = hasWeekBudget(a, d) ? 0 : 1;
         const bOk = hasWeekBudget(b, d) ? 0 : 1;
         if (aOk !== bOk) return aOk - bOk;
-        return nurseHours(schedule, a, numDays) - nurseHours(schedule, b, numDays);
+        const aH = nurseHours(schedule, a, numDays) - (hd ? hd[a] || 0 : 0);
+        const bH = nurseHours(schedule, b, numDays) - (hd ? hd[b] || 0 : 0);
+        return aH - bH;
       });
       return nurses;
     };
