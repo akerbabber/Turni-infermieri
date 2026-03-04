@@ -100,6 +100,7 @@ let state = {
   stats: [],
   solutions: [],
   selectedSolution: 0,
+  solverMethod: null,
   numSolutions: 3,
   timeBudget: 0,          // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
   worker: null,
@@ -627,6 +628,7 @@ function startSolver() {
     } else if (data.type === 'result') {
       state.solutions = data.solutions || [];
       state.selectedSolution = 0;
+      state.solverMethod = data.solverMethod || null;
       if (state.solutions.length > 0) {
         const best = state.solutions[0];
         state.schedule = best.schedule;
@@ -698,6 +700,7 @@ function regenerateTurni() {
     } else if (data.type === 'result') {
       state.solutions = data.solutions || [];
       state.selectedSolution = 0;
+      state.solverMethod = data.solverMethod || null;
       if (state.solutions.length > 0) {
         const best = state.solutions[0];
         state.schedule = best.schedule;
@@ -791,12 +794,41 @@ function selectSolution(idx) {
   renderStep4();
 }
 
+function renderSolverMethodBanner() {
+  const banner = document.getElementById('solver-method-banner');
+  if (!banner) return;
+
+  // Determine solver method from selected solution or global state
+  let method = state.solverMethod;
+  if (state.solutions && state.solutions.length > 0 && state.selectedSolution >= 0) {
+    const sol = state.solutions[state.selectedSolution];
+    if (sol && sol.solverMethod) method = sol.solverMethod;
+  }
+
+  if (!method || !state.schedule) {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  banner.classList.remove('hidden');
+  if (method === 'milp') {
+    banner.innerHTML = `<div class="p-3 bg-green-50 dark:bg-green-950 border border-green-300 dark:border-green-700 rounded-lg">
+      <p class="font-semibold text-green-700 dark:text-green-400 text-sm">✅ Algoritmo utilizzato: <strong>HiGHS MILP</strong> (ottimizzazione matematica)</p>
+    </div>`;
+  } else {
+    banner.innerHTML = `<div class="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 rounded-lg">
+      <p class="font-semibold text-amber-700 dark:text-amber-400 text-sm">⚠️ Algoritmo utilizzato: <strong>Euristica fallback</strong> — il solver MILP (HiGHS) non era disponibile o non ha trovato una soluzione. I risultati potrebbero essere meno ottimali.</p>
+    </div>`;
+  }
+}
+
 function renderStep4() {
   const container = document.getElementById('schedule-container');
   if (!container) return;
 
-  // Render solution picker
+  // Render solution picker and solver method banner
   renderSolutionPicker();
+  renderSolverMethodBanner();
 
   if (!state.schedule) {
     container.innerHTML = '<p class="text-gray-500 italic text-center py-12">Nessun turno generato. Torna al passo 3.</p>';
@@ -840,12 +872,12 @@ function renderStep4() {
                      <div class="font-bold">${d + 1}</div>
                    </th>`;
   }
-  headerHTML += `<th class="stats-col">Ore | N | WE</th></tr>`;
+  headerHTML += `<th class="stats-col">Ore | D | N | WE</th></tr>`;
 
   // Nurse rows
   let bodyHTML = '';
   for (let n = 0; n < numNurses; n++) {
-    const st = state.stats[n] || { totalHours: 0, nights: 0, weekends: 0 };
+    const st = state.stats[n] || { totalHours: 0, nights: 0, diurni: 0, weekends: 0 };
     bodyHTML += `<tr>`;
     bodyHTML += `<td class="text-xs font-medium truncate" title="${escHtml(activeNurses[n].name)}">${escHtml(activeNurses[n].name)}</td>`;
 
@@ -859,7 +891,7 @@ function renderStep4() {
                    </td>`;
     }
 
-    bodyHTML += `<td class="stats-col text-xs">${st.totalHours}h | ${st.nights}N | ${st.weekends}WE</td>`;
+    bodyHTML += `<td class="stats-col text-xs">${st.totalHours}h | ${st.diurni || 0}D | ${st.nights}N | ${st.weekends}WE</td>`;
     bodyHTML += `</tr>`;
   }
 
@@ -992,14 +1024,15 @@ function applyManualShift(n, d, newShift) {
 
 function recalcNurseStats(n) {
   const numDays = daysInMonth(state.year, state.month);
-  let totalHours = 0, nights = 0, weekends = 0;
+  let totalHours = 0, nights = 0, diurni = 0, weekends = 0;
   for (let d = 0; d < numDays; d++) {
     const s = state.schedule[n][d];
     totalHours += SHIFT_HOURS[s] || 0;
     if (s === 'N') nights++;
+    if (s === 'D') diurni++;
     if (isWeekend(state.year, state.month, d + 1) && s && s !== 'R') weekends++;
   }
-  state.stats[n] = { totalHours: Math.round(totalHours * 10) / 10, nights, weekends };
+  state.stats[n] = { totalHours: Math.round(totalHours * 10) / 10, nights, diurni, weekends };
 }
 
 function revalidate() {
@@ -1070,14 +1103,14 @@ function exportCSV() {
   const headers = ['Infermiere', ...Array.from({ length: numDays }, (_, i) => {
     const dow = DOW_LABELS[dayOfWeek(state.year, state.month, i + 1)];
     return `${i + 1} ${dow}`;
-  }), 'Ore', 'Notti', 'Weekend'];
+  }), 'Ore', 'Diurni', 'Notti', 'Weekend'];
 
   const rows = [headers];
   activeNurses.forEach((nurse, n) => {
-    const st = state.stats[n] || { totalHours: 0, nights: 0, weekends: 0 };
+    const st = state.stats[n] || { totalHours: 0, nights: 0, diurni: 0, weekends: 0 };
     const row = [nurse.name,
       ...Array.from({ length: numDays }, (_, d) => state.schedule[n][d] || 'R'),
-      st.totalHours, st.nights, st.weekends
+      st.totalHours, st.diurni || 0, st.nights, st.weekends
     ];
     rows.push(row);
   });

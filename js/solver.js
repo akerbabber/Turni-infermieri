@@ -32,6 +32,7 @@ const SHIFT_HOURS = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA:
 const EQUITY_THRESHOLD_HOURS = 2;        // ±hours from average before equity move triggers
 const HOUR_EQUITY_MILP_WEIGHT = 0.3;     // weight for minimax hour equity in MILP objective
 const NIGHT_EQUITY_MILP_WEIGHT = 0.15;   // weight for minimax night equity in MILP objective
+const DIURNI_EQUITY_MILP_WEIGHT = 0.15;  // weight for minimax D-shift equity in MILP objective
 const MP_BALANCE_MILP_WEIGHT = 0.1;      // weight for M/P balance penalty in MILP objective
 
 const ABSENCE_TAG_TO_SHIFT = {
@@ -209,6 +210,12 @@ function nightCount(schedule, n, numDays) {
   return c;
 }
 
+function diurniCount(schedule, n, numDays) {
+  let c = 0;
+  for (let d = 0; d < numDays; d++) if (schedule[n][d] === 'D') c++;
+  return c;
+}
+
 function countWeekRest(schedule, n, weekDays) {
   let c = 0;
   for (const d of weekDays) if (schedule[n][d] === 'R') c++;
@@ -292,6 +299,20 @@ function computeScore(schedule, ctx) {
     if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].noNotti) continue;
     const nc = nightCount(schedule, n, numDays);
     soft += Math.abs(nc - targetNights) * 3;
+  }
+
+  // Soft: D-shift (diurno) count fairness among D-eligible nurses
+  {
+    const dEligible = [];
+    for (let n = 0; n < numNurses; n++) {
+      if (nurseProps[n].soloMattine || nurseProps[n].soloNotti || nurseProps[n].noDiurni) continue;
+      dEligible.push(n);
+    }
+    if (dEligible.length >= 2) {
+      const dCounts = dEligible.map(n => diurniCount(schedule, n, numDays));
+      const dAvg = dCounts.reduce((a, b) => a + b, 0) / dCounts.length;
+      for (const dc of dCounts) soft += Math.abs(dc - dAvg) * 3;
+    }
   }
 
   // Soft: M/P balance for no_diurni nurses (including no_diurni+no_notti)
@@ -1155,14 +1176,15 @@ function collectViolations(schedule, ctx) {
 function computeStats(schedule, ctx) {
   const { year, month, numDays, nurses } = ctx;
   return nurses.map((_, n) => {
-    let totalHours = 0, nights = 0, weekends = 0;
+    let totalHours = 0, nights = 0, diurni = 0, weekends = 0;
     for (let d = 0; d < numDays; d++) {
       const s = schedule[n][d];
       totalHours += SHIFT_HOURS[s] || 0;
       if (s === 'N') nights++;
+      if (s === 'D') diurni++;
       if (isWeekend(year, month, d + 1) && s && s !== 'R') weekends++;
     }
-    return { totalHours: Math.round(totalHours * 10) / 10, nights, weekends };
+    return { totalHours: Math.round(totalHours * 10) / 10, nights, diurni, weekends };
   });
 }
 
@@ -1355,6 +1377,38 @@ function buildLP(ctx, perturbSeed) {
       if (nTerms.length === 0) continue;
       eqConstraints.push(` neqMx${n}: ${nTerms.join(' + ')} - nmax <= ${(-pinnedNights[n])}`);
       eqConstraints.push(` neqMn${n}: nmin - ${nTerms.join(' - ')} <= ${pinnedNights[n]}`);
+    }
+  }
+
+  // --- D-shift (diurno) equity via minimax: minimize (dmax - dmin) of D counts ---
+  const pinnedDiurni = new Array(numNurses).fill(0);
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (pinned[n][d] === 'D') pinnedDiurni[n]++;
+    }
+  }
+  const diurniElig = [];
+  for (let n = 0; n < numNurses; n++) {
+    if (nurseProps[n].soloMattine || nurseProps[n].soloNotti || nurseProps[n].noDiurni) continue;
+    let hasFreeD = false;
+    for (let d = 0; d < numDays; d++) {
+      if (isFree(n, d)) { hasFreeD = true; break; }
+    }
+    if (hasFreeD) diurniElig.push(n);
+  }
+  if (diurniElig.length >= 2) {
+    contVars.push('dmax', 'dmin');
+    objTerms.push(`${DIURNI_EQUITY_MILP_WEIGHT} dmax`);
+    objTerms.push(`-${DIURNI_EQUITY_MILP_WEIGHT} dmin`);
+
+    for (const n of diurniElig) {
+      const dTerms = [];
+      for (let d = 0; d < numDays; d++) {
+        if (isFree(n, d)) dTerms.push(V(n, d, 5)); // D shift index
+      }
+      if (dTerms.length === 0) continue;
+      eqConstraints.push(` deqMx${n}: ${dTerms.join(' + ')} - dmax <= ${(-pinnedDiurni[n])}`);
+      eqConstraints.push(` deqMn${n}: dmin - ${dTerms.join(' - ')} <= ${pinnedDiurni[n]}`);
     }
   }
 
@@ -1823,7 +1877,7 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
             const violations = collectViolations(polished, ctx);
             const stats = computeStats(polished, ctx);
             const score = computeScore(polished, ctx);
-            batchSolutions.push({ schedule: polished, violations, stats, score: score.total });
+            batchSolutions.push({ schedule: polished, violations, stats, score: score.total, solverMethod: 'milp' });
             continue;
           }
         } catch (_e) { /* fall through to greedy */ }
@@ -1836,7 +1890,7 @@ function solve(config, numSolutions, timeBudget, untilZeroViolations) {
       const violations = collectViolations(improved, ctx);
       const stats = computeStats(improved, ctx);
       const score = computeScore(improved, ctx);
-      batchSolutions.push({ schedule: improved, violations, stats, score: score.total });
+      batchSolutions.push({ schedule: improved, violations, stats, score: score.total, solverMethod: 'fallback' });
     }
   }
 
@@ -1898,6 +1952,7 @@ self.onmessage = function (e) {
         violations: best.violations || [],
         stats: best.stats || [],
         solutions: solutions,
+        solverMethod: best.solverMethod || 'fallback',
       });
     } catch (err) {
       self.postMessage({ type: 'error', message: err.message });
