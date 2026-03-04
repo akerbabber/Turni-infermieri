@@ -1017,3 +1017,179 @@ describe('collectViolations with previousMonthTail', () => {
     assert.ok(boundaryViolations[0].msg.includes('confine mese'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// 5-day tail and D-D boundary continuity tests
+// ---------------------------------------------------------------------------
+
+describe('buildContext with 5-day previousMonthTail', () => {
+  it('should accept and store a 5-element tail', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'R', 'M', 'P'], ['R', 'R', 'N', 'S', 'R']];
+    const bctx = ctx.buildContext(config);
+    assert.ok(bctx.prevTail);
+    assert.equal(bctx.prevTail[0].length, 5);
+    assert.equal(bctx.prevTail[1].length, 5);
+  });
+
+  it('should pin correctly with 5-day tail ending in N', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'R', 'M', 'N'], null];
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], 'S');
+    assert.equal(bctx.pinned[0][1], 'R');
+    assert.equal(bctx.pinned[0][2], 'R');
+  });
+
+  it('should not pin when 5-day tail shows completed N-S-R-R pattern', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    // N-S-R-R-M → pattern is complete, day 0 should not be pinned
+    config.previousMonthTail = [['N', 'S', 'R', 'R', 'M'], null];
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], null);
+  });
+
+  it('should pin R on day 0 with 5-day tail ending in N-S-R', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'N', 'S', 'R'], null];
+    const bctx = ctx.buildContext(config);
+    // N-S-R needs one more R
+    assert.equal(bctx.pinned[0][0], 'R');
+  });
+
+  it('should pin R, R on day 0-1 with 5-day tail ending in N-S', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'R', 'N', 'S'], null];
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], 'R');
+    assert.equal(bctx.pinned[0][1], 'R');
+  });
+});
+
+describe('buildContext D-D boundary pinning (consente2D)', () => {
+  it('should pin R on day 0 when prev month ends with D-D and consente2D enabled', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: true },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'D', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], 'R');
+  });
+
+  it('should not pin R on day 0 for D-D when consente2D is disabled', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: false },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'D', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    // D-D is forbidden when consente2D is false, so no special D-D pinning needed
+    assert.equal(bctx.pinned[0][0], null);
+  });
+
+  it('should not pin R when prev month ends with single D', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: true },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'M', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], null);
+  });
+});
+
+describe('computeScore D-D boundary (consente2D)', () => {
+  it('should add hard penalty when D-D at boundary and day 0 is not R', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: true },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'D', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    // Override day 0 to M instead of R (which was pinned) — simulate unpinned
+    schedule[0][0] = 'M';
+    const score = ctx.computeScore(schedule, bctx);
+    assert.ok(score.hard > 0, 'Should have hard violation for D-D not followed by R');
+  });
+
+  it('should not add D-D penalty when day 0 is R after D-D', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: true },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'D', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    // day 0 is R (correct after D-D)
+    const scoreBase = ctx.computeScore(schedule, bctx);
+
+    const configNo = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: true },
+    });
+    const bctxNo = ctx.buildContext(configNo);
+    const scoreNo = ctx.computeScore(schedule, bctxNo);
+    assert.equal(scoreBase.hard, scoreNo.hard, 'No extra hard violations when D-D followed by R');
+  });
+
+  it('should add hard penalty for 3 consecutive D at boundary', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: true },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'D', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'D'; // D-D-D at boundary
+    const score = ctx.computeScore(schedule, bctx);
+    assert.ok(score.hard > 0, 'Should have hard violation for 3 consecutive D');
+  });
+});
+
+describe('collectViolations D-D boundary (consente2D)', () => {
+  it('should report D-D not followed by R at month boundary', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: true },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'D', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'M'; // D-D followed by M (not R)
+    const violations = ctx.collectViolations(schedule, bctx);
+    const ddViolations = violations.filter(v => v.type === 'DD_no_R');
+    assert.ok(ddViolations.length > 0, 'Should have D-D boundary violation');
+    assert.ok(ddViolations[0].msg.includes('confine mese'));
+  });
+
+  it('should report 3 consecutive D at month boundary', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: true },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'D', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'D'; // D-D-D
+    const violations = ctx.collectViolations(schedule, bctx);
+    const dddViolations = violations.filter(v => v.type === 'DDD');
+    assert.ok(dddViolations.length > 0, 'Should have DDD boundary violation');
+    assert.ok(dddViolations[0].msg.includes('3 D consecutivi'));
+  });
+
+  it('should not report D-D violations when consente2D is disabled', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: { consente2DiurniConsecutivi: false },
+    });
+    config.previousMonthTail = [['M', 'P', 'R', 'D', 'D'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'M';
+    const violations = ctx.collectViolations(schedule, bctx);
+    const ddViolations = violations.filter(v => v.type === 'DD_no_R' || v.type === 'DDD');
+    assert.equal(ddViolations.length, 0, 'Should not have D-D boundary violations when consente2D is disabled');
+  });
+});

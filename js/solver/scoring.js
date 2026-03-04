@@ -120,12 +120,23 @@ function computeScore(schedule, ctx) {
       const tail = ctx.prevTail[n];
       if (tail && tail.length > 0) {
         const lastShift = tail[tail.length - 1];
+        const secondLastShift = tail.length >= 2 ? tail[tail.length - 2] : null;
         if (lastShift) {
           const day0 = schedule[n][0];
           const fb0 = forbidden[lastShift];
           if (fb0 && fb0.includes(day0)) hard++;
           if (lastShift === 'N' && day0 !== 'S') hard++;
           if (lastShift === 'S' && day0 !== 'R') hard++;
+        }
+        // D-D boundary checks (when consente2D enabled)
+        if (consente2D) {
+          const day0 = schedule[n][0];
+          // Previous month ends D-D → day 0 must be R
+          if (lastShift === 'D' && secondLastShift === 'D' && day0 !== 'R') hard++;
+          // Previous month ends …D → D on day 0 means D-D, so day 1 must be R
+          if (lastShift === 'D' && day0 === 'D' && numDays > 1 && schedule[n][1] !== 'R') hard++;
+          // Previous month ends D-D → D on day 0 means 3 consecutive D (forbidden)
+          if (lastShift === 'D' && secondLastShift === 'D' && day0 === 'D') hard++;
         }
       }
     }
@@ -290,6 +301,7 @@ function collectViolations(schedule, ctx) {
       const tail = ctx.prevTail[n];
       if (tail && tail.length > 0) {
         const lastShift = tail[tail.length - 1];
+        const secondLastShift = tail.length >= 2 ? tail[tail.length - 2] : null;
         if (lastShift) {
           const day0 = schedule[n][0];
           const fb0 = forbidden[lastShift];
@@ -314,6 +326,30 @@ function collectViolations(schedule, ctx) {
               type: 'S_no_R',
               msg: `Infermiere ${n + 1}, confine mese: S non seguito da R`,
             });
+          // D-D boundary checks (when consente2D enabled)
+          if (consente2D) {
+            if (lastShift === 'D' && secondLastShift === 'D' && day0 !== 'R')
+              violations.push({
+                nurse: n,
+                day: -1,
+                type: 'DD_no_R',
+                msg: `Infermiere ${n + 1}, confine mese: D-D non seguito da R`,
+              });
+            if (lastShift === 'D' && day0 === 'D' && numDays > 1 && schedule[n][1] !== 'R')
+              violations.push({
+                nurse: n,
+                day: 0,
+                type: 'DD_no_R',
+                msg: `Infermiere ${n + 1}, confine mese: D-D non seguito da R`,
+              });
+            if (lastShift === 'D' && secondLastShift === 'D' && day0 === 'D')
+              violations.push({
+                nurse: n,
+                day: -1,
+                type: 'DDD',
+                msg: `Infermiere ${n + 1}, confine mese: 3 D consecutivi vietati`,
+              });
+          }
         }
       }
     }

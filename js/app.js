@@ -890,12 +890,14 @@ function buildHourDeltas() {
 }
 
 /**
- * Build previousMonthTail array: last 3 shifts per nurse from previous month.
- * Used by the solver to enforce shift continuity at the month boundary.
+ * Build previousMonthTail array: last 5 shifts per nurse from previous month.
+ * Used by the solver to enforce shift continuity at the month boundary
+ * (N-S-R-R continuation, D-D-R continuation, forbidden transitions, 11h gap).
  */
 function buildPrevMonthTail() {
   if (!state.previousMonthSchedule) return null;
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  const TAIL_DAYS = 5;
   const tail = [];
   for (let n = 0; n < activeNurses.length; n++) {
     const row = state.previousMonthSchedule[n];
@@ -904,11 +906,11 @@ function buildPrevMonthTail() {
       continue;
     }
     const len = row.length;
-    const last3 = [];
-    for (let i = Math.max(0, len - 3); i < len; i++) {
-      last3.push(row[i] || null);
+    const lastN = [];
+    for (let i = Math.max(0, len - TAIL_DAYS); i < len; i++) {
+      lastN.push(row[i] || null);
     }
-    tail.push(last3);
+    tail.push(lastN);
   }
   // Only return if at least one nurse has tail data
   if (tail.every(t => !t || !t.length)) return null;

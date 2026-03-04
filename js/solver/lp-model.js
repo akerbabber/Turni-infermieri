@@ -420,6 +420,7 @@ function buildLP(ctx, perturbSeed) {
       if (!tail || tail.length === 0) continue;
       const last = tail[tail.length - 1];
       if (!last) continue;
+      const secondLast = tail.length >= 2 ? tail[tail.length - 2] : null;
       // Forbidden transitions from previous month's last shift to day 0
       if (last === 'P' && isPMForbidden) lines.push(` ptm${n}: ${V(n, 0, 0)} <= 0`);
       if (last === 'P' && isPDForbidden) lines.push(` ptd${n}: ${V(n, 0, 5)} <= 0`);
@@ -430,6 +431,24 @@ function buildLP(ctx, perturbSeed) {
       if (last === 'N') lines.push(` ptn${n}: ${V(n, 0, 3)} = 1`);
       // S must be followed by R
       if (last === 'S') lines.push(` pts${n}: ${V(n, 0, 4)} = 1`);
+      // D-D boundary constraints (when consente2D enabled)
+      if (consente2D) {
+        // Previous month ends D-D → day 0 must be R (already pinned, but safety)
+        if (last === 'D' && secondLast === 'D') {
+          lines.push(` ptddr${n}: ${V(n, 0, 4)} = 1`);
+        }
+        // Previous month ends …D → if day 0 is D then day 1 must be R
+        if (last === 'D' && isFree(n, 1)) {
+          lines.push(` ptdd1${n}: ${V(n, 0, 5)} - ${V(n, 1, 4)} <= 0`);
+        } else if (last === 'D' && !isFree(n, 1) && pinned[n][1] !== 'R') {
+          // day 1 pinned to non-R: D on day 0 forbidden
+          lines.push(` ptdd1p${n}: ${V(n, 0, 5)} <= 0`);
+        }
+        // Previous month ends D-D → D on day 0 forbidden (would be 3 consecutive D)
+        if (last === 'D' && secondLast === 'D') {
+          lines.push(` ptddd${n}: ${V(n, 0, 5)} <= 0`);
+        }
+      }
     }
   }
 
