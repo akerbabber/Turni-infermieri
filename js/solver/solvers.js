@@ -320,10 +320,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
 
   /** Generate one batch of solutions */
   async function generateBatch(batchSolutions, batchLabel, seedOffset) {
-    const milpTimeLimitSec = Math.max(
-      MILP_MIN_TIME_PER_SOLUTION,
-      Math.min(MILP_MAX_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions))
-    );
+    const milpTimeLimitSec = Math.max(MILP_MIN_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions));
     const perSolutionBudgetSec = Math.max(1, totalBudget / numSolutions);
 
     for (let i = 0; i < numSolutions; i++) {
