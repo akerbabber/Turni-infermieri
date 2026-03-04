@@ -76,7 +76,8 @@ function buildContext(config) {
     }
   }
 
-  // Previous month tail: pin mandatory continuation days (N→S→R→R) at month start
+  // Previous month tail: pin mandatory continuation days at month start
+  // Handles N→S→R→R continuation and D-D→R continuation (when consente2D)
   const prevTail = previousMonthTail || null;
   if (prevTail) {
     for (let n = 0; n < numNurses; n++) {
@@ -99,6 +100,12 @@ function buildContext(config) {
       } else if (last === 'R' && secondLast === 'S' && thirdLast === 'N') {
         // N-S-R on last three days → need second R for non-noDiurni
         if (!noDiurni && !pinned[n][0]) pinned[n][0] = 'R';
+      }
+
+      // D-D continuation: when consente2D is enabled and prev month ends with D-D,
+      // day 0 must be R (D-D must always be followed by R)
+      if (consente2D && last === 'D' && secondLast === 'D') {
+        if (!pinned[n][0]) pinned[n][0] = 'R';
       }
     }
   }

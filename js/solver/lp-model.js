@@ -430,6 +430,18 @@ function buildLP(ctx, perturbSeed) {
       if (last === 'N') lines.push(` ptn${n}: ${V(n, 0, 3)} = 1`);
       // S must be followed by R
       if (last === 'S') lines.push(` pts${n}: ${V(n, 0, 4)} = 1`);
+      // D-D boundary constraints (when consente2D enabled)
+      // Note: D-D at end of prev month is handled by pinning (context.js pins R at day 0),
+      // so isFree(n, 0) is false for that case. Here we handle the single-D case:
+      // previous month ends with …D → if day 0 is D then day 1 must be R.
+      if (consente2D && last === 'D') {
+        if (isFree(n, 1)) {
+          lines.push(` ptdd1${n}: ${V(n, 0, 5)} - ${V(n, 1, 4)} <= 0`);
+        } else if (!isFree(n, 1) && pinned[n][1] !== 'R') {
+          // day 1 pinned to non-R: D on day 0 forbidden (D-D needs R after)
+          lines.push(` ptdd1p${n}: ${V(n, 0, 5)} <= 0`);
+        }
+      }
     }
   }
 
