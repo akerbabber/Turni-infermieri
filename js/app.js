@@ -857,6 +857,9 @@ function computePrevMonthDeltas() {
   // Previous month had 4 or 5 weeks — compute monthly target from weekly
   const prevNumDays = state.previousMonthSchedule[0]?.length || 0;
   if (prevNumDays === 0) return null;
+  // Monthly target approximation: targetHours (weekly) × numDays/7.
+  // This is an approximation since months have 28–31 days (4–4.4 weeks),
+  // but the relative differences between nurses remain accurate.
   const monthlyTarget = targetH * (prevNumDays / 7);
   const deltas = {};
   for (let n = 0; n < activeNurses.length; n++) {
@@ -877,6 +880,9 @@ function buildHourDeltas() {
   const deltas = computePrevMonthDeltas();
   if (!deltas) return null;
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  // Negate: if nurse worked +5h MORE last month (positive delta from computePrevMonthDeltas),
+  // they should work LESS this month → solver needs negative adjustment (hourDeltas = -5).
+  // The solver interprets positive hourDeltas as "nurse should work more hours".
   const hourDeltas = activeNurses.map(n => -(deltas[n.name] || 0));
   // Only return if at least one delta is nonzero
   if (hourDeltas.every(d => d === 0)) return null;
