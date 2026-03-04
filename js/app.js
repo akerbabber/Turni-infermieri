@@ -911,7 +911,7 @@ function buildPrevMonthTail() {
     tail.push(last3);
   }
   // Only return if at least one nurse has tail data
-  if (tail.every(t => !t)) return null;
+  if (tail.every(t => !t || !t.length)) return null;
   return tail;
 }
 

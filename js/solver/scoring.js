@@ -11,18 +11,12 @@
 
 function transitionOk(prev, next, ctx, schedule, nurseIdx, dayIdx) {
   if (!prev) {
-    // Day 0: check previous month tail if available
-    if (ctx.prevTail && nurseIdx !== undefined && dayIdx === 0) {
+    // At day 0, use previous month tail shift if available
+    if (dayIdx === 0 && nurseIdx !== undefined && ctx.prevTail) {
       const tail = ctx.prevTail[nurseIdx];
-      if (tail && tail.length > 0) {
-        prev = tail[tail.length - 1];
-        if (!prev) return true;
-      } else {
-        return true;
-      }
-    } else {
-      return true;
+      prev = tail && tail.length > 0 ? tail[tail.length - 1] : null;
     }
+    if (!prev) return true;
   }
   const fb = ctx.forbidden[prev];
   if (fb && fb.includes(next)) return false;

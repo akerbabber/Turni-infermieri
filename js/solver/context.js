@@ -88,7 +88,7 @@ function buildContext(config) {
       const noDiurni = nurseProps[n].noDiurni;
 
       if (last === 'N') {
-        // N on last day → need S, R, R at start of new month
+        // N on last day → need S, R at start; second R for non-noDiurni nurses
         if (!pinned[n][0]) pinned[n][0] = 'S';
         if (numDays > 1 && !pinned[n][1]) pinned[n][1] = 'R';
         if (!noDiurni && numDays > 2 && !pinned[n][2]) pinned[n][2] = 'R';
