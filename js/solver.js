@@ -1390,11 +1390,11 @@ function buildLP(ctx, perturbSeed) {
   const diurniElig = [];
   for (let n = 0; n < numNurses; n++) {
     if (nurseProps[n].soloMattine || nurseProps[n].soloNotti || nurseProps[n].noDiurni) continue;
-    let hasFreeD = false;
+    let hasFreeDay = false;
     for (let d = 0; d < numDays; d++) {
-      if (isFree(n, d)) { hasFreeD = true; break; }
+      if (isFree(n, d)) { hasFreeDay = true; break; }
     }
-    if (hasFreeD) diurniElig.push(n);
+    if (hasFreeDay) diurniElig.push(n);
   }
   if (diurniElig.length >= 2) {
     contVars.push('dmax', 'dmin');
