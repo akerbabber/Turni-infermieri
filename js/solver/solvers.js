@@ -409,22 +409,14 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
         progress(2, `HiGHS non disponibile: ${_highsLoadDiag}`);
       }
     } catch (loadErr) {
-      if (solverChoice === 'milp_strict' && loadErr.message.includes('Modalità strict')) {
-        throw loadErr;
-      }
       console.error('[Solver] HiGHS loading threw exception:', loadErr.message || loadErr);
-      if (solverChoice === 'milp_strict') {
-        throw new Error(
-          `Impossibile caricare HiGHS MILP: ${loadErr.message || loadErr}. ` +
-            'Modalità strict richiede HiGHS funzionante. Verifica la connessione internet e riprova.'
-        );
-      }
       progress(2, `Errore caricamento HiGHS: ${loadErr.message || loadErr}`);
       milpAvailable = false;
     }
   }
 
-  if (solverChoice === 'auto' || solverChoice === 'glpk') {
+  // Load GLPK for auto, glpk, and milp_strict modes (strict uses GLPK as MILP fallback)
+  if (solverChoice === 'auto' || solverChoice === 'glpk' || solverChoice === 'milp_strict') {
     progress(2, 'Caricamento solver GLPK…');
     try {
       glpk = await loadGLPK();
@@ -436,10 +428,19 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     }
   }
 
+  // In strict mode, at least one MILP solver must be available
+  if (solverChoice === 'milp_strict' && !milpAvailable && !glpkAvailable) {
+    throw new Error(
+      'Impossibile caricare nessun solver MILP (HiGHS e GLPK). ' +
+        'Modalità strict richiede almeno un solver MILP funzionante. Verifica la connessione internet e riprova.'
+    );
+  }
+
   // Determine which solvers to try
   let useHiGHS =
     milpAvailable && (solverChoice === 'auto' || solverChoice === 'milp' || solverChoice === 'milp_strict');
-  const useGLPK = glpkAvailable && (solverChoice === 'auto' || solverChoice === 'glpk');
+  const useGLPK =
+    glpkAvailable && (solverChoice === 'auto' || solverChoice === 'glpk' || solverChoice === 'milp_strict');
   const strictMode = solverChoice === 'milp_strict';
   console.log(
     `[Solver] Solver plan: useHiGHS=${useHiGHS}, useGLPK=${useGLPK}, strict=${strictMode}, fallback=${!strictMode ? 'available' : 'disabled'}`
@@ -484,14 +485,6 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
             console.warn(
               `[Solver] HiGHS returned null (no feasible solution) after ${milpElapsed.toFixed(2)}s, status="${status}"`
             );
-            if (strictMode) {
-              throw new Error(
-                `HiGHS MILP non ha trovato una soluzione ammissibile per la soluzione ${i + 1} ` +
-                  `dopo ${milpElapsed.toFixed(0)} secondi (stato HiGHS: "${status}"). ` +
-                  'Possibili cause: vincoli troppo restrittivi, tempo insufficiente, o problema non ammissibile. ' +
-                  'Prova ad aumentare il tempo di calcolo o rilassare i vincoli.'
-              );
-            }
             progress(pctBase, `${batchLabel}HiGHS fallito: ${reason}`);
             // Reload corrupted instance for next attempt
             if (_highsCorrupted) {
@@ -509,17 +502,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
             }
           }
         } catch (highsErr) {
-          if (strictMode && highsErr.message.includes('HiGHS MILP non ha trovato')) {
-            throw highsErr;
-          }
           console.error('[Solver] HiGHS solve threw exception:', highsErr.message || highsErr);
           if (highsErr.stack) console.error('[Solver]   Stack:', highsErr.stack);
-          if (strictMode) {
-            throw new Error(
-              `Errore durante la risoluzione HiGHS MILP (soluzione ${i + 1}): ${highsErr.message || highsErr}. ` +
-                'Modalità strict non consente fallback euristico.'
-            );
-          }
           progress(pctBase, `${batchLabel}HiGHS errore: ${highsErr.message || highsErr}`);
         }
 
