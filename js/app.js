@@ -1,6 +1,11 @@
 /**
- * app.js — Turni Infermieri PS
- * Main application logic: state management, UI rendering, wizard flow.
+ * @file app.js — Turni Infermieri PS
+ * @description Main application logic: state management, UI rendering, wizard flow.
+ * @version 1.0.0
+ *
+ * This is the main thread script for the nurse shift scheduling application.
+ * It manages a 4-step wizard UI (Organico → Regole → Genera → Risultati),
+ * communicates with the solver Web Worker, and persists state to localStorage.
  */
 
 'use strict';
@@ -15,6 +20,8 @@ const SHIFT_HOURS  = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA
 const DOW_LABELS   = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const MONTHS_IT    = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
                       'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+
+const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('debug') === 'true';
 
 const DEFAULT_NURSE_NAMES = [
   'Rossi Marco','Bianchi Laura','Ferrari Giovanni','Esposito Sofia',
