@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 function buildContext(config) {
-  const { year, month, nurses, rules, hourDeltas } = config;
+  const { year, month, nurses, rules, hourDeltas, previousMonthTail } = config;
   const numDays = daysInMonth(year, month);
   const numNurses = nurses.length;
 
@@ -76,6 +76,33 @@ function buildContext(config) {
     }
   }
 
+  // Previous month tail: pin mandatory continuation days (N→S→R→R) at month start
+  const prevTail = previousMonthTail || null;
+  if (prevTail) {
+    for (let n = 0; n < numNurses; n++) {
+      const tail = prevTail[n];
+      if (!tail || tail.length === 0) continue;
+      const last = tail[tail.length - 1];
+      const secondLast = tail.length >= 2 ? tail[tail.length - 2] : null;
+      const thirdLast = tail.length >= 3 ? tail[tail.length - 3] : null;
+      const noDiurni = nurseProps[n].noDiurni;
+
+      if (last === 'N') {
+        // N on last day → need S, R at start; second R for non-noDiurni nurses
+        if (!pinned[n][0]) pinned[n][0] = 'S';
+        if (numDays > 1 && !pinned[n][1]) pinned[n][1] = 'R';
+        if (!noDiurni && numDays > 2 && !pinned[n][2]) pinned[n][2] = 'R';
+      } else if (last === 'S' && secondLast === 'N') {
+        // N-S on last two days → need R, R at start
+        if (!pinned[n][0]) pinned[n][0] = 'R';
+        if (!noDiurni && numDays > 1 && !pinned[n][1]) pinned[n][1] = 'R';
+      } else if (last === 'R' && secondLast === 'S' && thirdLast === 'N') {
+        // N-S-R on last three days → need second R for non-noDiurni
+        if (!noDiurni && !pinned[n][0]) pinned[n][0] = 'R';
+      }
+    }
+  }
+
   // Precompute week day-lists
   const weekDaysList = Array.from({ length: numWeeks }, () => []);
   for (let d = 0; d < numDays; d++) weekDaysList[weekOf(d)].push(d);
@@ -109,6 +136,7 @@ function buildContext(config) {
     coppiaTurni,
     consente2D,
     hourDeltas: hourDeltas || null,
+    prevTail,
   };
 }
 
