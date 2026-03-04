@@ -58,8 +58,8 @@ function loadSolver() {
     parseFloat,
     isNaN,
     isFinite,
-    importScripts: () => {},   // stub — external CDN scripts not loaded in tests
-    postMessage: () => {},     // stub
+    importScripts: () => {}, // stub — external CDN scripts not loaded in tests
+    postMessage: () => {}, // stub
     setTimeout,
     clearTimeout,
     setInterval,
@@ -93,7 +93,7 @@ function loadSolver() {
        };
        return lookup[name];
      }`,
-    context,
+    context
   );
 
   return context;
@@ -274,7 +274,7 @@ describe('gapHours', () => {
   it('should compute N->M gap as SHIFT_START.M - SHIFT_END.N (same-day, -0.2)', () => {
     // N ends at 8.2, M starts at 8 => 8 - 8.2 = -0.2
     const gap = ctx.gapHours('N', 'M');
-    assert.ok(Math.abs(gap - (-0.2)) < 0.001);
+    assert.ok(Math.abs(gap - -0.2) < 0.001);
   });
 
   it('should compute P->M gap as (24 - 20.2) + 8 = 11.8', () => {
@@ -434,12 +434,7 @@ describe('buildContext', () => {
 // ---------------------------------------------------------------------------
 describe('dayCoverage', () => {
   it('should count M, P, and N shifts on a given day', () => {
-    const schedule = [
-      ['M'],
-      ['P'],
-      ['N'],
-      ['R'],
-    ];
+    const schedule = [['M'], ['P'], ['N'], ['R']];
     const cov = ctx.dayCoverage(schedule, 0, 4);
     assert.equal(cov.M, 1);
     assert.equal(cov.P, 1);
@@ -448,11 +443,7 @@ describe('dayCoverage', () => {
   });
 
   it('should count D as contributing to both M and P coverage', () => {
-    const schedule = [
-      ['D'],
-      ['D'],
-      ['M'],
-    ];
+    const schedule = [['D'], ['D'], ['M']];
     const cov = ctx.dayCoverage(schedule, 0, 3);
     // D=2, M counted: 2 (from D) + 1 (from M) = 3
     assert.equal(cov.D, 2);
@@ -536,9 +527,7 @@ describe('computeScore', () => {
     const config = makeMinimalConfig({ numNurses: 4 });
     const bctx = ctx.buildContext(config);
     // Create a trivial schedule (all R) — will have coverage violations
-    const schedule = Array.from({ length: 4 }, () =>
-      new Array(bctx.numDays).fill('R'),
-    );
+    const schedule = Array.from({ length: 4 }, () => new Array(bctx.numDays).fill('R'));
     const score = ctx.computeScore(schedule, bctx);
     assert.equal(typeof score.hard, 'number');
     assert.equal(typeof score.soft, 'number');
@@ -551,9 +540,7 @@ describe('computeScore', () => {
       rules: { minCoverageM: 2, minCoverageP: 2, minCoverageN: 1 },
     });
     const bctx = ctx.buildContext(config);
-    const schedule = Array.from({ length: 4 }, () =>
-      new Array(bctx.numDays).fill('R'),
-    );
+    const schedule = Array.from({ length: 4 }, () => new Array(bctx.numDays).fill('R'));
     const score = ctx.computeScore(schedule, bctx);
     assert.ok(score.hard > 0, `Expected hard > 0, got ${score.hard}`);
   });
@@ -561,9 +548,7 @@ describe('computeScore', () => {
   it('should compute total as hard * 1000 + soft', () => {
     const config = makeMinimalConfig({ numNurses: 4 });
     const bctx = ctx.buildContext(config);
-    const schedule = Array.from({ length: 4 }, () =>
-      new Array(bctx.numDays).fill('R'),
-    );
+    const schedule = Array.from({ length: 4 }, () => new Array(bctx.numDays).fill('R'));
     const score = ctx.computeScore(schedule, bctx);
     assert.equal(score.total, score.hard * 1000 + score.soft);
   });
@@ -572,25 +557,24 @@ describe('computeScore', () => {
     const config = makeMinimalConfig({
       numNurses: 4,
       rules: {
-        minCoverageM: 0, maxCoverageM: 99,
-        minCoverageP: 0, maxCoverageP: 99,
-        minCoverageN: 0, maxCoverageN: 99,
+        minCoverageM: 0,
+        maxCoverageM: 99,
+        minCoverageP: 0,
+        maxCoverageP: 99,
+        minCoverageN: 0,
+        maxCoverageN: 99,
         minRPerWeek: 0,
       },
     });
     const bctx = ctx.buildContext(config);
     // All-N schedule violates N->N forbidden transition on every consecutive day
-    const scheduleN = Array.from({ length: 4 }, () =>
-      new Array(bctx.numDays).fill('N'),
-    );
-    const scheduleR = Array.from({ length: 4 }, () =>
-      new Array(bctx.numDays).fill('R'),
-    );
+    const scheduleN = Array.from({ length: 4 }, () => new Array(bctx.numDays).fill('N'));
+    const scheduleR = Array.from({ length: 4 }, () => new Array(bctx.numDays).fill('R'));
     const scoreN = ctx.computeScore(scheduleN, bctx);
     const scoreR = ctx.computeScore(scheduleR, bctx);
     assert.ok(
       scoreN.hard > scoreR.hard,
-      `N-schedule hard (${scoreN.hard}) should exceed R-schedule hard (${scoreR.hard})`,
+      `N-schedule hard (${scoreN.hard}) should exceed R-schedule hard (${scoreR.hard})`
     );
   });
 });
@@ -607,9 +591,7 @@ describe('transitionOk', () => {
       rules: { minGap11h: false },
     });
     bctx = ctx.buildContext(config);
-    dummySchedule = Array.from({ length: 8 }, () =>
-      new Array(bctx.numDays).fill('R'),
-    );
+    dummySchedule = Array.from({ length: 8 }, () => new Array(bctx.numDays).fill('R'));
   });
 
   it('should return true when prev is null (first day)', () => {
@@ -701,7 +683,7 @@ describe('getAbsenceShift', () => {
       name: 'Test',
       tags: ['104'],
       absencePeriods: {
-        '104': { start: '2025-03-01', end: '2025-03-31' },
+        104: { start: '2025-03-01', end: '2025-03-31' },
       },
     };
     const result = ctx.getAbsenceShift(nurse, 15, 2025, 2); // March 15
@@ -757,28 +739,19 @@ describe('construct', () => {
     const schedule = ctx.construct(bctx);
     for (let n = 0; n < schedule.length; n++) {
       for (let d = 0; d < schedule[n].length; d++) {
-        assert.notEqual(
-          schedule[n][d],
-          null,
-          `Cell [${n}][${d}] should not be null`,
-        );
+        assert.notEqual(schedule[n][d], null, `Cell [${n}][${d}] should not be null`);
       }
     }
   });
 
   it('should only use valid shift codes', () => {
-    const validShifts = new Set([
-      'M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT',
-    ]);
+    const validShifts = new Set(['M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT']);
     const config = makeMinimalConfig({ numNurses: 6, year: 2025, month: 0 });
     const bctx = ctx.buildContext(config);
     const schedule = ctx.construct(bctx);
     for (let n = 0; n < schedule.length; n++) {
       for (let d = 0; d < schedule[n].length; d++) {
-        assert.ok(
-          validShifts.has(schedule[n][d]),
-          `Invalid shift "${schedule[n][d]}" at [${n}][${d}]`,
-        );
+        assert.ok(validShifts.has(schedule[n][d]), `Invalid shift "${schedule[n][d]}" at [${n}][${d}]`);
       }
     }
   });
@@ -801,11 +774,93 @@ describe('construct', () => {
     const schedule = ctx.construct(bctx);
     // Days 0-4 (Jan 1-5) should be 'F' for nurse 0
     for (let d = 0; d < 5; d++) {
-      assert.equal(
-        schedule[0][d],
-        'F',
-        `Nurse 0 day ${d} should be F (ferie), got ${schedule[0][d]}`,
-      );
+      assert.equal(schedule[0][d], 'F', `Nurse 0 day ${d} should be F (ferie), got ${schedule[0][d]}`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 16. buildContext with hourDeltas
+// ---------------------------------------------------------------------------
+describe('buildContext with hourDeltas', () => {
+  it('should store hourDeltas in context when provided', () => {
+    const config = makeMinimalConfig({ numNurses: 4 });
+    config.hourDeltas = [3, -2, 0, 1.5];
+    const bctx = ctx.buildContext(config);
+    assert.deepEqual(toPlain(bctx.hourDeltas), [3, -2, 0, 1.5]);
+  });
+
+  it('should store null hourDeltas when not provided', () => {
+    const config = makeMinimalConfig({ numNurses: 4 });
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.hourDeltas, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 17. computeScore with hourDeltas
+// ---------------------------------------------------------------------------
+describe('computeScore with hourDeltas', () => {
+  it('should produce different soft scores with vs without hourDeltas', () => {
+    // Create a schedule where nurses have different hours
+    const config = makeMinimalConfig({
+      numNurses: 4,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 99,
+        minCoverageP: 0,
+        maxCoverageP: 99,
+        minCoverageN: 0,
+        maxCoverageN: 99,
+        minRPerWeek: 0,
+      },
+    });
+    const bctxNoDeltas = ctx.buildContext(config);
+    const numDays = bctxNoDeltas.numDays;
+
+    // Nurse 0: all M (high hours), Nurse 1-3: all R (zero hours)
+    const schedule = [
+      new Array(numDays).fill('M'),
+      new Array(numDays).fill('R'),
+      new Array(numDays).fill('R'),
+      new Array(numDays).fill('R'),
+    ];
+
+    const scoreWithout = ctx.computeScore(schedule, bctxNoDeltas);
+
+    // Now with hourDeltas that push nurse 0 target higher (should reduce penalty)
+    const configWithDeltas = makeMinimalConfig({
+      numNurses: 4,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 99,
+        minCoverageP: 0,
+        maxCoverageP: 99,
+        minCoverageN: 0,
+        maxCoverageN: 99,
+        minRPerWeek: 0,
+      },
+    });
+    // Nurse 0 should work more (positive delta), others less
+    configWithDeltas.hourDeltas = [50, -15, -15, -20];
+    const bctxWithDeltas = ctx.buildContext(configWithDeltas);
+    const scoreWith = ctx.computeScore(schedule, bctxWithDeltas);
+
+    // The soft scores should differ since hourDeltas adjust individual targets
+    assert.notEqual(scoreWithout.soft, scoreWith.soft, 'Soft scores should differ with hourDeltas');
+  });
+
+  it('should not change hard violations when hourDeltas are provided', () => {
+    const config = makeMinimalConfig({ numNurses: 4 });
+    const bctxNoDeltas = ctx.buildContext(config);
+    const schedule = Array.from({ length: 4 }, () => new Array(bctxNoDeltas.numDays).fill('R'));
+    const scoreWithout = ctx.computeScore(schedule, bctxNoDeltas);
+
+    const configWithDeltas = makeMinimalConfig({ numNurses: 4 });
+    configWithDeltas.hourDeltas = [5, -5, 3, -3];
+    const bctxWithDeltas = ctx.buildContext(configWithDeltas);
+    const scoreWith = ctx.computeScore(schedule, bctxWithDeltas);
+
+    assert.equal(scoreWith.hard, scoreWithout.hard, 'Hard violations should not change with hourDeltas');
   });
 });
