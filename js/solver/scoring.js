@@ -192,7 +192,8 @@ function computeScore(schedule, ctx) {
 
   // Soft: night-count fairness
   for (let n = 0; n < numNurses; n++) {
-    if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].noNotti) continue;
+    if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].noNotti || nurseProps[n].diurniNoNotti)
+      continue;
     const nc = nightCount(schedule, n, numDays);
     soft += Math.abs(nc - targetNights) * 3;
   }

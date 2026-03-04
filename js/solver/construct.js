@@ -56,7 +56,13 @@ function construct(ctx) {
   // Phase 2 — Night blocks (N-S-R-R)
   const nightEligible = [];
   for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].soloMattine && !nurseProps[n].soloDiurni && !nurseProps[n].noNotti) nightEligible.push(n);
+    if (
+      !nurseProps[n].soloMattine &&
+      !nurseProps[n].soloDiurni &&
+      !nurseProps[n].noNotti &&
+      !nurseProps[n].diurniNoNotti
+    )
+      nightEligible.push(n);
   }
   const nc = new Array(numNurses).fill(0);
 
@@ -255,7 +261,7 @@ function construct(ctx) {
     if (nurseProps[n].soloNotti && s !== 'N' && s !== 'S' && s !== 'R') return false;
     // diurni_e_notturni: only D, N, S, R allowed (no M, P)
     if (nurseProps[n].diurniENotturni && s !== 'D' && s !== 'N' && s !== 'S' && s !== 'R') return false;
-    if (s === 'N' && nurseProps[n].noNotti) return false;
+    if (s === 'N' && (nurseProps[n].noNotti || nurseProps[n].diurniNoNotti)) return false;
     if (s === 'D' && nurseProps[n].noDiurni) return false;
     const prev = d > 0 ? schedule[n][d - 1] : null;
     if (!transitionOk(prev, s, ctx, schedule, n, d)) return false;
