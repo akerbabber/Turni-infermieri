@@ -226,35 +226,30 @@ function loadGLPK() {
   if (_glpkPromise) return _glpkPromise;
   console.log('[GLPK] Starting load...');
   const t0 = Date.now();
-  _glpkPromise = new Promise(resolve => {
-    try {
-      importScripts('https://cdn.jsdelivr.net/npm/glpk.js/dist/glpk.min.js');
-      const initGLPK = self.GLPK || self.glpk;
-      if (typeof initGLPK === 'function') {
-        const inst = initGLPK();
-        if (inst && typeof inst.then === 'function') {
-          inst
-            .then(g => {
-              console.log(`[GLPK] Loaded successfully in ${Date.now() - t0}ms, solve=${typeof g?.solve}`);
-              resolve(g);
-            })
-            .catch(err => {
-              console.error('[GLPK] Init promise rejected:', err);
-              resolve(null);
-            });
-        } else {
-          console.log(`[GLPK] Loaded (sync) in ${Date.now() - t0}ms, solve=${typeof inst?.solve}`);
-          resolve(inst);
-        }
-      } else {
-        console.error('[GLPK] initGLPK is not a function:', typeof initGLPK);
-        resolve(null);
+  // glpk.js v5 is an ES module (uses import.meta.url + export default) so it
+  // cannot be loaded with importScripts().  Use dynamic import() instead, which
+  // works in modern Web Workers (Chrome 89+, Firefox 89+, Safari 15+).
+  _glpkPromise = import('https://cdn.jsdelivr.net/npm/glpk.js@5.0.0/dist/glpk.js')
+    .then(module => {
+      const factory = module.default;
+      if (typeof factory !== 'function') {
+        console.error('[GLPK] Module default export is not a function:', typeof factory);
+        return null;
       }
-    } catch (_e) {
-      console.error('[GLPK] Load failed with exception:', _e.message || _e);
-      resolve(null);
-    }
-  });
+      return factory();
+    })
+    .then(glpk => {
+      if (glpk && typeof glpk.solve === 'function') {
+        console.log(`[GLPK] Loaded successfully in ${Date.now() - t0}ms, solve=${typeof glpk.solve}`);
+        return glpk;
+      }
+      console.error('[GLPK] Instance loaded but .solve() missing');
+      return null;
+    })
+    .catch(err => {
+      console.error('[GLPK] Load failed:', err.message || err);
+      return null;
+    });
   return _glpkPromise;
 }
 
