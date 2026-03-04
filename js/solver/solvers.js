@@ -93,51 +93,78 @@ function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
     `[HiGHS] Building LP: ~${constraintCount} constraints, ~${binCount} binary var lines, seed=${perturbSeed}, timeLimit=${timeLimit}s`
   );
 
-  const opts = {
-    time_limit: timeLimit,
-    mip_rel_gap: 0.05, // relaxed from 0.02 to find feasible solutions faster
-    mip_feasibility_tolerance: 1e-4,
-    random_seed: perturbSeed * 137,
-    output_flag: false,
-    log_to_console: false,
-  };
-  const t0 = Date.now();
-  const result = highs.solve(lp, opts);
-  const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+  // Retry with adjusted time limits to work around the HiGHS WASM "Unable to parse solution" bug.
+  // This bug occurs when HiGHS finds a solution near the time limit boundary and the WASM wrapper
+  // fails to parse the truncated output. Retrying with a slightly different time limit often fixes it.
+  const MAX_RETRIES = 3;
+  const timeLimits = [timeLimit, Math.ceil(timeLimit * 1.15), Math.ceil(timeLimit * 0.8)];
 
-  console.log(`[HiGHS] Solve completed in ${elapsed}s — Status: "${result.Status}"`);
-  if (result.ObjectiveValue !== undefined) {
-    console.log(`[HiGHS]   ObjectiveValue: ${result.ObjectiveValue}`);
-  }
-  if (result.Columns) {
-    const colCount = Object.keys(result.Columns).length;
-    const assignedCount = Object.values(result.Columns).filter(c => Math.round(c.Primal) === 1).length;
-    console.log(`[HiGHS]   Columns: ${colCount} total, ${assignedCount} assigned (Primal≈1)`);
-  } else {
-    console.warn('[HiGHS]   No Columns in result — solver did not produce a solution');
-  }
-  // Log all result keys for diagnostics
-  console.log(`[HiGHS]   Result keys: ${Object.keys(result).join(', ')}`);
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const currentTimeLimit = timeLimits[attempt] || timeLimit;
+    const opts = {
+      time_limit: currentTimeLimit,
+      mip_rel_gap: 0.05, // relaxed from 0.02 to find feasible solutions faster
+      mip_feasibility_tolerance: 1e-4,
+      random_seed: perturbSeed * 137,
+      output_flag: false,
+      log_to_console: false,
+    };
 
-  // Accept any status that has columns (a feasible or partial solution)
-  const acceptedStatuses = ['Optimal', 'Time limit reached', 'Target for objective reached'];
-  if (acceptedStatuses.includes(result.Status)) {
-    console.log(`[HiGHS]   → Accepted (status: ${result.Status})`);
-    return parseSolution(result, ctx);
-  }
+    let result;
+    const t0 = Date.now();
+    try {
+      result = highs.solve(lp, opts);
+    } catch (solveErr) {
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+      const isParseErr =
+        solveErr.message && (solveErr.message.includes('parse solution') || solveErr.message.includes('Too few lines'));
+      if (isParseErr && attempt < MAX_RETRIES - 1) {
+        console.warn(
+          `[HiGHS] Attempt ${attempt + 1}/${MAX_RETRIES}: parse error after ${elapsed}s (timeLimit=${currentTimeLimit}s) — retrying with different time limit`
+        );
+        continue;
+      }
+      // Last attempt or non-parse error — re-throw
+      throw solveErr;
+    }
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
 
-  // Even for non-standard statuses, try to extract a solution if columns exist
-  if (result.Columns && Object.keys(result.Columns).length > 0) {
-    const assignedCount = Object.values(result.Columns).filter(c => Math.round(c.Primal) === 1).length;
-    if (assignedCount > 0) {
-      console.warn(
-        `[HiGHS]   → Status "${result.Status}" is non-standard, but found ${assignedCount} assigned columns — attempting to parse solution anyway`
-      );
+    console.log(`[HiGHS] Solve completed in ${elapsed}s — Status: "${result.Status}"`);
+    if (result.ObjectiveValue !== undefined) {
+      console.log(`[HiGHS]   ObjectiveValue: ${result.ObjectiveValue}`);
+    }
+    if (result.Columns) {
+      const colCount = Object.keys(result.Columns).length;
+      const assignedCount = Object.values(result.Columns).filter(c => Math.round(c.Primal) === 1).length;
+      console.log(`[HiGHS]   Columns: ${colCount} total, ${assignedCount} assigned (Primal≈1)`);
+    } else {
+      console.warn('[HiGHS]   No Columns in result — solver did not produce a solution');
+    }
+    // Log all result keys for diagnostics
+    console.log(`[HiGHS]   Result keys: ${Object.keys(result).join(', ')}`);
+
+    // Accept any status that has columns (a feasible or partial solution)
+    const acceptedStatuses = ['Optimal', 'Time limit reached', 'Target for objective reached'];
+    if (acceptedStatuses.includes(result.Status)) {
+      console.log(`[HiGHS]   → Accepted (status: ${result.Status})`);
       return parseSolution(result, ctx);
     }
+
+    // Even for non-standard statuses, try to extract a solution if columns exist
+    if (result.Columns && Object.keys(result.Columns).length > 0) {
+      const assignedCount = Object.values(result.Columns).filter(c => Math.round(c.Primal) === 1).length;
+      if (assignedCount > 0) {
+        console.warn(
+          `[HiGHS]   → Status "${result.Status}" is non-standard, but found ${assignedCount} assigned columns — attempting to parse solution anyway`
+        );
+        return parseSolution(result, ctx);
+      }
+    }
+
+    console.warn(`[HiGHS]   → Rejected: no usable solution (Status: "${result.Status}")`);
+    return null;
   }
 
-  console.warn(`[HiGHS]   → Rejected: no usable solution (Status: "${result.Status}")`);
   return null;
 }
 
@@ -422,9 +449,14 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
           console.error('[Solver] HiGHS solve threw exception:', highsErr.message || highsErr);
           if (highsErr.stack) console.error('[Solver]   Stack:', highsErr.stack);
           if (strictMode) {
+            const isParseErr =
+              highsErr.message &&
+              (highsErr.message.includes('parse solution') || highsErr.message.includes('Too few lines'));
+            const hint = isParseErr
+              ? ' Il solver ha trovato una soluzione ma non è riuscito a leggerla (bug noto del modulo HiGHS WASM). Prova ad aumentare il tempo di calcolo per permettere al solver di completare.'
+              : ' Modalità strict non consente fallback euristico.';
             throw new Error(
-              `Errore durante la risoluzione HiGHS MILP (soluzione ${i + 1}): ${highsErr.message || highsErr}. ` +
-                'Modalità strict non consente fallback euristico.'
+              `Errore durante la risoluzione HiGHS MILP (soluzione ${i + 1}): ${highsErr.message || highsErr}.` + hint
             );
           }
           progress(pctBase, `${batchLabel}HiGHS errore: ${highsErr.message || highsErr}`);
