@@ -1440,4 +1440,65 @@ describe('solver diagnostics', () => {
     assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non caricato: errore rete/CDN'));
     assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback'));
   });
+
+  it('should return the best fallback solution in milp_strict mode when MILP solvers are infeasible', async () => {
+    vm.runInContext(
+      `
+      loadHiGHS = async function () {
+        return { solve: function () { return {}; } };
+      };
+      loadGLPK = async function () {
+        return { solve: function () { return {}; } };
+      };
+      solveOneMILP = function () {
+        _lastHighsStatus = 'Infeasible';
+        return null;
+      };
+      solveOneGLPK = async function () {
+        _lastGLPKStatusName = 'GLP_NOFEAS';
+        return null;
+      };
+      buildContext = function () {
+        return {
+          numNurses: 1,
+          numDays: 1,
+          minCovM: 0,
+          maxCovM: 0,
+          minCovP: 0,
+          maxCovP: 0,
+          minCovN: 0,
+          maxCovN: 0,
+          minCovD: 0,
+          maxCovD: 0
+        };
+      };
+      construct = function () { return [['R']]; };
+      localSearch = function (schedule) { return schedule; };
+      collectViolations = function () { return [{ type: 'coverage', message: 'demo violation' }]; };
+      computeStats = function () { return []; };
+      computeScore = function () { return { total: 1000, hard: 1, soft: 0 }; };
+      progress = function () {};
+    `,
+      ctx
+    );
+
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      rules: { minCoverageM: 0, maxCoverageM: 0, minCoverageP: 0, maxCoverageP: 0, minCoverageN: 0, maxCoverageN: 0 },
+    });
+    const result = await ctx.solve(config, 1, 15, false, 'milp_strict');
+    const diagnostics = toPlain(result.diagnostics);
+
+    assert.equal(result.solutions.length, 1);
+    assert.equal(result.solutions[0].solverMethod, 'fallback');
+    assert.equal(result.solutions[0].violations.length, 1);
+    assert.ok(diagnostics.some(diag => diag.code === 'model_infeasible' && diag.source === 'highs'));
+    assert.ok(diagnostics.some(diag => diag.code === 'model_infeasible' && diag.source === 'glpk'));
+    assert.ok(
+      diagnostics.some(
+        diag =>
+          diag.code === 'fallback_used' && diag.userMessage === 'HiGHS e GLPK falliti, uso euristica come fallback'
+      )
+    );
+  });
 });

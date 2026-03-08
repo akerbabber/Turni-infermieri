@@ -74,13 +74,6 @@ function makeDiagnostic(source, phase, code, severity, userMessage, detail, extr
   };
 }
 
-function makeSolverError(message, diagnostics, code) {
-  const err = new Error(message);
-  err.code = code || 'solver_error';
-  err.diagnostics = Array.isArray(diagnostics) ? diagnostics : [];
-  return err;
-}
-
 /**
  * Persist the latest load diagnostic for a solver, while logging the same entry
  * with a consistent prefix for debugging. Valid targets are 'highs' and 'glpk'.
@@ -601,7 +594,7 @@ function solveFallback(config) {
  * @param {number} numSolutions
  * @param {number} timeBudget  – total seconds allocated; 0 or undefined = default 30s
  * @param {boolean} untilZeroViolations – keep generating until a 0-violation solution is found
- * @param {string} solverChoice – 'auto'|'milp'|'glpk'|'fallback'
+ * @param {string} solverChoice – 'auto'|'milp'|'milp_strict'|'glpk'|'fallback'
  */
 async function solve(config, numSolutions, timeBudget, untilZeroViolations, solverChoice) {
   solverChoice = solverChoice || 'auto';
@@ -620,6 +613,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     if (attempted.length === 1) return `${attempted[0]} fallito, uso euristica come fallback`;
     if (attempted.length > 1) return `${attempted.join(' e ')} falliti, uso euristica come fallback`;
     if (solverChoice === 'milp') return 'HiGHS non disponibile, uso euristica come fallback';
+    if (solverChoice === 'milp_strict')
+      return 'HiGHS/GLPK non hanno trovato una soluzione, uso la migliore euristica come fallback';
     if (solverChoice === 'glpk') return 'GLPK non disponibile, uso euristica come fallback';
     return 'Solver MILP non disponibili, uso euristica come fallback';
   }
@@ -702,32 +697,14 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     }
   }
 
-  // In strict mode, at least one MILP solver must be available
-  if (solverChoice === 'milp_strict' && !milpAvailable && !glpkAvailable) {
-    const diagnostic = makeDiagnostic(
-      'solver',
-      'availability',
-      'solver_unavailable',
-      'error',
-      'Nessun solver MILP disponibile',
-      'Modalità strict richiede almeno un solver MILP funzionante. Verifica la connessione internet e riprova.'
-    );
-    addDiagnostic(diagnostic);
-    throw makeSolverError(
-      'Impossibile caricare nessun solver MILP (HiGHS e GLPK). Modalità strict richiede almeno un solver MILP funzionante.',
-      diagnostics,
-      'solver_unavailable'
-    );
-  }
-
   // Determine which solvers to try
   let useHiGHS =
     milpAvailable && (solverChoice === 'auto' || solverChoice === 'milp' || solverChoice === 'milp_strict');
   const useGLPK =
     glpkAvailable && (solverChoice === 'auto' || solverChoice === 'glpk' || solverChoice === 'milp_strict');
-  const strictMode = solverChoice === 'milp_strict';
+  const preferMILPBeforeFallback = solverChoice === 'milp_strict';
   console.log(
-    `[Solver] Solver plan: useHiGHS=${useHiGHS}, useGLPK=${useGLPK}, strict=${strictMode}, fallback=${!strictMode ? 'available' : 'disabled'}`
+    `[Solver] Solver plan: useHiGHS=${useHiGHS}, useGLPK=${useGLPK}, preferMILP=${preferMILPBeforeFallback}, fallback=available`
   );
 
   /** Generate one batch of solutions */
@@ -861,28 +838,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
         }
       }
 
-      // Greedy + SA fallback (disabled in strict mode)
+      // Greedy + SA fallback
       if (!solved) {
-        if (strictMode) {
-          const attempted = [useHiGHS && 'HiGHS', useGLPK && 'GLPK'].filter(Boolean);
-          addDiagnostic(
-            makeDiagnostic(
-              'solver',
-              'solve',
-              'solver_no_solution',
-              'error',
-              'Nessun solver MILP ha prodotto una soluzione utilizzabile',
-              `Solver tentati: ${attempted.join(', ') || 'nessuno'}. Modalità strict non consente fallback euristico.`
-            )
-          );
-          throw makeSolverError(
-            `Nessun solver MILP ha prodotto una soluzione per la soluzione ${i + 1}/${numSolutions}. ` +
-              `Solver tentati: ${attempted.join(', ') || 'nessuno'}. Modalità strict non consente fallback euristico. ` +
-              'Prova ad aumentare il tempo di calcolo o rilassare i vincoli.',
-            diagnostics,
-            'solver_no_solution'
-          );
-        }
         const attempted = [useHiGHS && 'HiGHS', useGLPK && 'GLPK'].filter(Boolean);
         const label = attempted.length > 0 ? `Fallback euristica (${attempted.join('+')})` : 'Euristica';
         const fallbackReason = buildFallbackReason(attempted);
@@ -924,7 +881,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
   if (useGLPK) availSolvers.push('GLPK');
   if (availSolvers.length > 0) {
     const milpTime = Math.max(MILP_MIN_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions));
-    const strictLabel = strictMode ? ' [STRICT — nessun fallback]' : '';
+    const strictLabel = preferMILPBeforeFallback ? ' [preferisci MILP, poi fallback]' : '';
     progress(5, `Solver: ${availSolvers.join(', ')}${strictLabel}. ${numSolutions} soluzioni, ${milpTime}s ciascuna…`);
   } else if (solverChoice === 'fallback') {
     progress(5, 'Euristica selezionata manualmente…');
