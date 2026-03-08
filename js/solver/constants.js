@@ -48,6 +48,7 @@ const SHIFT_START = { M: 8, P: 14, D: 8, N: 20 };
 
 /**
  * Apply a fascia oraria preset, updating SHIFT_HOURS, SHIFT_START, SHIFT_END.
+ * Unknown fascia values default to 'standard'.
  * @param {string} fascia - 'standard' or '7-10'
  */
 function applyFasciaOraria(fascia) {

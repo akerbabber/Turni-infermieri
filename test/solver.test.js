@@ -12,7 +12,7 @@
 
 'use strict';
 
-const { describe, it, before } = require('node:test');
+const { describe, it, before, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -377,6 +377,11 @@ describe('SHIFT_HOURS', () => {
 // 7b. applyFasciaOraria
 // ---------------------------------------------------------------------------
 describe('applyFasciaOraria', () => {
+  afterEach(() => {
+    // Always reset to standard after each test to avoid test interdependence
+    ctx.applyFasciaOraria('standard');
+  });
+
   it('should switch SHIFT_HOURS to 7-10 preset', () => {
     ctx.applyFasciaOraria('7-10');
     const hrs = toPlain(ctx._getConst('SHIFT_HOURS'));
@@ -431,8 +436,6 @@ describe('applyFasciaOraria', () => {
     const schedule = [['M', 'P', 'R']];
     const hours = ctx.nurseHours(schedule, 0, 3);
     assert.ok(Math.abs(hours - 14.4) < 0.001);
-    // Reset to standard
-    ctx.applyFasciaOraria('standard');
   });
 
   it('should affect gapHours calculation after switching fascia', () => {
@@ -440,8 +443,6 @@ describe('applyFasciaOraria', () => {
     // P ends at 21.2, M starts at 7 => gap = 24 - 21.2 + 7 = 9.8
     const gap = ctx.gapHours('P', 'M');
     assert.ok(Math.abs(gap - 9.8) < 0.001);
-    // Reset to standard
-    ctx.applyFasciaOraria('standard');
   });
 });
 
