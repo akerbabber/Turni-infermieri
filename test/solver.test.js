@@ -1137,6 +1137,59 @@ describe('construct', () => {
   });
 });
 
+describe('localSearch night coverage repair', () => {
+  function placeNightBlock(row, start, numDays) {
+    row[start] = 'N';
+    if (start + 1 < numDays) row[start + 1] = 'S';
+    if (start + 2 < numDays) row[start + 2] = 'R';
+    if (start + 3 < numDays) row[start + 3] = 'R';
+  }
+
+  it('should post-process alternating night excess/deficit days even when annealing iterations are skipped', () => {
+    const config = makeMinimalConfig({
+      numNurses: 7,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 0,
+        minCoverageP: 0,
+        maxCoverageP: 0,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 1,
+        maxCoverageN: 1,
+        targetNights: 1,
+        maxNights: 4,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 7;
+    bctx.weekDaysList = [[0, 1, 2, 3, 4, 5, 6]];
+    bctx.weekOf = () => 0;
+
+    const schedule = Array.from({ length: 7 }, () => new Array(7).fill('R'));
+    [0, 1, 2, 2, 4, 5, 6].forEach((start, nurseIdx) => placeNightBlock(schedule[nurseIdx], start, bctx.numDays));
+
+    const beforeViolations = ctx
+      .collectViolations(schedule, bctx)
+      .filter(v => v.type === 'coverage_N' || v.type === 'coverage_N_max');
+    assert.equal(beforeViolations.length, 2);
+
+    const improved = ctx.localSearch(schedule, bctx, 0);
+    const afterNightCoverage = Array.from(
+      { length: bctx.numDays },
+      (_, d) => ctx.dayCoverage(improved, d, bctx.numNurses).N
+    );
+    assert.deepEqual(afterNightCoverage, [1, 1, 1, 1, 1, 1, 1]);
+
+    const afterViolations = ctx
+      .collectViolations(improved, bctx)
+      .filter(v => v.type === 'coverage_N' || v.type === 'coverage_N_max');
+    assert.deepEqual(toPlain(afterViolations), []);
+    assert.ok(ctx.computeScore(improved, bctx).total < ctx.computeScore(schedule, bctx).total);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 16. buildContext with hourDeltas
 // ---------------------------------------------------------------------------
