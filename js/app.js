@@ -1017,7 +1017,10 @@ function applyConfigPayload(cfg) {
   if (cfg.month !== undefined) state.month = Math.max(0, Math.min(11, parseInt(cfg.month) || 0));
   if (cfg.year !== undefined) state.year = Math.max(2020, parseInt(cfg.year) || state.year);
 
-  const importedNurses = Array.isArray(cfg.nurses) && cfg.nurses.length > 0 ? cfg.nurses.map(normalizeNurse) : null;
+  const importedNurses =
+    Array.isArray(cfg.nurses) && cfg.nurses.length > 0
+      ? cfg.nurses.map((nurse, index) => normalizeNurse(nurse, index))
+      : null;
   if (importedNurses) {
     state.nurses = importedNurses;
   }

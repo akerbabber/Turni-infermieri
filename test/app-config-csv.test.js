@@ -80,7 +80,7 @@ function loadApp() {
   vm.runInContext(code, context, { filename: 'app.js' });
   vm.runInContext(
     `function _getAppConst(name) {
-       var lookup = {
+       const lookup = {
          DEFAULT_RULES: DEFAULT_RULES,
          CONFIG_CSV_ABSENCE_FIELDS: CONFIG_CSV_ABSENCE_FIELDS
        };
@@ -95,6 +95,10 @@ function loadApp() {
 
 function toPlain(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function defaultRulesForApply(appContext) {
+  return toPlain(appContext._getAppConst('DEFAULT_RULES'));
 }
 
 let ctx;
@@ -218,7 +222,3 @@ describe('config CSV helpers', () => {
     assert.equal(nextState.solverMethod, null);
   });
 });
-
-function defaultRulesForApply(appContext) {
-  return toPlain(appContext._getAppConst('DEFAULT_RULES'));
-}
