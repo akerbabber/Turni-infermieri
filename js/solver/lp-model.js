@@ -612,10 +612,7 @@ function buildLP(ctx, perturbSeed) {
           const day = startDay + offset;
           if (!isFree(n, day)) {
             const pinnedShift = pinned[n][day];
-            if (
-              (pinnedShift !== 'M' && pinnedShift !== 'P' && pinnedShift !== 'R') ||
-              pinnedShift !== pattern[offset]
-            ) {
+            if (pinnedShift !== pattern[offset]) {
               compatible = false;
               break;
             }

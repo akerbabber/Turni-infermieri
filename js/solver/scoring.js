@@ -87,6 +87,10 @@ function isMPCycleLimitedNurse(props) {
   return props.mattineEPomeriggi || (props.noNotti && props.noDiurni);
 }
 
+function isAllowedMPCycleShift(shift) {
+  return shift === 'M' || shift === 'P' || shift === 'R';
+}
+
 function getMPCycleBlockMismatch(schedule, nurseIdx, startDay, numDays) {
   const row = schedule[nurseIdx];
   const blockLen = Math.min(6, numDays - startDay);
@@ -96,7 +100,7 @@ function getMPCycleBlockMismatch(schedule, nurseIdx, startDay, numDays) {
     let comparable = false;
     for (let offset = 0; offset < blockLen; offset++) {
       const shift = row[startDay + offset];
-      if (shift !== 'M' && shift !== 'P' && shift !== 'R') {
+      if (!isAllowedMPCycleShift(shift)) {
         comparable = false;
         mismatch = 0;
         break;

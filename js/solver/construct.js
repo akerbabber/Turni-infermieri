@@ -22,6 +22,9 @@
 // ---------------------------------------------------------------------------
 
 function construct(ctx) {
+  const MP_CYCLE_OVER_MAX_PENALTY = 100;
+  const MP_CYCLE_BELOW_MIN_WEIGHT = 20;
+  const MP_CYCLE_SPARE_CAPACITY_WEIGHT = 2;
   const {
     numDays,
     numNurses,
@@ -126,8 +129,12 @@ function construct(ctx) {
       const currentCov = desired === 'M' ? cov.M : cov.P;
       const minCov = desired === 'M' ? minCovM : minCovP;
       const maxCov = desired === 'M' ? maxCovM : maxCovP;
-      if (currentCov >= maxCov) score -= 100;
-      else score += Math.max(0, minCov - currentCov) * 20 + Math.max(0, maxCov - currentCov) * 2;
+      if (currentCov >= maxCov) score -= MP_CYCLE_OVER_MAX_PENALTY;
+      else {
+        score +=
+          Math.max(0, minCov - currentCov) * MP_CYCLE_BELOW_MIN_WEIGHT +
+          Math.max(0, maxCov - currentCov) * MP_CYCLE_SPARE_CAPACITY_WEIGHT;
+      }
       if (desired === 'M') mAdd++;
       else pAdd++;
     }
