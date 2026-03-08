@@ -722,13 +722,43 @@ describe('computeScore', () => {
     const mHardFromCov = mExcessPerDay * numDays; // 1 per day
     const nHardFromCov = nExcessDay0 * 3; // 3× for night on 1 day
     // The N schedule has fewer total coverage hard violations but night ones count 3×
+    assert.ok(nHardFromCov === 3, `Night overcoverage penalty per unit should be 3, got ${nHardFromCov}`);
+    assert.ok(mHardFromCov === numDays, `Morning overcoverage penalty should be ${numDays}, got ${mHardFromCov}`);
+  });
+
+  it('should penalize M/P imbalance for no_notti nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['no_notti'] },
+      },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 99,
+        minCoverageP: 0,
+        maxCoverageP: 99,
+        minCoverageN: 0,
+        maxCoverageN: 99,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const numDays = bctx.numDays;
+    const imbalanced = [new Array(numDays).fill('R')];
+    imbalanced[0][0] = 'M';
+    imbalanced[0][1] = 'M';
+    imbalanced[0][2] = 'M';
+    imbalanced[0][3] = 'M';
+    const balanced = [new Array(numDays).fill('R')];
+    balanced[0][0] = 'M';
+    balanced[0][1] = 'P';
+    balanced[0][2] = 'M';
+    balanced[0][3] = 'P';
+    const scoreImbalanced = ctx.computeScore(imbalanced, bctx);
+    const scoreBalanced = ctx.computeScore(balanced, bctx);
     assert.ok(
-      nHardFromCov === 3,
-      `Night overcoverage penalty per unit should be 3, got ${nHardFromCov}`
-    );
-    assert.ok(
-      mHardFromCov === numDays,
-      `Morning overcoverage penalty should be ${numDays}, got ${mHardFromCov}`
+      scoreImbalanced.soft > scoreBalanced.soft,
+      `Expected no_notti imbalance penalty, got ${scoreImbalanced.soft} vs ${scoreBalanced.soft}`
     );
   });
 });
@@ -931,6 +961,53 @@ describe('construct', () => {
       assert.equal(schedule[0][d], 'F', `Nurse 0 day ${d} should be F (ferie), got ${schedule[0][d]}`);
     }
   });
+
+  it('should spread extra night shifts according to the monthly target instead of saturating max coverage', () => {
+    const config = makeMinimalConfig({
+      numNurses: 12,
+      nurseOverrides: {
+        0: { tags: ['mattine_e_pomeriggi'] },
+        1: { tags: ['no_diurni'] },
+        2: { tags: ['no_notti'] },
+      },
+      rules: {
+        minCoverageM: 2,
+        maxCoverageM: 3,
+        minCoverageP: 2,
+        maxCoverageP: 3,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 1,
+        maxCoverageN: 2,
+        targetNights: 4,
+        maxNights: 6,
+        minRPerWeek: 1,
+      },
+    });
+    const origRandom = Math.random;
+    Math.random = () => 0.123456789;
+    try {
+      const bctx = ctx.buildContext(config);
+      const schedule = ctx.construct(bctx);
+      const dailyNightCoverage = Array.from(
+        { length: bctx.numDays },
+        (_, d) => ctx.dayCoverage(schedule, d, bctx.numNurses).N
+      );
+      // This case is deterministic because Math.random is pinned to a constant seed value.
+      // 10 nurses remain night-eligible (12 total minus mattine_e_pomeriggi and no_notti).
+      // With targetNights=4, the heuristic should aim for 40 night starts overall.
+      // The minimum daily requirement already consumes 31 starts, so exactly 9 days
+      // should need a second nurse on night coverage.
+      const daysAtMaxNightCoverage = dailyNightCoverage.filter(n => n === 2).length;
+      assert.equal(daysAtMaxNightCoverage, 9);
+      assert.equal(
+        dailyNightCoverage.reduce((sum, n) => sum + n, 0),
+        40
+      );
+    } finally {
+      Math.random = origRandom;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1026,7 +1103,10 @@ describe('computeScore with hourDeltas', () => {
 describe('buildContext with previousMonthTail', () => {
   it('should store prevTail in context when provided', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
-    config.previousMonthTail = [['M', 'P', 'R'], ['R', 'N', 'S']];
+    config.previousMonthTail = [
+      ['M', 'P', 'R'],
+      ['R', 'N', 'S'],
+    ];
     const bctx = ctx.buildContext(config);
     assert.ok(bctx.prevTail);
     assert.equal(bctx.prevTail.length, 2);
@@ -1179,7 +1259,10 @@ describe('collectViolations with previousMonthTail', () => {
 describe('buildContext with 5-day previousMonthTail', () => {
   it('should accept and store a 5-element tail', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
-    config.previousMonthTail = [['M', 'P', 'R', 'M', 'P'], ['R', 'R', 'N', 'S', 'R']];
+    config.previousMonthTail = [
+      ['M', 'P', 'R', 'M', 'P'],
+      ['R', 'R', 'N', 'S', 'R'],
+    ];
     const bctx = ctx.buildContext(config);
     assert.ok(bctx.prevTail);
     assert.equal(bctx.prevTail[0].length, 5);
@@ -1422,8 +1505,6 @@ describe('solver diagnostics', () => {
     assert.equal(result.solutions.length, 1);
     assert.equal(result.solutions[0].solverMethod, 'fallback');
     assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non caricato: errore rete/CDN'));
-    assert.ok(
-      diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback')
-    );
+    assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback'));
   });
 });

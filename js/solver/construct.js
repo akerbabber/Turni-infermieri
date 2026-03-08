@@ -115,6 +115,23 @@ function construct(ctx) {
     nurseStartOffset.set(n, idx % nCycle);
   });
 
+  const desiredNightLoads = new Array(numDays).fill(minCovN);
+  const minTotalNightStarts = minCovN * numDays;
+  const maxTotalNightStarts = maxCovN * numDays;
+  const targetTotalNightStarts = Math.max(
+    minTotalNightStarts,
+    Math.min(maxTotalNightStarts, targetNights * nightEligible.length)
+  );
+  const extraNightStarts = Math.max(0, targetTotalNightStarts - minTotalNightStarts);
+  const maxNightLoadBumps = Math.max(1, numDays * Math.max(1, maxCovN - minCovN));
+  for (let i = 0; i < extraNightStarts; i++) {
+    let d = Math.floor((i * numDays) / extraNightStarts);
+    let searchLimit = maxNightLoadBumps;
+    while (desiredNightLoads[d] >= maxCovN && searchLimit-- > 0) d = (d + 1) % numDays;
+    if (searchLimit <= 0) break;
+    desiredNightLoads[d]++;
+  }
+
   // Phase 2a.1: First, place nights to meet minimum coverage, respecting offsets
   // Go day by day and ensure we meet minCovN
   for (let d = 0; d < numDays; d++) {
@@ -216,8 +233,15 @@ function construct(ctx) {
   // 2c — Fill nights to target per nurse, prioritizing days with less coverage
   for (const n of shuffle([...nightEligible])) {
     if (nc[n] >= targetNights) continue;
-    const days = shuffle(Array.from({ length: numDays }, (_, i) => i).filter(d => canNight(n, d)));
-    days.sort((a, b) => (nightStarts[a] || 0) - (nightStarts[b] || 0));
+    const days = shuffle(
+      Array.from({ length: numDays }, (_, i) => i).filter(d => canNight(n, d) && nightStarts[d] < desiredNightLoads[d])
+    );
+    days.sort((a, b) => {
+      const aGap = desiredNightLoads[a] - (nightStarts[a] || 0);
+      const bGap = desiredNightLoads[b] - (nightStarts[b] || 0);
+      if (aGap !== bGap) return bGap - aGap;
+      return (nightStarts[a] || 0) - (nightStarts[b] || 0);
+    });
     for (const d of days) {
       if (nc[n] >= targetNights) break;
       if (!canNight(n, d)) continue;
@@ -430,7 +454,7 @@ function construct(ctx) {
     }
   }
 
-  // Phase 4.6 — M/P balance for no_diurni and no_notti nurses
+  // Phase 4.6 — M/P balance for nurses limited to M/P-heavy workloads
   for (let n = 0; n < numNurses; n++) {
     if (
       nurseProps[n].soloMattine ||
@@ -439,22 +463,31 @@ function construct(ctx) {
       nurseProps[n].diurniENotturni
     )
       continue;
-    // Apply to no_diurni nurses, mattine_e_pomeriggi nurses, and combinations
-    if (!nurseProps[n].noDiurni && !nurseProps[n].mattineEPomeriggi) continue;
-    let mCount = 0,
-      pCount = 0;
-    const mDays = [],
-      pDays = [];
-    for (let d = 0; d < numDays; d++) {
-      if (schedule[n][d] === 'M') {
-        mCount++;
-        mDays.push(d);
+    if (
+      !nurseProps[n].noDiurni &&
+      !nurseProps[n].mattineEPomeriggi &&
+      !nurseProps[n].noNotti &&
+      !nurseProps[n].diurniNoNotti
+    )
+      continue;
+    function collectMPDays() {
+      let mCount = 0,
+        pCount = 0;
+      const mDays = [],
+        pDays = [];
+      for (let d = 0; d < numDays; d++) {
+        if (schedule[n][d] === 'M') {
+          mCount++;
+          mDays.push(d);
+        }
+        if (schedule[n][d] === 'P') {
+          pCount++;
+          pDays.push(d);
+        }
       }
-      if (schedule[n][d] === 'P') {
-        pCount++;
-        pDays.push(d);
-      }
+      return { mCount, pCount, mDays, pDays };
     }
+    let { mCount, pCount, mDays, pDays } = collectMPDays();
     // Swap excess M to P or vice versa to balance
     const diff = mCount - pCount;
     if (Math.abs(diff) > 1) {
@@ -476,6 +509,20 @@ function construct(ctx) {
         if (!transitionOk(newShift, next, ctx, schedule, n, d + 1)) continue;
         schedule[n][d] = newShift;
         swaps--;
+      }
+      ({ mCount, pCount, mDays, pDays } = collectMPDays());
+      let remainingDiff = mCount - pCount;
+      // A half-month worth of swap attempts is enough to explore different pairings
+      // without spending too long on a single nurse during constructive balancing.
+      const maxBalanceAttempts = Math.floor(numDays / 2);
+      let attempts = maxBalanceAttempts;
+      while (Math.abs(remainingDiff) > 1 && attempts-- > 0) {
+        const srcIsM = remainingDiff > 0;
+        const prevDiff = remainingDiff;
+        trySwapMP(schedule, n, srcIsM ? mDays : pDays, srcIsM ? pDays : mDays, Math.floor(numDays / 2), srcIsM, ctx);
+        ({ mCount, pCount, mDays, pDays } = collectMPDays());
+        remainingDiff = mCount - pCount;
+        if (remainingDiff === prevDiff) break;
       }
     }
   }

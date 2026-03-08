@@ -225,9 +225,15 @@ function computeScore(schedule, ctx) {
     }
   }
 
-  // Soft: M/P balance for no_diurni and mattine_e_pomeriggi nurses
+  // Soft: M/P balance for nurses limited to M/P-heavy workloads
   for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].noDiurni && !nurseProps[n].mattineEPomeriggi) continue;
+    if (
+      !nurseProps[n].noDiurni &&
+      !nurseProps[n].mattineEPomeriggi &&
+      !nurseProps[n].noNotti &&
+      !nurseProps[n].diurniNoNotti
+    )
+      continue;
     if (
       nurseProps[n].soloMattine ||
       nurseProps[n].soloDiurni ||
