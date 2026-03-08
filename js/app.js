@@ -40,7 +40,16 @@ const SHIFT_LABELS = {
   PR: 'Perm.Retr.',
   MT: 'Maternità',
 };
+// Active shift hours (mutable — updated by applyFasciaOraria)
 const SHIFT_HOURS = { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 };
+const FASCIA_PRESETS = {
+  standard: { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 },
+  '7-10': { M: 7.2, P: 7.2, D: 12.2, N: 10.2, S: 0, R: 0, F: 7.12, MA: 7.12, L104: 7.12, PR: 7.12, MT: 7.12 },
+};
+function applyFasciaOraria(fascia) {
+  const key = FASCIA_PRESETS[fascia] ? fascia : 'standard';
+  Object.assign(SHIFT_HOURS, FASCIA_PRESETS[key]);
+}
 const DOW_LABELS = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const MONTHS_IT = [
   'Gennaio',
@@ -124,6 +133,7 @@ const DEFAULT_RULES = {
   coppiaTurni: null, // Array of 2 nurse indices [n1, n2] to have same shifts, or null
   consentePomeriggioDiurno: false, // Allow P→D transition
   consente2DiurniConsecutivi: false, // Allow D-D but require R after
+  fasciaOraria: 'standard', // 'standard' (6+12) or '7-10' (7+10)
 };
 
 // ---------------------------------------------------------------------------
@@ -212,6 +222,8 @@ function loadState() {
         maternita: { start: null, end: null },
       },
     }));
+    // Apply fascia oraria to update SHIFT_HOURS in main thread
+    applyFasciaOraria(state.rules.fasciaOraria);
   } catch (_) {}
 }
 
@@ -610,6 +622,17 @@ function renderStep2() {
   bindToggle('tog-consente-2d', r.consente2DiurniConsecutivi, v => {
     state.rules.consente2DiurniConsecutivi = v;
     saveState();
+  });
+
+  // Fascia oraria radio buttons
+  const radios = document.querySelectorAll('input[name="fascia-oraria"]');
+  radios.forEach(radio => {
+    radio.checked = radio.value === (r.fasciaOraria || 'standard');
+    radio.onchange = () => {
+      state.rules.fasciaOraria = radio.value;
+      applyFasciaOraria(radio.value);
+      saveState();
+    };
   });
 
   // Nurse pairing dropdown

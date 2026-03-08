@@ -49,7 +49,7 @@ function buildLP(ctx, perturbSeed) {
 
   // Shift indices: M=0, P=1, N=2, S=3, R=4, D=5
   const SHIFTS = ['M', 'P', 'N', 'S', 'R', 'D'];
-  const S_HRS = [6.2, 6.2, 12.2, 0, 0, 12.2];
+  const S_HRS = SHIFTS.map(s => SHIFT_HOURS[s]);
   const V = (n, d, s) => `x${n}_${d}_${s}`;
 
   const lines = [];
