@@ -123,9 +123,12 @@ function construct(ctx) {
     Math.min(maxTotalNightStarts, targetNights * nightEligible.length)
   );
   const extraNightStarts = Math.max(0, targetTotalNightStarts - minTotalNightStarts);
+  const maxNightLoadBumps = Math.max(1, numDays * Math.max(1, maxCovN - minCovN));
   for (let i = 0; i < extraNightStarts; i++) {
     let d = Math.floor((i * numDays) / extraNightStarts);
-    while (desiredNightLoads[d] >= maxCovN) d = (d + 1) % numDays;
+    let guard = maxNightLoadBumps;
+    while (desiredNightLoads[d] >= maxCovN && guard-- > 0) d = (d + 1) % numDays;
+    if (guard <= 0) break;
     desiredNightLoads[d]++;
   }
 
@@ -509,7 +512,10 @@ function construct(ctx) {
       }
       ({ mCount, pCount, mDays, pDays } = collectMPDays());
       let remainingDiff = mCount - pCount;
-      let attempts = Math.floor(numDays / 2);
+      // A half-month worth of swap attempts is enough to explore different pairings
+      // without spending too long on a single nurse during constructive balancing.
+      const maxBalanceAttempts = Math.floor(numDays / 2);
+      let attempts = maxBalanceAttempts;
       while (Math.abs(remainingDiff) > 1 && attempts-- > 0) {
         const srcIsM = remainingDiff > 0;
         const prevDiff = remainingDiff;

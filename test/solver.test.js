@@ -993,6 +993,10 @@ describe('construct', () => {
         { length: bctx.numDays },
         (_, d) => ctx.dayCoverage(schedule, d, bctx.numNurses).N
       );
+      // 10 nurses remain night-eligible (12 total minus mattine_e_pomeriggi and no_notti).
+      // With targetNights=4, the heuristic should aim for 40 night starts overall.
+      // The minimum daily requirement already consumes 31 starts, so only 9 days
+      // should need a second nurse on night coverage.
       const daysAtMaxNightCoverage = dailyNightCoverage.filter(n => n === 2).length;
       assert.equal(daysAtMaxNightCoverage, 9);
       assert.equal(
