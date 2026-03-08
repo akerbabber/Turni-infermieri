@@ -89,12 +89,13 @@ function loadSolver() {
          SHIFT_START: SHIFT_START,
          SHIFT_END: SHIFT_END,
          BASE_FORBIDDEN_NEXT: BASE_FORBIDDEN_NEXT,
-         ABSENCE_TAG_TO_SHIFT: ABSENCE_TAG_TO_SHIFT,
-         FASCIA_PRESETS: FASCIA_PRESETS,
-         FASCIA_SHIFT_START: FASCIA_SHIFT_START,
-         FASCIA_SHIFT_END: FASCIA_SHIFT_END,
-       };
-       return lookup[name];
+       ABSENCE_TAG_TO_SHIFT: ABSENCE_TAG_TO_SHIFT,
+        FASCIA_PRESETS: FASCIA_PRESETS,
+        FASCIA_SHIFT_START: FASCIA_SHIFT_START,
+        FASCIA_SHIFT_END: FASCIA_SHIFT_END,
+        HIGHS_RANDOM_SEED_MULTIPLIER: HIGHS_RANDOM_SEED_MULTIPLIER,
+      };
+      return lookup[name];
      }`,
     context
   );
@@ -1358,10 +1359,15 @@ describe('solver diagnostics', () => {
   });
 
   it('should keep HiGHS presolve disabled in solve options', () => {
-    const opts = toPlain(ctx.buildHighsSolveOptions(17, 3));
-    assert.equal(opts.time_limit, 17);
+    const testTimeLimit = 17;
+    const testPerturbSeed = 3;
+    const seedMultiplier = ctx._getConst('HIGHS_RANDOM_SEED_MULTIPLIER');
+    const expectedRandomSeed = testPerturbSeed * seedMultiplier;
+    const opts = toPlain(ctx.buildHighsSolveOptions(testTimeLimit, testPerturbSeed));
+    assert.equal(seedMultiplier, 137);
+    assert.equal(opts.time_limit, testTimeLimit);
     assert.equal(opts.presolve, 'off');
-    assert.equal(opts.random_seed, 411);
+    assert.equal(opts.random_seed, expectedRandomSeed);
     assert.equal(opts.mip_rel_gap, 0.05);
     assert.equal(opts.output_flag, false);
     assert.equal(opts.log_to_console, false);

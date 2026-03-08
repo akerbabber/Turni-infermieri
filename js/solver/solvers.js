@@ -269,6 +269,7 @@ function loadHiGHS() {
  */
 let _lastHighsStatus = ''; // last HiGHS solver status for diagnostics
 let _lastGLPKStatusName = '';
+const HIGHS_RANDOM_SEED_MULTIPLIER = 137;
 
 /**
  * Classify a HiGHS solver status into a user-friendly diagnostic object.
@@ -321,8 +322,8 @@ function buildHighsSolveOptions(timeLimit, perturbSeed) {
     time_limit: timeLimit,
     presolve: 'off', // avoid highs-js solution parse bug when presolve reduces the problem
     mip_rel_gap: 0.05, // relaxed from 0.02 to find feasible solutions faster
-    mip_feasibility_tolerance: 1e-4,
-    random_seed: perturbSeed * 137,
+    mip_feasibility_tolerance: 1e-4, // keep a small tolerance so near-integer MILP solutions remain usable
+    random_seed: perturbSeed * HIGHS_RANDOM_SEED_MULTIPLIER,
     output_flag: false,
     log_to_console: false,
   };
