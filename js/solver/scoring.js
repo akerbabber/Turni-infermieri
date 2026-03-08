@@ -102,7 +102,8 @@ function computeScore(schedule, ctx) {
   let hard = 0,
     soft = 0;
 
-  // Coverage
+  // Coverage — night overcoverage is penalised 3× harder so the solver
+  // prefers to exceed on M/P/D positions rather than on night shifts.
   for (let d = 0; d < numDays; d++) {
     const cov = dayCoverage(schedule, d, numNurses);
     if (cov.M < minCovM) hard += minCovM - cov.M;
@@ -110,7 +111,7 @@ function computeScore(schedule, ctx) {
     if (cov.P < minCovP) hard += minCovP - cov.P;
     if (cov.P > maxCovP) hard += cov.P - maxCovP;
     if (cov.N < minCovN) hard += minCovN - cov.N;
-    if (cov.N > maxCovN) hard += cov.N - maxCovN;
+    if (cov.N > maxCovN) hard += (cov.N - maxCovN) * 3;
   }
 
   // Per-nurse hard constraints
