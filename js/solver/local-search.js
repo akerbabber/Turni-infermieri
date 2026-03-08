@@ -219,6 +219,9 @@ function relocateNightBlock(schedule, ctx, nurseIdx, oldStart, newStart) {
   const oldDays = getNightBlockDays(oldStart, noDiurni, numDays);
   const oldDaySet = new Set(oldDays);
   const newDays = getNightBlockDays(newStart, noDiurni, numDays);
+  for (const d of oldDays) {
+    if (pinned[nurseIdx][d]) return null;
+  }
 
   const candidate = deepCopy(schedule);
   for (const d of oldDays) candidate[nurseIdx][d] = 'R';

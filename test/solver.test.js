@@ -1168,6 +1168,8 @@ describe('localSearch night coverage repair', () => {
     bctx.weekOf = () => 0;
 
     const schedule = Array.from({ length: 7 }, () => new Array(7).fill('R'));
+    // Intentionally duplicate day 2 and skip day 3 so nights start on:
+    // 0,1,2,2,4,5,6 → excess on day 2 and deficit on day 3.
     [0, 1, 2, 2, 4, 5, 6].forEach((start, nurseIdx) => placeNightBlock(schedule[nurseIdx], start, bctx.numDays));
 
     const beforeViolations = ctx
