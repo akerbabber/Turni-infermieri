@@ -58,10 +58,10 @@ function construct(ctx) {
   for (let n = 0; n < numNurses; n++) {
     if (
       !nurseProps[n].soloMattine &&
-      !nurseProps[n].soloPomeriggi &&
       !nurseProps[n].soloDiurni &&
       !nurseProps[n].noNotti &&
-      !nurseProps[n].diurniNoNotti
+      !nurseProps[n].diurniNoNotti &&
+      !nurseProps[n].mattineEPomeriggi
     )
       nightEligible.push(n);
   }
@@ -256,15 +256,15 @@ function construct(ctx) {
   function eligible(n, d, s) {
     if (schedule[n][d] !== null) return false;
     if (nurseProps[n].soloMattine) return false;
-    if (nurseProps[n].soloPomeriggi) return false;
     // solo_diurni: only D or R allowed
     if (nurseProps[n].soloDiurni && s !== 'D' && s !== 'R') return false;
     // solo_notti: only N, S, or R allowed
     if (nurseProps[n].soloNotti && s !== 'N' && s !== 'S' && s !== 'R') return false;
     // diurni_e_notturni: only D, N, S, R allowed (no M, P)
     if (nurseProps[n].diurniENotturni && s !== 'D' && s !== 'N' && s !== 'S' && s !== 'R') return false;
-    if (s === 'N' && (nurseProps[n].noNotti || nurseProps[n].diurniNoNotti)) return false;
-    if (s === 'D' && nurseProps[n].noDiurni) return false;
+    if (s === 'N' && (nurseProps[n].noNotti || nurseProps[n].diurniNoNotti || nurseProps[n].mattineEPomeriggi))
+      return false;
+    if (s === 'D' && (nurseProps[n].noDiurni || nurseProps[n].mattineEPomeriggi)) return false;
     const prev = d > 0 ? schedule[n][d - 1] : null;
     if (!transitionOk(prev, s, ctx, schedule, n, d)) return false;
     if (consente2D && s === 'D' && prev === 'D' && d + 1 < numDays && schedule[n][d + 1] !== null) return false;
@@ -316,8 +316,8 @@ function construct(ctx) {
       for (const n of avail().filter(
         n =>
           !nurseProps[n].noDiurni &&
+          !nurseProps[n].mattineEPomeriggi &&
           !nurseProps[n].soloMattine &&
-          !nurseProps[n].soloPomeriggi &&
           !nurseProps[n].soloNotti
       )) {
         if (cov.D >= maxCovD || cov.M >= maxCovM || cov.P >= maxCovP) break;
@@ -383,8 +383,8 @@ function construct(ctx) {
       for (const n of avail().filter(
         n =>
           !nurseProps[n].noDiurni &&
+          !nurseProps[n].mattineEPomeriggi &&
           !nurseProps[n].soloMattine &&
-          !nurseProps[n].soloPomeriggi &&
           !nurseProps[n].soloNotti
       )) {
         if (cov.M >= maxCovM || cov.P >= maxCovP) break;
@@ -434,14 +434,13 @@ function construct(ctx) {
   for (let n = 0; n < numNurses; n++) {
     if (
       nurseProps[n].soloMattine ||
-      nurseProps[n].soloPomeriggi ||
       nurseProps[n].soloDiurni ||
       nurseProps[n].soloNotti ||
       nurseProps[n].diurniENotturni
     )
       continue;
-    // Apply to no_diurni nurses and also to no_diurni+no_notti nurses
-    if (!nurseProps[n].noDiurni) continue;
+    // Apply to no_diurni nurses, mattine_e_pomeriggi nurses, and combinations
+    if (!nurseProps[n].noDiurni && !nurseProps[n].mattineEPomeriggi) continue;
     let mCount = 0,
       pCount = 0;
     const mDays = [],

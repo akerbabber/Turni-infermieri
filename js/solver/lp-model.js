@@ -122,7 +122,7 @@ function buildLP(ctx, perturbSeed) {
   const contVars = [];
   const controllable = [];
   for (let n = 0; n < numNurses; n++) {
-    if (nurseProps[n].soloDiurni || nurseProps[n].soloMattine || nurseProps[n].soloPomeriggi) continue;
+    if (nurseProps[n].soloDiurni || nurseProps[n].soloMattine) continue;
     let hasFree = false;
     for (let d = 0; d < numDays; d++) {
       if (isFree(n, d)) {
@@ -160,10 +160,10 @@ function buildLP(ctx, perturbSeed) {
   for (let n = 0; n < numNurses; n++) {
     if (
       nurseProps[n].soloMattine ||
-      nurseProps[n].soloPomeriggi ||
       nurseProps[n].soloDiurni ||
       nurseProps[n].noNotti ||
-      nurseProps[n].diurniNoNotti
+      nurseProps[n].diurniNoNotti ||
+      nurseProps[n].mattineEPomeriggi
     )
       continue;
     let hasFreeN = false;
@@ -200,7 +200,12 @@ function buildLP(ctx, perturbSeed) {
   }
   const diurniElig = [];
   for (let n = 0; n < numNurses; n++) {
-    if (nurseProps[n].soloMattine || nurseProps[n].soloPomeriggi || nurseProps[n].soloNotti || nurseProps[n].noDiurni)
+    if (
+      nurseProps[n].soloMattine ||
+      nurseProps[n].soloNotti ||
+      nurseProps[n].noDiurni ||
+      nurseProps[n].mattineEPomeriggi
+    )
       continue;
     let hasFreeDay = false;
     for (let d = 0; d < numDays; d++) {
@@ -227,12 +232,11 @@ function buildLP(ctx, perturbSeed) {
     }
   }
 
-  // --- M/P balance for no_diurni nurses: penalize |M_count - P_count| ---
+  // --- M/P balance for no_diurni and mattine_e_pomeriggi nurses: penalize |M_count - P_count| ---
   for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].noDiurni) continue;
+    if (!nurseProps[n].noDiurni && !nurseProps[n].mattineEPomeriggi) continue;
     if (
       nurseProps[n].soloMattine ||
-      nurseProps[n].soloPomeriggi ||
       nurseProps[n].soloDiurni ||
       nurseProps[n].soloNotti ||
       nurseProps[n].diurniENotturni
@@ -276,7 +280,7 @@ function buildLP(ctx, perturbSeed) {
     }
     // Check feasibility: can we meet night coverage with available nurses?
     const nightEligibleCount = nurseProps.filter(
-      p => !p.soloMattine && !p.soloPomeriggi && !p.soloDiurni && !p.noNotti && !p.diurniNoNotti
+      p => !p.soloMattine && !p.soloDiurni && !p.noNotti && !p.diurniNoNotti && !p.mattineEPomeriggi
     ).length;
     // Each night nurse needs 4 days (N-S-R-R) per night block, so max nights per nurse ≈ numDays/4
     const theoreticalMaxNightSlots = nightEligibleCount * Math.floor(numDays / 4);
@@ -503,8 +507,8 @@ function buildLP(ctx, perturbSeed) {
       nurseProps[n].noNotti ||
       nurseProps[n].diurniNoNotti ||
       nurseProps[n].soloMattine ||
-      nurseProps[n].soloPomeriggi ||
-      nurseProps[n].soloDiurni
+      nurseProps[n].soloDiurni ||
+      nurseProps[n].mattineEPomeriggi
     )
       continue;
     const nTerms = [];
@@ -579,8 +583,18 @@ function buildLP(ctx, perturbSeed) {
   // --- Nurse-specific: solo_mattine → only M or R (handled by pinning, but safety) ---
   // Already handled by pinned cells
 
-  // --- Nurse-specific: solo_pomeriggi → only P or R (handled by pinning, but safety) ---
-  // Already handled by pinned cells
+  // --- Nurse-specific: mattine_e_pomeriggi → only M, P, R allowed (ban N, S, D) ---
+  for (let n = 0; n < numNurses; n++) {
+    if (nurseProps[n].mattineEPomeriggi) {
+      for (let d = 0; d < numDays; d++) {
+        if (isFree(n, d)) {
+          lines.push(` mpN${n}_${d}: ${V(n, d, 2)} <= 0`); // ban N
+          lines.push(` mpS${n}_${d}: ${V(n, d, 3)} <= 0`); // ban S
+          lines.push(` mpD${n}_${d}: ${V(n, d, 5)} <= 0`); // ban D
+        }
+      }
+    }
+  }
 
   // --- Per-week rest constraints (proper weekly distribution) ---
   // Enforce minimum rest days per actual week, not just monthly average.

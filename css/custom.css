@@ -407,7 +407,7 @@ td.violation-cell {
   color: #1d4ed8;
   border-color: #93c5fd;
 }
-.tag.tag-solo_pomeriggi {
+.tag.tag-mattine_e_pomeriggi {
   background: #ffedd5;
   color: #c2410c;
   border-color: #fb923c;
@@ -480,7 +480,7 @@ html.dark .tag.tag-solo_mattine {
   color: #93c5fd;
   border-color: #3b82f6;
 }
-html.dark .tag.tag-solo_pomeriggi {
+html.dark .tag.tag-mattine_e_pomeriggi {
   background: #431407;
   color: #fb923c;
   border-color: #ea580c;
