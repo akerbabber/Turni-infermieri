@@ -1458,6 +1458,8 @@ describe('solver diagnostics', () => {
         _lastGLPKStatusName = 'GLP_NOFEAS';
         return null;
       };
+      // Minimal context stub: this test exercises only the solver fallback flow,
+      // so it provides just the fields that solve() logs or passes through.
       buildContext = function () {
         return {
           numNurses: 1,

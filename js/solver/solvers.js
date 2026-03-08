@@ -614,7 +614,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     if (attempted.length > 1) return `${attempted.join(' e ')} falliti, uso euristica come fallback`;
     if (solverChoice === 'milp') return 'HiGHS non disponibile, uso euristica come fallback';
     if (solverChoice === 'milp_strict')
-      return 'HiGHS/GLPK non hanno trovato una soluzione, uso la migliore euristica come fallback';
+      return 'HiGHS e GLPK non hanno trovato una soluzione, uso la migliore euristica come fallback';
     if (solverChoice === 'glpk') return 'GLPK non disponibile, uso euristica come fallback';
     return 'Solver MILP non disponibili, uso euristica come fallback';
   }
@@ -702,9 +702,9 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     milpAvailable && (solverChoice === 'auto' || solverChoice === 'milp' || solverChoice === 'milp_strict');
   const useGLPK =
     glpkAvailable && (solverChoice === 'auto' || solverChoice === 'glpk' || solverChoice === 'milp_strict');
-  const preferMILPBeforeFallback = solverChoice === 'milp_strict';
+  const tryAllMILPSolvers = solverChoice === 'milp_strict';
   console.log(
-    `[Solver] Solver plan: useHiGHS=${useHiGHS}, useGLPK=${useGLPK}, preferMILP=${preferMILPBeforeFallback}, fallback=available`
+    `[Solver] Solver plan: useHiGHS=${useHiGHS}, useGLPK=${useGLPK}, tryAllMILPSolvers=${tryAllMILPSolvers}, fallback=available`
   );
 
   /** Generate one batch of solutions */
@@ -881,7 +881,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
   if (useGLPK) availSolvers.push('GLPK');
   if (availSolvers.length > 0) {
     const milpTime = Math.max(MILP_MIN_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions));
-    const strictLabel = preferMILPBeforeFallback ? ' [preferisci MILP, poi fallback]' : '';
+    const strictLabel = tryAllMILPSolvers ? ' [preferisci MILP, poi fallback]' : '';
     progress(5, `Solver: ${availSolvers.join(', ')}${strictLabel}. ${numSolutions} soluzioni, ${milpTime}s ciascuna…`);
   } else if (solverChoice === 'fallback') {
     progress(5, 'Euristica selezionata manualmente…');
