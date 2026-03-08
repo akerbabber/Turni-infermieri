@@ -161,6 +161,20 @@ function makeMinimalConfig(overrides = {}) {
   };
 }
 
+const MP_CYCLE_PATTERNS = [
+  ['M', 'M', 'P', 'P', 'R', 'R'],
+  ['M', 'P', 'P', 'P', 'R', 'R'],
+  ['M', 'M', 'M', 'P', 'R', 'R'],
+];
+
+function assertMatchesMPCycle(row, messagePrefix) {
+  for (let start = 0; start < row.length; start += 6) {
+    const block = row.slice(start, start + 6);
+    const ok = MP_CYCLE_PATTERNS.some(pattern => block.every((shift, idx) => shift === pattern[idx]));
+    assert.ok(ok, `${messagePrefix} block ${start + 1}-${start + block.length}: ${block.join('-')}`);
+  }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -1090,7 +1104,7 @@ describe('construct', () => {
     }
   });
 
-  it('should give mattine_e_pomeriggi nurses two nearby rests instead of extending work streaks past four days', () => {
+  it('should keep mattine_e_pomeriggi nurses on the allowed 4+2 M/P cycle patterns', () => {
     const config = makeMinimalConfig({
       numNurses: 5,
       nurseOverrides: {
@@ -1119,21 +1133,75 @@ describe('construct', () => {
     try {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
-      let streak = 0;
-      let maxStreak = 0;
-      for (const shift of schedule[0]) {
-        if (shift === 'M' || shift === 'P') {
-          streak++;
-          maxStreak = Math.max(maxStreak, streak);
-        } else {
-          streak = 0;
-        }
-      }
-      assert.ok(maxStreak <= 4, `mattine_e_pomeriggi work streak should stop at 4 days, got ${maxStreak}`);
-      assert.match(schedule[0].join(' '), /\bR R\b/, 'Expected at least one nearby pair of rest days');
+      assertMatchesMPCycle(schedule[0], 'mattine_e_pomeriggi nurse should follow 4+2 cycle');
+      assert.equal(schedule[0][0], 'M');
     } finally {
       Math.random = origRandom;
     }
+  });
+
+  it('should keep no_notti + no_diurni nurses on the same 4+2 M/P cycle without losing day-1 morning coverage', () => {
+    const config = makeMinimalConfig({
+      numNurses: 7,
+      nurseOverrides: {
+        0: { tags: ['no_notti', 'no_diurni'] },
+        1: { tags: ['no_notti', 'no_diurni'] },
+      },
+      rules: {
+        minCoverageM: 3,
+        maxCoverageM: 4,
+        minCoverageP: 2,
+        maxCoverageP: 4,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+        minRPerWeek: 1,
+      },
+    });
+    const origRandom = Math.random;
+    let state = 19;
+    Math.random = () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 4294967296;
+    };
+    try {
+      const bctx = ctx.buildContext(config);
+      const schedule = ctx.construct(bctx);
+      assertMatchesMPCycle(schedule[0], 'no_notti+no_diurni nurse #1 should follow 4+2 cycle');
+      assertMatchesMPCycle(schedule[1], 'no_notti+no_diurni nurse #2 should follow 4+2 cycle');
+      const day1Coverage = ctx.dayCoverage(schedule, 0, bctx.numNurses);
+      assert.ok(
+        day1Coverage.M >= bctx.minCovM,
+        `Day 1 morning coverage should hold, got ${day1Coverage.M}/${bctx.minCovM}`
+      );
+      assert.equal(schedule[0][0], 'M');
+      assert.equal(schedule[1][0], 'M');
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+
+  it('should encode LP cycle constraints for M/P-only nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      nurseOverrides: {
+        0: { tags: ['no_notti', 'no_diurni'] },
+      },
+      rules: {
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const lp = ctx.buildLP(bctx, 0);
+    assert.match(lp, /mpcPick0_0:/);
+    assert.match(lp, /mpcM0_0:/);
+    assert.match(lp, /mpcR0_4:/);
   });
 });
 

@@ -15,6 +15,8 @@
 
 'use strict';
 
+/* global MP_CYCLE_PATTERNS, isMPCycleLimitedNurse */
+
 // ---------------------------------------------------------------------------
 // Construction heuristic (one attempt)
 // ---------------------------------------------------------------------------
@@ -104,10 +106,34 @@ function construct(ctx) {
     return false;
   }
 
-  function shiftCoverageAboveMin(cov, shift) {
-    if (shift === 'M') return cov.M > minCovM;
-    if (shift === 'P') return cov.P > minCovP;
-    return false;
+  function scoreMPCyclePattern(n, startDay, pattern) {
+    let score = 0;
+    let mAdd = 0;
+    let pAdd = 0;
+    for (let offset = 0; offset < 6 && startDay + offset < numDays; offset++) {
+      const day = startDay + offset;
+      const desired = pattern[offset];
+      const current = schedule[n][day];
+      if (current !== null) {
+        if (current !== desired) return -Infinity;
+        continue;
+      }
+      if (desired === 'R') {
+        score += 0.1;
+        continue;
+      }
+      const cov = dayCoverage(schedule, day, numNurses);
+      const currentCov = desired === 'M' ? cov.M : cov.P;
+      const minCov = desired === 'M' ? minCovM : minCovP;
+      const maxCov = desired === 'M' ? maxCovM : maxCovP;
+      if (currentCov >= maxCov) score -= 100;
+      else score += Math.max(0, minCov - currentCov) * 20 + Math.max(0, maxCov - currentCov) * 2;
+      if (desired === 'M') mAdd++;
+      else pAdd++;
+    }
+    const mp = countMPForNurse(n);
+    score -= Math.abs(mp.m + mAdd - (mp.p + pAdd));
+    return score;
   }
 
   function canNight(n, d) {
@@ -331,6 +357,26 @@ function construct(ctx) {
   }
 
   // Phase 3 — Day shifts (M, P, D)
+  for (let n = 0; n < numNurses; n++) {
+    if (!isMPCycleLimitedNurse(nurseProps[n])) continue;
+    for (let startDay = 0; startDay < numDays; startDay += 6) {
+      let bestPattern = null;
+      let bestScore = -Infinity;
+      for (const pattern of MP_CYCLE_PATTERNS) {
+        const score = scoreMPCyclePattern(n, startDay, pattern);
+        if (score > bestScore) {
+          bestScore = score;
+          bestPattern = pattern;
+        }
+      }
+      if (!bestPattern || bestScore === -Infinity) continue;
+      for (let offset = 0; offset < 6 && startDay + offset < numDays; offset++) {
+        const day = startDay + offset;
+        if (schedule[n][day] === null) schedule[n][day] = bestPattern[offset];
+      }
+    }
+  }
+
   function eligible(n, d, s) {
     if (schedule[n][d] !== null) return false;
     if (nurseProps[n].soloMattine) return false;
@@ -534,6 +580,7 @@ function construct(ctx) {
       !nurseProps[n].diurniNoNotti
     )
       continue;
+    if (isMPCycleLimitedNurse(nurseProps[n])) continue;
     function collectMPDays() {
       let mCount = 0,
         pCount = 0;
@@ -588,35 +635,6 @@ function construct(ctx) {
         remainingDiff = mCount - pCount;
         if (remainingDiff === prevDiff) break;
       }
-    }
-  }
-
-  // Phase 4.65 — For mattine_e_pomeriggi nurses, keep 2 nearby rests after 4 work days when coverage allows
-  for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].mattineEPomeriggi) continue;
-    for (let d = 0; d < numDays - 5; d++) {
-      const work4 =
-        (schedule[n][d] === 'M' || schedule[n][d] === 'P') &&
-        (schedule[n][d + 1] === 'M' || schedule[n][d + 1] === 'P') &&
-        (schedule[n][d + 2] === 'M' || schedule[n][d + 2] === 'P') &&
-        (schedule[n][d + 3] === 'M' || schedule[n][d + 3] === 'P');
-      if (!work4) continue;
-      const r1 = d + 4;
-      const r2 = d + 5;
-      if (schedule[n][r1] === 'R' && schedule[n][r2] === 'R') continue;
-      if (pinned[n][r1] || pinned[n][r2]) continue;
-      if (schedule[n][r1] !== 'M' && schedule[n][r1] !== 'P') continue;
-      if (schedule[n][r2] !== 'M' && schedule[n][r2] !== 'P') continue;
-      const cov1 = dayCoverage(schedule, r1, numNurses);
-      const cov2 = dayCoverage(schedule, r2, numNurses);
-      if (!shiftCoverageAboveMin(cov1, schedule[n][r1])) continue;
-      if (!shiftCoverageAboveMin(cov2, schedule[n][r2])) continue;
-      const prev = r1 > 0 ? schedule[n][r1 - 1] : null;
-      const next = r2 < numDays - 1 ? schedule[n][r2 + 1] : null;
-      if (!transitionOk(prev, 'R', ctx, schedule, n, r1)) continue;
-      if (!transitionOk('R', next, ctx, schedule, n, r2 + 1)) continue;
-      schedule[n][r1] = 'R';
-      schedule[n][r2] = 'R';
     }
   }
 

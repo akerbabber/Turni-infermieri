@@ -6,6 +6,8 @@
 
 'use strict';
 
+/* global isMPCycleLimitedNurse */
+
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
 // ---------------------------------------------------------------------------
@@ -259,6 +261,7 @@ function trySwapMove(schedule, ctx, changes) {
   const n1 = Math.floor(Math.random() * numNurses);
   const n2 = Math.floor(Math.random() * numNurses);
   if (n1 === n2) return false;
+  if (isMPCycleLimitedNurse(nurseProps[n1]) || isMPCycleLimitedNurse(nurseProps[n2])) return false;
   if (pinned[n1][d] || pinned[n2][d]) return false;
   const s1 = schedule[n1][d],
     s2 = schedule[n2][d];
@@ -292,6 +295,7 @@ function tryChangeMove(schedule, ctx, changes) {
   const { numDays, numNurses, pinned, nurseProps } = ctx;
   const d = Math.floor(Math.random() * numDays);
   const n = Math.floor(Math.random() * numNurses);
+  if (isMPCycleLimitedNurse(nurseProps[n])) return false;
   if (pinned[n][d]) return false;
   const old = schedule[n][d];
   if (old === 'N' || old === 'S') return false;
@@ -358,6 +362,7 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
     hourDeltas,
   } = ctx;
   const n = Math.floor(Math.random() * numNurses);
+  if (isMPCycleLimitedNurse(nurseProps[n])) return false;
   if (nurseProps[n].soloMattine || nurseProps[n].soloNotti) return false;
 
   // Use cached hours: O(numNurses) instead of O(numNurses × numDays)
@@ -450,6 +455,7 @@ function tryWeeklyRestMove(schedule, ctx, changes, nurseIndices) {
   // Find a nurse with a weekly-rest deficit (reuse pre-allocated array when available)
   const nOrder = nurseIndices ? shuffle([...nurseIndices]) : shuffle(Array.from({ length: numNurses }, (_, i) => i));
   for (const n of nOrder) {
+    if (isMPCycleLimitedNurse(nurseProps[n])) continue;
     for (let w = 0; w < weekDaysList.length; w++) {
       const wDays = weekDaysList[w];
       const need = requiredRest(wDays.length, minRPerWeek);
@@ -464,6 +470,7 @@ function tryWeeklyRestMove(schedule, ctx, changes, nurseIndices) {
         // Find another nurse with R on this day who has excess weekly rest
         const others = shuffle(Array.from({ length: numNurses }, (_, i) => i).filter(i => i !== n));
         for (const o of others) {
+          if (isMPCycleLimitedNurse(nurseProps[o])) continue;
           if (pinned[o][d] || schedule[o][d] !== 'R') continue;
           if (
             nurseProps[o].soloMattine ||

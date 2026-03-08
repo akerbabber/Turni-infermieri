@@ -6,6 +6,8 @@
 
 'use strict';
 
+/* global MP_CYCLE_PATTERNS, isMPCycleLimitedNurse */
+
 // Seeded PRNG for reproducible random perturbations
 function seededRandom(seed) {
   let s = seed | 0;
@@ -51,6 +53,7 @@ function buildLP(ctx, perturbSeed) {
   const SHIFTS = ['M', 'P', 'N', 'S', 'R', 'D'];
   const S_HRS = SHIFTS.map(s => SHIFT_HOURS[s]);
   const V = (n, d, s) => `x${n}_${d}_${s}`;
+  const cycleShiftIndex = { M: 0, P: 1, R: 4 };
 
   const lines = [];
   const binVars = [];
@@ -591,6 +594,62 @@ function buildLP(ctx, perturbSeed) {
           lines.push(` mpN${n}_${d}: ${V(n, d, 2)} <= 0`); // ban N
           lines.push(` mpS${n}_${d}: ${V(n, d, 3)} <= 0`); // ban S
           lines.push(` mpD${n}_${d}: ${V(n, d, 5)} <= 0`); // ban D
+        }
+      }
+    }
+  }
+
+  // --- Nurse-specific: M/P-only 4+2 cycle (M-M-P-P-R-R, M-P-P-P-R-R, M-M-M-P-R-R) ---
+  for (let n = 0; n < numNurses; n++) {
+    if (!isMPCycleLimitedNurse(nurseProps[n])) continue;
+    for (let startDay = 0; startDay < numDays; startDay += 6) {
+      const blockLen = Math.min(6, numDays - startDay);
+      const compatiblePatterns = [];
+      for (let p = 0; p < MP_CYCLE_PATTERNS.length; p++) {
+        const pattern = MP_CYCLE_PATTERNS[p];
+        let compatible = true;
+        for (let offset = 0; offset < blockLen; offset++) {
+          const day = startDay + offset;
+          if (!isFree(n, day)) {
+            const pinnedShift = pinned[n][day];
+            if (
+              (pinnedShift !== 'M' && pinnedShift !== 'P' && pinnedShift !== 'R') ||
+              pinnedShift !== pattern[offset]
+            ) {
+              compatible = false;
+              break;
+            }
+          }
+        }
+        if (compatible) compatiblePatterns.push({ index: p, pattern });
+      }
+      if (compatiblePatterns.length === 0) continue;
+      if (compatiblePatterns.length === 1) {
+        const pattern = compatiblePatterns[0].pattern;
+        for (let offset = 0; offset < blockLen; offset++) {
+          const day = startDay + offset;
+          if (!isFree(n, day)) continue;
+          lines.push(` mpcFix${n}_${day}: ${V(n, day, cycleShiftIndex[pattern[offset]])} = 1`);
+        }
+        continue;
+      }
+
+      const patternVars = compatiblePatterns.map(({ index }) => `mpc${n}_${startDay}_${index}`);
+      binVars.push(...patternVars);
+      lines.push(` mpcPick${n}_${startDay}: ${patternVars.join(' + ')} = 1`);
+
+      for (let offset = 0; offset < blockLen; offset++) {
+        const day = startDay + offset;
+        if (!isFree(n, day)) continue;
+        for (const shift of ['M', 'P', 'R']) {
+          const matches = compatiblePatterns
+            .filter(({ pattern }) => pattern[offset] === shift)
+            .map(({ index }) => `mpc${n}_${startDay}_${index}`);
+          if (matches.length === 0) {
+            lines.push(` mpc${shift}${n}_${day}: ${V(n, day, cycleShiftIndex[shift])} = 0`);
+          } else {
+            lines.push(` mpc${shift}${n}_${day}: ${V(n, day, cycleShiftIndex[shift])} - ${matches.join(' - ')} = 0`);
+          }
         }
       }
     }
