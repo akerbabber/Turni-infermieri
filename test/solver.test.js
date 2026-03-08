@@ -1008,6 +1008,133 @@ describe('construct', () => {
       Math.random = origRandom;
     }
   });
+
+  it('should keep night counts fairer across eligible nurses in the heuristic', () => {
+    const config = makeMinimalConfig({
+      numNurses: 7,
+      nurseOverrides: {
+        0: { tags: ['no_diurni'] },
+      },
+      rules: {
+        minCoverageM: 1,
+        maxCoverageM: 3,
+        minCoverageP: 1,
+        maxCoverageP: 3,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 1,
+        maxCoverageN: 2,
+        targetNights: 2,
+        maxNights: 6,
+        minRPerWeek: 1,
+      },
+    });
+    const origRandom = Math.random;
+    let state = 1;
+    Math.random = () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 4294967296;
+    };
+    try {
+      const bctx = ctx.buildContext(config);
+      const schedule = ctx.construct(bctx);
+      const nightCounts = Array.from({ length: bctx.numNurses }, (_, n) => ctx.nightCount(schedule, n, bctx.numDays));
+      const spread = Math.max(...nightCounts) - Math.min(...nightCounts);
+      assert.ok(spread <= 1, `Night counts should stay near-even, got ${nightCounts.join(', ')}`);
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+
+  it('should bring no_diurni nurses back to M/P after the single mandatory rest following a night block', () => {
+    const config = makeMinimalConfig({
+      numNurses: 8,
+      nurseOverrides: {
+        0: { tags: ['no_diurni'] },
+      },
+      rules: {
+        minCoverageM: 1,
+        maxCoverageM: 2,
+        minCoverageP: 1,
+        maxCoverageP: 2,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 1,
+        maxCoverageN: 2,
+        targetNights: 4,
+        maxNights: 6,
+        minRPerWeek: 1,
+      },
+    });
+    const origRandom = Math.random;
+    let state = 27;
+    Math.random = () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 4294967296;
+    };
+    try {
+      const bctx = ctx.buildContext(config);
+      const schedule = ctx.construct(bctx);
+      const row = schedule[0];
+      for (let d = 0; d < bctx.numDays - 3; d++) {
+        if (row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R') {
+          assert.notEqual(
+            row[d + 3],
+            'R',
+            `no_diurni nurse should resume M/P after N-S-R, got ${row.slice(d, d + 4).join('-')}`
+          );
+        }
+      }
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+
+  it('should give mattine_e_pomeriggi nurses two nearby rests instead of extending work streaks past four days', () => {
+    const config = makeMinimalConfig({
+      numNurses: 5,
+      nurseOverrides: {
+        0: { tags: ['mattine_e_pomeriggi'] },
+      },
+      rules: {
+        minCoverageM: 1,
+        maxCoverageM: 2,
+        minCoverageP: 1,
+        maxCoverageP: 2,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+        minRPerWeek: 1,
+      },
+    });
+    const origRandom = Math.random;
+    let state = 1;
+    Math.random = () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 4294967296;
+    };
+    try {
+      const bctx = ctx.buildContext(config);
+      const schedule = ctx.construct(bctx);
+      let streak = 0;
+      let maxStreak = 0;
+      for (const shift of schedule[0]) {
+        if (shift === 'M' || shift === 'P') {
+          streak++;
+          maxStreak = Math.max(maxStreak, streak);
+        } else {
+          streak = 0;
+        }
+      }
+      assert.ok(maxStreak <= 4, `mattine_e_pomeriggi work streak should stop at 4 days, got ${maxStreak}`);
+      assert.match(schedule[0].join(' '), /\bR R\b/, 'Expected at least one nearby pair of rest days');
+    } finally {
+      Math.random = origRandom;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

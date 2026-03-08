@@ -67,6 +67,43 @@ function construct(ctx) {
   }
   const nc = new Array(numNurses).fill(0);
 
+  function countMPForNurse(n) {
+    let m = 0;
+    let p = 0;
+    for (let d = 0; d < numDays; d++) {
+      if (schedule[n][d] === 'M') m++;
+      else if (schedule[n][d] === 'P') p++;
+    }
+    return { m, p };
+  }
+
+  function hasSpareWeeklyRest(n, d) {
+    if (minRPerWeek <= 0) return true;
+    const wIdx = ctx.weekOf(d);
+    const wDays = weekDaysList[wIdx];
+    return countWeekRest(schedule, n, wDays) > requiredRest(wDays.length, minRPerWeek);
+  }
+
+  function assignBestMPShift(n, d) {
+    if (schedule[n][d] !== 'R' || pinned[n][d] || !hasSpareWeeklyRest(n, d)) return false;
+    const cov = dayCoverage(schedule, d, numNurses);
+    const mp = countMPForNurse(n);
+    const mGap = Math.max(0, minCovM - cov.M);
+    const pGap = Math.max(0, minCovP - cov.P);
+    const preferM = mGap === pGap ? mp.m <= mp.p : mGap > pGap;
+    const prev = d > 0 ? schedule[n][d - 1] : null;
+    const next = d < numDays - 1 ? schedule[n][d + 1] : null;
+    for (const s of preferM ? ['M', 'P'] : ['P', 'M']) {
+      if (s === 'M' && cov.M >= maxCovM) continue;
+      if (s === 'P' && cov.P >= maxCovP) continue;
+      if (!transitionOk(prev, s, ctx, schedule, n, d)) continue;
+      if (!transitionOk(s, next, ctx, schedule, n, d + 1)) continue;
+      schedule[n][d] = s;
+      return true;
+    }
+    return false;
+  }
+
   function canNight(n, d) {
     if (schedule[n][d] !== null || nc[n] >= maxNights) return false;
     const noDiurni = nurseProps[n].noDiurni;
@@ -144,18 +181,15 @@ function construct(ctx) {
       const cands = shuffle([...nightEligible])
         .filter(n => canNight(n, d))
         .sort((a, b) => {
+          // Primary: prefer nurses with fewer nights to keep distribution fair
+          if (nc[a] !== nc[b]) return nc[a] - nc[b];
           // Primary: prefer nurses whose offset matches their cycle
           const aCycle = nurseCycleLen.get(a);
           const bCycle = nurseCycleLen.get(b);
           const aMatch = d % aCycle === nurseStartOffset.get(a) ? 0 : 1;
           const bMatch = d % bCycle === nurseStartOffset.get(b) ? 0 : 1;
           if (aMatch !== bMatch) return aMatch - bMatch;
-          // Secondary: prefer noDiurni nurses (shorter blocks, more efficient)
-          const aNd = nurseProps[a].noDiurni ? 0 : 1;
-          const bNd = nurseProps[b].noDiurni ? 0 : 1;
-          if (aNd !== bNd) return aNd - bNd;
-          // Tertiary: prefer nurses with fewer nights
-          return nc[a] - nc[b];
+          return 0;
         });
 
       if (cands.length === 0) break;
@@ -173,7 +207,7 @@ function construct(ctx) {
     if (cov >= minCovN) continue;
 
     // Try to find nurses who have R (not from a recent N-S block) or null
-    for (const n of shuffle([...nightEligible])) {
+    for (const n of shuffle([...nightEligible]).sort((a, b) => nc[a] - nc[b])) {
       if (cov >= minCovN) break;
       if (nc[n] >= maxNights) continue;
 
@@ -231,22 +265,34 @@ function construct(ctx) {
   }
 
   // 2c — Fill nights to target per nurse, prioritizing days with less coverage
-  for (const n of shuffle([...nightEligible])) {
-    if (nc[n] >= targetNights) continue;
-    const days = shuffle(
-      Array.from({ length: numDays }, (_, i) => i).filter(d => canNight(n, d) && nightStarts[d] < desiredNightLoads[d])
-    );
-    days.sort((a, b) => {
-      const aGap = desiredNightLoads[a] - (nightStarts[a] || 0);
-      const bGap = desiredNightLoads[b] - (nightStarts[b] || 0);
+  let addedTargetNight = true;
+  while (addedTargetNight) {
+    addedTargetNight = false;
+    const orderedNightEligible = shuffle([...nightEligible]).sort((a, b) => {
+      const aGap = Math.max(0, targetNights - nc[a]);
+      const bGap = Math.max(0, targetNights - nc[b]);
       if (aGap !== bGap) return bGap - aGap;
-      return (nightStarts[a] || 0) - (nightStarts[b] || 0);
+      return nc[a] - nc[b];
     });
-    for (const d of days) {
-      if (nc[n] >= targetNights) break;
-      if (!canNight(n, d)) continue;
-      placeNight(n, d);
-      nightStarts[d]++;
+    for (const n of orderedNightEligible) {
+      if (nc[n] >= targetNights) continue;
+      const days = shuffle(
+        Array.from({ length: numDays }, (_, i) => i).filter(d => canNight(n, d) && nightStarts[d] < desiredNightLoads[d])
+      );
+      days.sort((a, b) => {
+        const aGap = desiredNightLoads[a] - (nightStarts[a] || 0);
+        const bGap = desiredNightLoads[b] - (nightStarts[b] || 0);
+        if (aGap !== bGap) return bGap - aGap;
+        return (nightStarts[a] || 0) - (nightStarts[b] || 0);
+      });
+      for (const d of days) {
+        if (nc[n] >= targetNights) break;
+        if (!canNight(n, d)) continue;
+        placeNight(n, d);
+        nightStarts[d]++;
+        addedTargetNight = true;
+        break;
+      }
     }
   }
 
@@ -454,6 +500,16 @@ function construct(ctx) {
     }
   }
 
+  // Phase 4.55 — For no_diurni nurses, prefer M/P immediately after N-S-R when possible
+  for (let n = 0; n < numNurses; n++) {
+    if (!nurseProps[n].noDiurni) continue;
+    for (let d = 3; d < numDays; d++) {
+      if (schedule[n][d] !== 'R') continue;
+      if (schedule[n][d - 1] !== 'R' || schedule[n][d - 2] !== 'S' || schedule[n][d - 3] !== 'N') continue;
+      assignBestMPShift(n, d);
+    }
+  }
+
   // Phase 4.6 — M/P balance for nurses limited to M/P-heavy workloads
   for (let n = 0; n < numNurses; n++) {
     if (
@@ -524,6 +580,35 @@ function construct(ctx) {
         remainingDiff = mCount - pCount;
         if (remainingDiff === prevDiff) break;
       }
+    }
+  }
+
+  // Phase 4.65 — For mattine_e_pomeriggi nurses, keep 2 nearby rests after 4 work days when coverage allows
+  for (let n = 0; n < numNurses; n++) {
+    if (!nurseProps[n].mattineEPomeriggi) continue;
+    for (let d = 0; d < numDays - 5; d++) {
+      const work4 =
+        (schedule[n][d] === 'M' || schedule[n][d] === 'P') &&
+        (schedule[n][d + 1] === 'M' || schedule[n][d + 1] === 'P') &&
+        (schedule[n][d + 2] === 'M' || schedule[n][d + 2] === 'P') &&
+        (schedule[n][d + 3] === 'M' || schedule[n][d + 3] === 'P');
+      if (!work4) continue;
+      const r1 = d + 4;
+      const r2 = d + 5;
+      if (schedule[n][r1] === 'R' && schedule[n][r2] === 'R') continue;
+      if (pinned[n][r1] || pinned[n][r2]) continue;
+      if (schedule[n][r1] !== 'M' && schedule[n][r1] !== 'P') continue;
+      if (schedule[n][r2] !== 'M' && schedule[n][r2] !== 'P') continue;
+      const cov1 = dayCoverage(schedule, r1, numNurses);
+      const cov2 = dayCoverage(schedule, r2, numNurses);
+      if ((schedule[n][r1] === 'M' ? cov1.M : cov1.P) <= (schedule[n][r1] === 'M' ? minCovM : minCovP)) continue;
+      if ((schedule[n][r2] === 'M' ? cov2.M : cov2.P) <= (schedule[n][r2] === 'M' ? minCovM : minCovP)) continue;
+      const prev = r1 > 0 ? schedule[n][r1 - 1] : null;
+      const next = r2 < numDays - 1 ? schedule[n][r2 + 1] : null;
+      if (!transitionOk(prev, 'R', ctx, schedule, n, r1)) continue;
+      if (!transitionOk('R', next, ctx, schedule, n, r2 + 1)) continue;
+      schedule[n][r1] = 'R';
+      schedule[n][r2] = 'R';
     }
   }
 
