@@ -65,6 +65,13 @@ const MONTHS_IT = [
   'Novembre',
   'Dicembre',
 ];
+const CONFIG_CSV_ABSENCE_FIELDS = [
+  { key: 'ferie', startHeader: 'Ferie dal', endHeader: 'Ferie al' },
+  { key: 'malattia', startHeader: 'Malattia dal', endHeader: 'Malattia al' },
+  { key: '104', startHeader: '104 dal', endHeader: '104 al' },
+  { key: 'permesso_retribuito', startHeader: 'Permesso retr. dal', endHeader: 'Permesso retr. al' },
+  { key: 'maternita', startHeader: 'Maternità dal', endHeader: 'Maternità al' },
+];
 
 const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('debug') === 'true';
 
@@ -150,19 +157,43 @@ function nextMonthDefault() {
   return { month: m.getMonth(), year: m.getFullYear() };
 }
 
+function createEmptyAbsencePeriods() {
+  return {
+    ferie: { start: null, end: null },
+    malattia: { start: null, end: null },
+    104: { start: null, end: null },
+    permesso_retribuito: { start: null, end: null },
+    maternita: { start: null, end: null },
+  };
+}
+
+function normalizeNullableDate(value) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized || null;
+}
+
+function normalizeNurse(nurse, index) {
+  const absencePeriods = createEmptyAbsencePeriods();
+  const sourcePeriods = nurse && nurse.absencePeriods ? nurse.absencePeriods : {};
+  CONFIG_CSV_ABSENCE_FIELDS.forEach(({ key }) => {
+    const period = sourcePeriods[key] || {};
+    absencePeriods[key] = {
+      start: normalizeNullableDate(period.start),
+      end: normalizeNullableDate(period.end),
+    };
+  });
+
+  return {
+    ...nurse,
+    id: nurse?.id || genId(index),
+    name: nurse?.name?.trim() || DEFAULT_NURSE_NAMES[index] || `Infermiere ${index + 1}`,
+    tags: Array.isArray(nurse?.tags) ? nurse.tags.filter(Boolean) : [],
+    absencePeriods,
+  };
+}
+
 function buildDefaultNurses(count) {
-  return Array.from({ length: count }, (_, i) => ({
-    id: genId(i),
-    name: DEFAULT_NURSE_NAMES[i] || `Infermiere ${i + 1}`,
-    tags: [],
-    absencePeriods: {
-      ferie: { start: null, end: null },
-      malattia: { start: null, end: null },
-      104: { start: null, end: null },
-      permesso_retribuito: { start: null, end: null },
-      maternita: { start: null, end: null },
-    },
-  }));
+  return Array.from({ length: count }, (_, i) => normalizeNurse({}, i));
 }
 
 const { month: defMonth, year: defYear } = nextMonthDefault();
@@ -213,17 +244,7 @@ function loadState() {
     // Ensure rules have all keys
     state.rules = { ...DEFAULT_RULES, ...saved.rules };
     // Re-hydrate nurses (ensure tags array and absencePeriods)
-    state.nurses = (saved.nurses || []).map(n => ({
-      ...n,
-      tags: n.tags || [],
-      absencePeriods: n.absencePeriods || {
-        ferie: { start: null, end: null },
-        malattia: { start: null, end: null },
-        104: { start: null, end: null },
-        permesso_retribuito: { start: null, end: null },
-        maternita: { start: null, end: null },
-      },
-    }));
+    state.nurses = (saved.nurses || []).map((n, index) => normalizeNurse(n, index));
     // Apply fascia oraria to update SHIFT_HOURS in main thread
     applyFasciaOraria(state.rules.fasciaOraria);
   } catch (_) {}
@@ -353,13 +374,7 @@ function renderNurseList() {
   activeNurses.forEach((nurse, idx) => {
     // Ensure nurse has absencePeriods initialized
     if (!nurse.absencePeriods) {
-      nurse.absencePeriods = {
-        ferie: { start: null, end: null },
-        malattia: { start: null, end: null },
-        104: { start: null, end: null },
-        permesso_retribuito: { start: null, end: null },
-        maternita: { start: null, end: null },
-      };
+      nurse.absencePeriods = createEmptyAbsencePeriods();
     }
 
     const item = document.createElement('div');
@@ -916,18 +931,12 @@ function renderPrevMonthStatus() {
  * Supports both semicolon and comma separators. Header row is auto-detected and skipped.
  */
 function parsePrevMonthCSV(text) {
-  const lines = text
-    .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(l => l.length > 0);
-  if (lines.length === 0) return { error: 'Nessun dato trovato.' };
-
-  // Detect separator
-  const sep = lines[0].includes(';') ? ';' : ',';
+  const { rows } = parseCsvText(text);
+  if (rows.length === 0) return { error: 'Nessun dato trovato.' };
 
   // Skip header row if first cell looks like a header
   let startIdx = 0;
-  const firstCells = lines[0].split(sep).map(c => c.replace(/^"|"$/g, '').trim());
+  const firstCells = rows[0].map(c => c.trim());
   if (
     firstCells[0].toLowerCase().includes('infermiere') ||
     firstCells[0].toLowerCase().includes('nome') ||
@@ -941,8 +950,8 @@ function parsePrevMonthCSV(text) {
   const hoursData = [];
   const matched = [];
 
-  for (let i = startIdx; i < lines.length; i++) {
-    const cells = lines[i].split(sep).map(c => c.replace(/^"|"$/g, '').trim());
+  for (let i = startIdx; i < rows.length; i++) {
+    const cells = rows[i].map(c => c.trim());
     if (cells.length < 2) continue;
 
     const name = cells[0];
@@ -982,6 +991,254 @@ function parsePrevMonthCSV(text) {
   return { scheduleData, hoursData, numDays, matchedCount, total: scheduleData.length };
 }
 
+function getConfigPayload() {
+  return {
+    month: state.month,
+    year: state.year,
+    totalNurses: state.totalNurses,
+    absentNurses: state.absentNurses,
+    nurses: state.nurses.map((nurse, index) => normalizeNurse(nurse, index)),
+    rules: { ...DEFAULT_RULES, ...state.rules },
+  };
+}
+
+function resetGeneratedResults() {
+  state.schedule = null;
+  state.violations = [];
+  state.stats = [];
+  state.solutions = [];
+  state.selectedSolution = 0;
+  state.solverMethod = null;
+  state.solverDiagnostics = [];
+  state.solverProgress = { percent: 0, message: '' };
+}
+
+function applyConfigPayload(cfg) {
+  if (cfg.month !== undefined) state.month = Math.max(0, Math.min(11, parseInt(cfg.month) || 0));
+  if (cfg.year !== undefined) state.year = Math.max(2020, parseInt(cfg.year) || state.year);
+
+  const importedNurses = Array.isArray(cfg.nurses) && cfg.nurses.length > 0 ? cfg.nurses.map(normalizeNurse) : null;
+  if (importedNurses) {
+    state.nurses = importedNurses;
+  }
+
+  if (cfg.totalNurses !== undefined) {
+    state.totalNurses = Math.max(1, parseInt(cfg.totalNurses) || 1);
+  } else if (importedNurses) {
+    state.totalNurses = importedNurses.length;
+  }
+
+  while (state.nurses.length < state.totalNurses) {
+    state.nurses.push(normalizeNurse({}, state.nurses.length));
+  }
+  if (state.nurses.length > state.totalNurses) {
+    state.totalNurses = state.nurses.length;
+  }
+
+  if (cfg.absentNurses !== undefined) {
+    state.absentNurses = Math.max(0, parseInt(cfg.absentNurses) || 0);
+  }
+  state.absentNurses = Math.min(state.absentNurses, state.totalNurses);
+
+  state.rules = { ...DEFAULT_RULES, ...(cfg.rules || state.rules) };
+  const activeCount = Math.max(0, state.totalNurses - state.absentNurses);
+  if (
+    !Array.isArray(state.rules.coppiaTurni) ||
+    state.rules.coppiaTurni.length !== 2 ||
+    state.rules.coppiaTurni.some(idx => !Number.isInteger(idx) || idx < 0 || idx >= activeCount)
+  ) {
+    state.rules.coppiaTurni = null;
+  }
+
+  applyFasciaOraria(state.rules.fasciaOraria);
+  resetGeneratedResults();
+  saveState();
+  renderAll();
+}
+
+function serializeConfigRuleValue(key, value) {
+  if (key === 'coppiaTurni') return Array.isArray(value) ? value.join(',') : '';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return value ?? '';
+}
+
+function parseConfigRuleValue(key, rawValue) {
+  const value = String(rawValue ?? '').trim();
+  const defaultValue = DEFAULT_RULES[key];
+  if (key === 'coppiaTurni') {
+    if (!value) return null;
+    const pair = value
+      .split(/[|,]/)
+      .map(part => parseInt(part.trim(), 10))
+      .filter(Number.isInteger);
+    return pair.length === 2 ? pair : null;
+  }
+  if (typeof defaultValue === 'boolean') {
+    return ['true', '1', 'si', 'sì'].includes(value.toLowerCase());
+  }
+  if (typeof defaultValue === 'number') {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : defaultValue;
+  }
+  if (typeof defaultValue === 'string') {
+    return value || defaultValue;
+  }
+  return value;
+}
+
+function normalizeCsvHeader(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function buildConfigCsvRows(cfg) {
+  const rows = [
+    [
+      'Sezione',
+      'Chiave',
+      'Valore',
+      'Ordine',
+      'Nome',
+      'Tag',
+      ...CONFIG_CSV_ABSENCE_FIELDS.flatMap(field => [field.startHeader, field.endHeader]),
+    ],
+  ];
+  const emptyAbsenceCells = new Array(CONFIG_CSV_ABSENCE_FIELDS.length * 2).fill('');
+
+  [
+    ['month', cfg.month],
+    ['year', cfg.year],
+    ['totalNurses', cfg.totalNurses],
+    ['absentNurses', cfg.absentNurses],
+  ].forEach(([key, value]) => {
+    rows.push(['meta', key, value, '', '', '', ...emptyAbsenceCells]);
+  });
+
+  Object.keys(DEFAULT_RULES).forEach(key => {
+    rows.push(['vincolo', key, serializeConfigRuleValue(key, cfg.rules[key]), '', '', '', ...emptyAbsenceCells]);
+  });
+
+  cfg.nurses.forEach((nurse, index) => {
+    rows.push([
+      'infermiere',
+      '',
+      '',
+      index + 1,
+      nurse.name,
+      nurse.tags.join(','),
+      ...CONFIG_CSV_ABSENCE_FIELDS.flatMap(field => [
+        nurse.absencePeriods[field.key]?.start || '',
+        nurse.absencePeriods[field.key]?.end || '',
+      ]),
+    ]);
+  });
+
+  return rows;
+}
+
+function exportConfigCSV() {
+  const csv = formatCsv(buildConfigCsvRows(getConfigPayload()));
+  downloadFile(csv, `config_turni_${state.year}_${state.month + 1}.csv`, 'text/csv;charset=utf-8;');
+}
+
+function parseConfigCSV(text) {
+  const { rows } = parseCsvText(text);
+  if (rows.length === 0) return { error: 'Nessun dato trovato nel CSV.' };
+
+  const headerMap = new Map(rows[0].map((header, index) => [normalizeCsvHeader(header), index]));
+  const sectionIdx = headerMap.get('sezione') ?? headerMap.get('section');
+  if (sectionIdx === undefined) {
+    return { error: 'Formato CSV non riconosciuto. Usa il file esportato dall’app.' };
+  }
+
+  const keyIdx = headerMap.get('chiave') ?? headerMap.get('key');
+  const valueIdx = headerMap.get('valore') ?? headerMap.get('value');
+  const orderIdx = headerMap.get('ordine') ?? headerMap.get('order');
+  const nameIdx = headerMap.get('nome') ?? headerMap.get('name');
+  const tagIdx = headerMap.get('tag') ?? headerMap.get('tags');
+  const nurseRows = [];
+  const cfg = { nurses: [] };
+  let hasData = false;
+  let hasRules = false;
+
+  const getCell = (row, idx) => (idx === undefined ? '' : String(row[idx] ?? '').trim());
+
+  rows.slice(1).forEach((row, fallbackIndex) => {
+    const section = getCell(row, sectionIdx).toLowerCase();
+    if (!section) return;
+
+    if (section === 'meta') {
+      const key = getCell(row, keyIdx);
+      const value = getCell(row, valueIdx);
+      if (['month', 'year', 'totalNurses', 'absentNurses'].includes(key)) {
+        cfg[key] = parseInt(value, 10);
+        hasData = true;
+      }
+      return;
+    }
+
+    if (section === 'vincolo' || section === 'rule' || section === 'regola') {
+      const key = getCell(row, keyIdx);
+      if (!Object.prototype.hasOwnProperty.call(DEFAULT_RULES, key)) return;
+      if (!cfg.rules) cfg.rules = {};
+      cfg.rules[key] = parseConfigRuleValue(key, getCell(row, valueIdx));
+      hasData = true;
+      hasRules = true;
+      return;
+    }
+
+    if (section === 'infermiere' || section === 'nurse') {
+      const name = getCell(row, nameIdx);
+      if (!name) return;
+      const tags = getCell(row, tagIdx)
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean);
+      const absencePeriods = createEmptyAbsencePeriods();
+      CONFIG_CSV_ABSENCE_FIELDS.forEach(field => {
+        const startIdx = headerMap.get(normalizeCsvHeader(field.startHeader));
+        const endIdx = headerMap.get(normalizeCsvHeader(field.endHeader));
+        absencePeriods[field.key] = {
+          start: normalizeNullableDate(getCell(row, startIdx)),
+          end: normalizeNullableDate(getCell(row, endIdx)),
+        };
+        if ((absencePeriods[field.key].start || absencePeriods[field.key].end) && !tags.includes(field.key)) {
+          tags.push(field.key);
+        }
+      });
+      const rawOrder = parseInt(getCell(row, orderIdx), 10);
+      nurseRows.push({
+        order: Number.isInteger(rawOrder) ? rawOrder : fallbackIndex + 1,
+        nurse: normalizeNurse({ name, tags, absencePeriods }, fallbackIndex),
+      });
+      hasData = true;
+    }
+  });
+
+  if (!hasData) return { error: 'Nessuna configurazione valida trovata nel CSV.' };
+
+  if (nurseRows.length > 0) {
+    cfg.nurses = nurseRows.sort((a, b) => a.order - b.order).map(entry => entry.nurse);
+    if (cfg.totalNurses === undefined || Number.isNaN(cfg.totalNurses)) {
+      cfg.totalNurses = cfg.nurses.length;
+    }
+  } else {
+    delete cfg.nurses;
+  }
+  if (!hasRules) delete cfg.rules;
+
+  Object.keys(cfg).forEach(key => {
+    if (Number.isNaN(cfg[key])) delete cfg[key];
+  });
+
+  return { config: cfg };
+}
+
 /**
  * Import parsed CSV data into state, mapping nurses by name order.
  */
@@ -1017,6 +1274,50 @@ function clearPrevMonth() {
   state.previousMonthHours = null;
   saveState();
   renderPrevMonthStatus();
+}
+
+function parseCsvLine(line, separator) {
+  const cells = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === separator && !inQuotes) {
+      cells.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+
+  cells.push(current);
+  return cells;
+}
+
+function parseCsvText(text) {
+  const lines = String(text || '')
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .filter(line => line.trim().length > 0);
+  if (lines.length === 0) return { separator: ';', rows: [] };
+  const separator = lines[0].includes(';') ? ';' : ',';
+  return { separator, rows: lines.map(line => parseCsvLine(line, separator)) };
+}
+
+function formatCsvCell(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function formatCsv(rows) {
+  return '\uFEFF' + rows.map(row => row.map(formatCsvCell).join(';')).join('\r\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1929,7 +2230,7 @@ function exportCSV() {
     rows.push(row);
   });
 
-  const csv = '\uFEFF' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+  const csv = formatCsv(rows);
   downloadFile(csv, `turni_${MONTHS_IT[state.month]}_${state.year}.csv`, 'text/csv;charset=utf-8;');
 }
 
@@ -1938,14 +2239,7 @@ function exportCSV() {
 // ---------------------------------------------------------------------------
 
 function saveConfig() {
-  const cfg = {
-    month: state.month,
-    year: state.year,
-    totalNurses: state.totalNurses,
-    absentNurses: state.absentNurses,
-    nurses: state.nurses,
-    rules: state.rules,
-  };
+  const cfg = getConfigPayload();
   downloadFile(JSON.stringify(cfg, null, 2), `config_turni_${state.year}_${state.month + 1}.json`, 'application/json');
 }
 
@@ -1954,20 +2248,30 @@ function loadConfig(file) {
   reader.onload = e => {
     try {
       const cfg = JSON.parse(e.target.result);
-      state.month = cfg.month ?? state.month;
-      state.year = cfg.year ?? state.year;
-      state.totalNurses = cfg.totalNurses ?? state.totalNurses;
-      state.absentNurses = cfg.absentNurses ?? state.absentNurses;
-      state.nurses = (cfg.nurses || []).map(n => ({ ...n, tags: n.tags || [] }));
-      state.rules = { ...DEFAULT_RULES, ...cfg.rules };
-      saveState();
-      renderAll();
+      applyConfigPayload(cfg);
       alert('Configurazione caricata con successo.');
     } catch (_) {
       alert('Errore nel caricamento del file JSON.');
     }
   };
   reader.readAsText(file);
+}
+
+function loadConfigCSV(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const result = parseConfigCSV(e.target.result);
+    if (result.error) {
+      alert(result.error);
+      return;
+    }
+    applyConfigPayload(result.config);
+    alert('Configurazione CSV caricata con successo.');
+  };
+  reader.onerror = () => {
+    alert('Errore durante la lettura del file CSV.');
+  };
+  reader.readAsText(file, 'UTF-8');
 }
 
 function downloadFile(content, filename, mimeType) {
@@ -1985,15 +2289,9 @@ function downloadFile(content, filename, mimeType) {
 // ---------------------------------------------------------------------------
 
 function syncNurseList() {
-  const active = state.totalNurses - state.absentNurses;
   // Extend list if needed
   while (state.nurses.length < state.totalNurses) {
-    const i = state.nurses.length;
-    state.nurses.push({
-      id: genId(i),
-      name: DEFAULT_NURSE_NAMES[i] || `Infermiere ${i + 1}`,
-      tags: [],
-    });
+    state.nurses.push(normalizeNurse({}, state.nurses.length));
   }
   saveState();
   renderNurseList();
@@ -2052,6 +2350,15 @@ function init() {
       renderNurseList();
     });
   }
+  document.getElementById('btn-export-config-csv')?.addEventListener('click', exportConfigCSV);
+  document.getElementById('btn-load-config-csv')?.addEventListener('click', () => {
+    document.getElementById('inp-load-config-csv-file')?.click();
+  });
+  document.getElementById('inp-load-config-csv-file')?.addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    if (file) loadConfigCSV(file);
+    e.target.value = '';
+  });
   document.getElementById('btn-step1-next')?.addEventListener('click', () => goToStep(2));
 
   // ---- Step 2 ----
