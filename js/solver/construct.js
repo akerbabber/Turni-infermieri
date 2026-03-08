@@ -126,9 +126,9 @@ function construct(ctx) {
   const maxNightLoadBumps = Math.max(1, numDays * Math.max(1, maxCovN - minCovN));
   for (let i = 0; i < extraNightStarts; i++) {
     let d = Math.floor((i * numDays) / extraNightStarts);
-    let guard = maxNightLoadBumps;
-    while (desiredNightLoads[d] >= maxCovN && guard-- > 0) d = (d + 1) % numDays;
-    if (guard <= 0) break;
+    let searchLimit = maxNightLoadBumps;
+    while (desiredNightLoads[d] >= maxCovN && searchLimit-- > 0) d = (d + 1) % numDays;
+    if (searchLimit <= 0) break;
     desiredNightLoads[d]++;
   }
 
