@@ -30,6 +30,20 @@ function progress(percent, message) {
   self.postMessage({ type: 'progress', percent, message });
 }
 
+function normalizeWorkerError(err, fallbackDiagnostics) {
+  const diagnostics = Array.isArray(err?.diagnostics)
+    ? err.diagnostics
+    : Array.isArray(fallbackDiagnostics)
+      ? fallbackDiagnostics
+      : [];
+  return {
+    name: err?.name || 'Error',
+    code: err?.code || 'worker_error',
+    message: err?.message || 'Errore sconosciuto nel worker',
+    diagnostics,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Load solver modules in dependency order
 // ---------------------------------------------------------------------------
@@ -65,7 +79,9 @@ self.onmessage = async function (e) {
       const timeBudget = e.data.timeBudget || 0;
       const untilZeroViolations = !!e.data.untilZeroViolations;
       const solverChoice = e.data.solverChoice || 'auto';
-      const solutions = await solve(e.data.config, numSolutions, timeBudget, untilZeroViolations, solverChoice);
+      const result = await solve(e.data.config, numSolutions, timeBudget, untilZeroViolations, solverChoice);
+      const solutions = result?.solutions || [];
+      const diagnostics = result?.diagnostics || [];
       const best = solutions[0] || {};
       console.log(
         `[Worker] Solve complete: ${solutions.length} solutions, best method="${best.solverMethod}", best score=${best.score}`
@@ -77,10 +93,12 @@ self.onmessage = async function (e) {
         stats: best.stats || [],
         solutions: solutions,
         solverMethod: best.solverMethod || 'fallback',
+        diagnostics,
       });
     } catch (err) {
       console.error('[Worker] Solve failed with uncaught exception:', err.message, err.stack);
-      self.postMessage({ type: 'error', message: err.message });
+      const error = normalizeWorkerError(err);
+      self.postMessage({ type: 'error', message: error.message, error, diagnostics: error.diagnostics });
     }
   } else if (e.data.type === 'rebalance') {
     // Rebalance: take existing schedule and optimise it via local search
@@ -110,7 +128,18 @@ self.onmessage = async function (e) {
       });
     } catch (err) {
       console.error('[Worker] Rebalance failed:', err.message, err.stack);
-      self.postMessage({ type: 'error', message: err.message });
+      const diagnostics = [
+        {
+          source: 'worker',
+          phase: 'rebalance',
+          code: 'worker_error',
+          severity: 'error',
+          userMessage: 'Worker error durante la riassegnazione',
+          detail: err.message || String(err),
+        },
+      ];
+      const error = normalizeWorkerError(err, diagnostics);
+      self.postMessage({ type: 'error', message: error.message, error, diagnostics: error.diagnostics });
     }
   }
 };

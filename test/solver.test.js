@@ -1347,3 +1347,78 @@ describe('collectViolations D-D boundary (consente2D)', () => {
     assert.equal(ddViolations.length, 0, 'Should not have D-D boundary violations when consente2D is disabled');
   });
 });
+
+// ---------------------------------------------------------------------------
+// 18. Solver diagnostics
+// ---------------------------------------------------------------------------
+
+describe('solver diagnostics', () => {
+  afterEach(() => {
+    ctx = loadSolver();
+  });
+
+  it('should classify HiGHS infeasible statuses with a user-friendly diagnostic', () => {
+    const diagnostic = toPlain(ctx.buildHighsSolveDiagnostic('Infeasible', 12.34));
+    assert.equal(diagnostic.source, 'highs');
+    assert.equal(diagnostic.code, 'model_infeasible');
+    assert.equal(diagnostic.userMessage, 'Il modello non ha trovato una soluzione ammissibile con i vincoli attuali');
+    assert.match(diagnostic.detail, /Infeasible/);
+  });
+
+  it('should classify GLPK no-feasible statuses with a user-friendly diagnostic', () => {
+    const diagnostic = toPlain(ctx.buildGLPKSolveDiagnostic('GLP_NOFEAS', 4.2));
+    assert.equal(diagnostic.source, 'glpk');
+    assert.equal(diagnostic.code, 'model_infeasible');
+    assert.equal(diagnostic.userMessage, 'Il modello non ha trovato una soluzione ammissibile con i vincoli attuali');
+    assert.match(diagnostic.detail, /GLP_NOFEAS/);
+  });
+
+  it('should return fallback diagnostics when explicit HiGHS loading fails', async () => {
+    vm.runInContext(
+      `
+      loadHiGHS = async function () {
+        _highsLoadState = makeDiagnostic(
+          'highs',
+          'script_load',
+          'cdn_load_failed',
+          'error',
+          'HiGHS non caricato: errore rete/CDN',
+          'importScripts failed: network error'
+        );
+        _highsLoadDiag = _highsLoadState.detail;
+        return null;
+      };
+      buildContext = function () {
+        return {
+          numNurses: 1,
+          numDays: 1,
+          minCovM: 0,
+          maxCovM: 0,
+          minCovP: 0,
+          maxCovP: 0,
+          minCovN: 0,
+          maxCovN: 0,
+          minCovD: 0,
+          maxCovD: 0
+        };
+      };
+      construct = function () { return [['R']]; };
+      localSearch = function (schedule) { return schedule; };
+      collectViolations = function () { return []; };
+      computeStats = function () { return []; };
+      computeScore = function () { return { total: 0, hard: 0, soft: 0 }; };
+      progress = function () {};
+    `,
+      ctx
+    );
+
+    const config = makeMinimalConfig({ numNurses: 1, rules: { minCoverageM: 0, maxCoverageM: 0, minCoverageP: 0, maxCoverageP: 0, minCoverageN: 0, maxCoverageN: 0 } });
+    const result = await ctx.solve(config, 1, 15, false, 'milp');
+    const diagnostics = toPlain(result.diagnostics);
+
+    assert.equal(result.solutions.length, 1);
+    assert.equal(result.solutions[0].solverMethod, 'fallback');
+    assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non caricato: errore rete/CDN'));
+    assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback'));
+  });
+});

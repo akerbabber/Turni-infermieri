@@ -181,6 +181,8 @@ let state = {
   solutions: [],
   selectedSolution: 0,
   solverMethod: null,
+  solverDiagnostics: [],
+  solverProgress: { percent: 0, message: '' },
   numSolutions: 3,
   timeBudget: 0, // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
   solverChoice: 'auto', // 'auto'|'milp'|'glpk'|'fallback'
@@ -515,6 +517,139 @@ function renderNurseList() {
 
 function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function normalizeDiagnostics(diagnostics) {
+  if (!Array.isArray(diagnostics)) return [];
+  const seen = new Set();
+  return diagnostics
+    .filter(diag => diag && diag.userMessage)
+    .map(diag => ({
+      source: diag.source || 'solver',
+      phase: diag.phase || 'solve',
+      code: diag.code || 'unknown',
+      severity: diag.severity || 'warning',
+      userMessage: diag.userMessage,
+      detail: diag.detail || '',
+      status: diag.status || '',
+    }))
+    .filter(diag => {
+      const key = [diag.source, diag.phase, diag.code, diag.userMessage, diag.detail].join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function sourceLabel(source) {
+  if (source === 'highs') return 'HiGHS';
+  if (source === 'glpk') return 'GLPK';
+  if (source === 'worker') return 'Worker';
+  return 'Solver';
+}
+
+function worstDiagnosticSeverity(diagnostics) {
+  if ((diagnostics || []).some(diag => diag.severity === 'error')) return 'error';
+  if ((diagnostics || []).some(diag => diag.severity === 'warning')) return 'warning';
+  return 'info';
+}
+
+function renderDiagnosticsPanel(elementId, diagnostics) {
+  const panel = document.getElementById(elementId);
+  if (!panel) return;
+  const normalized = normalizeDiagnostics(diagnostics).filter(diag => diag.severity !== 'info');
+  if (normalized.length === 0) {
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+    return;
+  }
+
+  const severity = worstDiagnosticSeverity(normalized);
+  const theme =
+    severity === 'error'
+      ? {
+          box: 'bg-red-50 dark:bg-red-950 border-red-300 dark:border-red-700',
+          title: 'text-red-700 dark:text-red-400',
+          text: 'text-red-600 dark:text-red-300',
+          icon: '❌',
+          heading: 'Diagnostica solver',
+        }
+      : {
+          box: 'bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-700',
+          title: 'text-amber-700 dark:text-amber-400',
+          text: 'text-amber-700 dark:text-amber-300',
+          icon: '⚠️',
+          heading: 'Avvisi solver',
+        };
+
+  panel.classList.remove('hidden');
+  panel.innerHTML = `<div class="p-3 border rounded-lg ${theme.box}">
+      <p class="font-semibold text-sm ${theme.title}">${theme.icon} ${theme.heading}</p>
+      <div class="mt-2 space-y-2">
+        ${normalized
+          .map(
+            diag => `<div>
+              <p class="text-sm ${theme.text}"><strong>${sourceLabel(diag.source)}:</strong> ${escHtml(diag.userMessage)}</p>
+              ${
+                diag.detail
+                  ? `<p class="text-xs text-gray-600 dark:text-slate-400 mt-0.5">${escHtml(diag.detail)}</p>`
+                  : ''
+              }
+            </div>`
+          )
+          .join('')}
+      </div>
+    </div>`;
+}
+
+function updateSolverProgress(percent, message) {
+  state.solverProgress = { percent: percent || 0, message: message || '' };
+  const bar = document.getElementById('progress-bar');
+  const msg = document.getElementById('progress-msg');
+  if (bar) bar.style.width = `${state.solverProgress.percent}%`;
+  if (msg) msg.textContent = state.solverProgress.message;
+}
+
+function setSolverDiagnostics(diagnostics) {
+  state.solverDiagnostics = normalizeDiagnostics(diagnostics);
+  renderDiagnosticsPanel('solver-run-feedback', state.solverDiagnostics);
+  renderDiagnosticsPanel('solver-diagnostics-banner', state.solverDiagnostics);
+}
+
+function resetSolverFeedback() {
+  updateSolverProgress(0, '');
+  setSolverDiagnostics([]);
+}
+
+function applySolveResult(data) {
+  console.log(`[App] Applicazione risultato solver: ${data.solutions?.length || 0} soluzioni, metodo="${data.solverMethod}"`);
+  state.solutions = data.solutions || [];
+  state.selectedSolution = 0;
+  state.solverMethod = data.solverMethod || null;
+  setSolverDiagnostics(data.diagnostics || []);
+  if (state.solutions.length > 0) {
+    const best = state.solutions[0];
+    state.schedule = best.schedule;
+    state.violations = best.violations || [];
+    state.stats = best.stats || [];
+  } else {
+    state.schedule = data.schedule;
+    state.violations = data.violations || [];
+    state.stats = data.stats || [];
+  }
+}
+
+function buildWorkerRuntimeDiagnostic(err, actionLabel) {
+  return [
+    {
+      source: 'worker',
+      phase: 'runtime',
+      code: 'worker_error',
+      severity: 'error',
+      userMessage: `Worker error durante ${actionLabel}`,
+      detail: err?.message || 'Errore sconosciuto nel worker',
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -975,10 +1110,8 @@ function timeBudgetLabel(value) {
 }
 
 function renderStep3() {
-  const bar = document.getElementById('progress-bar');
-  const msg = document.getElementById('progress-msg');
-  if (bar) bar.style.width = '0%';
-  if (msg) msg.textContent = '';
+  updateSolverProgress(state.solverProgress?.percent || 0, state.solverProgress?.message || '');
+  renderDiagnosticsPanel('solver-run-feedback', state.solverDiagnostics);
 
   const activeCount = state.totalNurses - state.absentNurses;
   const setEl = (id, val) => {
@@ -1035,6 +1168,14 @@ function startSolver() {
     state.worker = null;
   }
 
+  resetSolverFeedback();
+  state.schedule = null;
+  state.violations = [];
+  state.stats = [];
+  state.solutions = [];
+  state.selectedSolution = 0;
+  state.solverMethod = null;
+
   const btn = document.getElementById('btn-generate');
   if (btn) {
     btn.disabled = true;
@@ -1058,14 +1199,8 @@ function startSolver() {
   worker.onmessage = e => {
     const data = e.data;
     if (data.type === 'progress') {
-      const bar = document.getElementById('progress-bar');
-      const msg = document.getElementById('progress-msg');
-      if (bar) bar.style.width = data.percent + '%';
-      if (msg) msg.textContent = data.message;
+      updateSolverProgress(data.percent, data.message);
     } else if (data.type === 'result') {
-      console.log(
-        `[App] Solver result received: ${data.solutions?.length || 0} solutions, method="${data.solverMethod}"`
-      );
       if (data.solutions) {
         data.solutions.forEach((sol, i) => {
           console.log(
@@ -1073,19 +1208,7 @@ function startSolver() {
           );
         });
       }
-      state.solutions = data.solutions || [];
-      state.selectedSolution = 0;
-      state.solverMethod = data.solverMethod || null;
-      if (state.solutions.length > 0) {
-        const best = state.solutions[0];
-        state.schedule = best.schedule;
-        state.violations = best.violations || [];
-        state.stats = best.stats || [];
-      } else {
-        state.schedule = data.schedule;
-        state.violations = data.violations || [];
-        state.stats = data.stats || [];
-      }
+      applySolveResult(data);
       state.worker = null;
       worker.terminate();
       saveState();
@@ -1096,8 +1219,9 @@ function startSolver() {
       }
       goToStep(4);
     } else if (data.type === 'error') {
-      console.error('[App] Solver error:', data.message);
-      alert('Errore nel solver: ' + data.message);
+      console.error('[App] Solver error:', data.message, data.error);
+      updateSolverProgress(state.solverProgress?.percent || 0, data.message || 'Errore nel solver');
+      setSolverDiagnostics(data.diagnostics || []);
       const btnG = document.getElementById('btn-generate');
       if (btnG) {
         btnG.disabled = false;
@@ -1110,13 +1234,15 @@ function startSolver() {
 
   worker.onerror = err => {
     console.error('[App] Worker error:', err.message, err);
-    alert('Errore Worker: ' + err.message);
+    updateSolverProgress(state.solverProgress?.percent || 0, 'Worker error durante la generazione');
+    setSolverDiagnostics(buildWorkerRuntimeDiagnostic(err, 'la generazione'));
     const btnG = document.getElementById('btn-generate');
     if (btnG) {
       btnG.disabled = false;
       btnG.textContent = 'GENERA TURNI';
     }
     state.worker = null;
+    worker.terminate();
   };
 
   const effectiveTimeBudget = state.timeBudget === 0 ? estimateTimeBudget() : state.timeBudget;
@@ -1136,6 +1262,8 @@ function regenerateTurni() {
     state.worker.terminate();
     state.worker = null;
   }
+
+  resetSolverFeedback();
 
   const btn = document.getElementById('btn-regenerate');
   if (btn) {
@@ -1162,11 +1290,8 @@ function regenerateTurni() {
   worker.onmessage = e => {
     const data = e.data;
     if (data.type === 'progress') {
-      // Progress can be shown if needed
+      updateSolverProgress(data.percent, data.message);
     } else if (data.type === 'result') {
-      console.log(
-        `[App Regen] Solver result received: ${data.solutions?.length || 0} solutions, method="${data.solverMethod}"`
-      );
       if (data.solutions) {
         data.solutions.forEach((sol, i) => {
           console.log(
@@ -1174,19 +1299,7 @@ function regenerateTurni() {
           );
         });
       }
-      state.solutions = data.solutions || [];
-      state.selectedSolution = 0;
-      state.solverMethod = data.solverMethod || null;
-      if (state.solutions.length > 0) {
-        const best = state.solutions[0];
-        state.schedule = best.schedule;
-        state.violations = best.violations || [];
-        state.stats = best.stats || [];
-      } else {
-        state.schedule = data.schedule;
-        state.violations = data.violations || [];
-        state.stats = data.stats || [];
-      }
+      applySolveResult(data);
       state.worker = null;
       worker.terminate();
       saveState();
@@ -1197,8 +1310,9 @@ function regenerateTurni() {
       }
       renderStep4();
     } else if (data.type === 'error') {
-      console.error('[App Regen] Solver error:', data.message);
-      alert('Errore nel solver: ' + data.message);
+      console.error('[App Regen] Solver error:', data.message, data.error);
+      updateSolverProgress(state.solverProgress?.percent || 0, data.message || 'Errore nel solver');
+      setSolverDiagnostics(data.diagnostics || []);
       const btnR = document.getElementById('btn-regenerate');
       if (btnR) {
         btnR.disabled = false;
@@ -1206,18 +1320,22 @@ function regenerateTurni() {
       }
       state.worker = null;
       worker.terminate();
+      renderStep4();
     }
   };
 
   worker.onerror = err => {
     console.error('[App Regen] Worker error:', err.message, err);
-    alert('Errore Worker: ' + err.message);
+    updateSolverProgress(state.solverProgress?.percent || 0, 'Worker error durante la rigenerazione');
+    setSolverDiagnostics(buildWorkerRuntimeDiagnostic(err, 'la rigenerazione'));
     const btnR = document.getElementById('btn-regenerate');
     if (btnR) {
       btnR.disabled = false;
       btnR.textContent = '🔄 Rigenera turni';
     }
     state.worker = null;
+    worker.terminate();
+    renderStep4();
   };
 
   const effectiveTimeBudget = state.timeBudget === 0 ? estimateTimeBudget() : state.timeBudget;
@@ -1247,6 +1365,8 @@ function rebalanceTurni() {
     state.worker = null;
   }
 
+  resetSolverFeedback();
+
   const btn = document.getElementById('btn-rebalance');
   if (btn) {
     btn.disabled = true;
@@ -1270,12 +1390,13 @@ function rebalanceTurni() {
   worker.onmessage = e => {
     const data = e.data;
     if (data.type === 'progress') {
-      // Progress can be shown if needed
+      updateSolverProgress(data.percent, data.message);
     } else if (data.type === 'result') {
       console.log('[App Rebalance] Result received');
       state.solutions = data.solutions || [];
       state.selectedSolution = 0;
       state.solverMethod = data.solverMethod || null;
+      setSolverDiagnostics(data.diagnostics || []);
       if (state.solutions.length > 0) {
         const best = state.solutions[0];
         state.schedule = best.schedule;
@@ -1296,8 +1417,9 @@ function rebalanceTurni() {
       }
       renderStep4();
     } else if (data.type === 'error') {
-      console.error('[App Rebalance] Solver error:', data.message);
-      alert('Errore nella riassegnazione: ' + data.message);
+      console.error('[App Rebalance] Solver error:', data.message, data.error);
+      updateSolverProgress(state.solverProgress?.percent || 0, data.message || 'Errore nella riassegnazione');
+      setSolverDiagnostics(data.diagnostics || []);
       const btnR = document.getElementById('btn-rebalance');
       if (btnR) {
         btnR.disabled = false;
@@ -1305,18 +1427,22 @@ function rebalanceTurni() {
       }
       state.worker = null;
       worker.terminate();
+      renderStep4();
     }
   };
 
   worker.onerror = err => {
     console.error('[App Rebalance] Worker error:', err.message, err);
-    alert('Errore Worker: ' + err.message);
+    updateSolverProgress(state.solverProgress?.percent || 0, 'Worker error durante la riassegnazione');
+    setSolverDiagnostics(buildWorkerRuntimeDiagnostic(err, 'la riassegnazione'));
     const btnR = document.getElementById('btn-rebalance');
     if (btnR) {
       btnR.disabled = false;
       btnR.textContent = '⚖️ Riassegna turni';
     }
     state.worker = null;
+    worker.terminate();
+    renderStep4();
   };
 
   worker.postMessage({
@@ -1405,7 +1531,7 @@ function renderSolverMethodBanner() {
     </div>`;
   } else {
     banner.innerHTML = `<div class="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 rounded-lg">
-      <p class="font-semibold text-amber-700 dark:text-amber-400 text-sm">⚠️ Algoritmo utilizzato: <strong>Euristica</strong> (greedy + simulated annealing) — nessun solver MILP ha trovato una soluzione.</p>
+      <p class="font-semibold text-amber-700 dark:text-amber-400 text-sm">⚠️ Algoritmo utilizzato: <strong>Euristica</strong> (greedy + simulated annealing) — i solver matematici non erano disponibili oppure non hanno trovato una soluzione utilizzabile.</p>
     </div>`;
   }
 }
@@ -1417,6 +1543,7 @@ function renderStep4() {
   // Render solution picker and solver method banner
   renderSolutionPicker();
   renderSolverMethodBanner();
+  renderDiagnosticsPanel('solver-diagnostics-banner', state.solverDiagnostics);
 
   if (!state.schedule) {
     container.innerHTML =

@@ -46,6 +46,43 @@ let _highsFactory = null; // saved Emscripten factory function (survives instanc
 let _highsPromise = null;
 let _highsCorrupted = false; // set to true after any solve error (WASM state unreliable)
 let _highsLoadDiag = ''; // diagnostic message from last load attempt
+let _highsLoadState = null;
+let _glpkLoadDiag = '';
+let _glpkLoadState = null;
+
+function makeDiagnostic(source, phase, code, severity, userMessage, detail, extra) {
+  return {
+    source,
+    phase,
+    code,
+    severity,
+    userMessage,
+    detail: detail || '',
+    ...(extra || {}),
+  };
+}
+
+function makeSolverError(message, diagnostics, code) {
+  const err = new Error(message);
+  err.code = code || 'solver_error';
+  err.diagnostics = Array.isArray(diagnostics) ? diagnostics : [];
+  return err;
+}
+
+function rememberDiagnostic(target, diagnostic) {
+  if (!diagnostic) return null;
+  const summary = diagnostic.detail ? `${diagnostic.userMessage} — ${diagnostic.detail}` : diagnostic.userMessage;
+  const logger = diagnostic.severity === 'error' ? console.error : diagnostic.severity === 'warning' ? console.warn : console.log;
+  logger(`[${diagnostic.source.toUpperCase()}] ${summary}`);
+  if (target === 'highs') {
+    _highsLoadState = diagnostic;
+    _highsLoadDiag = diagnostic.detail || diagnostic.userMessage;
+  } else if (target === 'glpk') {
+    _glpkLoadState = diagnostic;
+    _glpkLoadDiag = diagnostic.detail || diagnostic.userMessage;
+  }
+  return diagnostic;
+}
 
 /**
  * Create a fresh HiGHS WASM instance from the saved factory.
@@ -57,8 +94,10 @@ function _createHighsInstance() {
     try {
       if (typeof _highsFactory !== 'function') {
         const msg = `HiGHS factory is ${typeof _highsFactory}, not a function`;
-        console.error('[HiGHS]', msg);
-        _highsLoadDiag = msg;
+        rememberDiagnostic(
+          'highs',
+          makeDiagnostic('highs', 'wasm_init', 'solver_unavailable', 'error', 'HiGHS non disponibile', msg)
+        );
         resolve(null);
         return;
       }
@@ -75,32 +114,72 @@ function _createHighsInstance() {
             console.log(`[HiGHS] WASM initialized in ${elapsed}ms, solve=${typeof h?.solve}`);
             if (!hasSolve) {
               const keys = h ? Object.keys(h).slice(0, 20).join(', ') : 'null';
-              _highsLoadDiag = `WASM loaded but .solve() missing. Instance keys: [${keys}]`;
-              console.error('[HiGHS]', _highsLoadDiag);
+              rememberDiagnostic(
+                'highs',
+                makeDiagnostic(
+                  'highs',
+                  'wasm_init',
+                  'wasm_unavailable',
+                  'error',
+                  'HiGHS inizializzato ma WASM non disponibile',
+                  `WASM loaded but .solve() missing. Instance keys: [${keys}]`
+                )
+              );
             } else {
-              _highsLoadDiag = `OK (${elapsed}ms)`;
+              rememberDiagnostic(
+                'highs',
+                makeDiagnostic('highs', 'wasm_init', 'ready', 'info', 'HiGHS pronto', `OK (${elapsed}ms)`)
+              );
               _patchHighsSolve(h);
             }
             resolve(h);
           })
           .catch(err => {
             const msg = `WASM init rejected: ${err?.message || err}`;
-            console.error('[HiGHS]', msg);
-            _highsLoadDiag = msg;
+            rememberDiagnostic(
+              'highs',
+              makeDiagnostic(
+                'highs',
+                'wasm_init',
+                'wasm_init_failed',
+                'error',
+                'HiGHS inizializzato ma WASM non disponibile',
+                msg
+              )
+            );
             resolve(null);
           });
       } else {
         const elapsed = Date.now() - t0;
         const hasSolve = inst && typeof inst.solve === 'function';
         console.log(`[HiGHS] Loaded (sync) in ${elapsed}ms, solve=${typeof inst?.solve}`);
-        _highsLoadDiag = hasSolve ? `OK sync (${elapsed}ms)` : 'Loaded sync but .solve() missing';
-        if (hasSolve) _patchHighsSolve(inst);
+        if (hasSolve) {
+          rememberDiagnostic(
+            'highs',
+            makeDiagnostic('highs', 'wasm_init', 'ready', 'info', 'HiGHS pronto', `OK sync (${elapsed}ms)`)
+          );
+          _patchHighsSolve(inst);
+        } else {
+          rememberDiagnostic(
+            'highs',
+            makeDiagnostic(
+              'highs',
+              'wasm_init',
+              'wasm_unavailable',
+              'error',
+              'HiGHS inizializzato ma WASM non disponibile',
+              'Loaded sync but .solve() missing'
+            )
+          );
+        }
         resolve(inst);
       }
     } catch (e) {
       const msg = `Instance creation failed: ${e.message || e}`;
-      console.error('[HiGHS]', msg);
-      _highsLoadDiag = msg;
+      rememberDiagnostic(
+        'highs',
+        makeDiagnostic('highs', 'wasm_init', 'wasm_init_failed', 'error', 'HiGHS inizializzato ma WASM non disponibile', msg)
+      );
       resolve(null);
     }
   });
@@ -133,8 +212,10 @@ function loadHiGHS() {
             k => /highs|module|solver/i.test(k) && typeof self[k] === 'function'
           );
           const msg = `self.Module is ${typeof _highsFactory}, not a function. Candidate globals: [${candidates.join(', ')}]`;
-          console.error('[HiGHS]', msg);
-          _highsLoadDiag = msg;
+          rememberDiagnostic(
+            'highs',
+            makeDiagnostic('highs', 'script_load', 'solver_unavailable', 'error', 'HiGHS non disponibile', msg)
+          );
           _highsFactory = null;
           resolve(null);
           return;
@@ -146,8 +227,10 @@ function loadHiGHS() {
       _createHighsInstance().then(resolve);
     } catch (e) {
       const msg = `importScripts failed: ${e.message || e}`;
-      console.error('[HiGHS]', msg);
-      _highsLoadDiag = msg;
+      rememberDiagnostic(
+        'highs',
+        makeDiagnostic('highs', 'script_load', 'cdn_load_failed', 'error', 'HiGHS non caricato: errore rete/CDN', msg)
+      );
       resolve(null);
     }
   });
@@ -158,6 +241,42 @@ function loadHiGHS() {
  * Solve a single MILP instance with HiGHS.
  */
 let _lastHighsStatus = ''; // last HiGHS solver status for diagnostics
+let _lastGLPKStatusName = '';
+
+function buildHighsSolveDiagnostic(status, elapsedSec) {
+  const normalizedStatus = String(status || '').toLowerCase();
+  const infeasible = normalizedStatus.includes('infeasible');
+  const detail = `Stato solver: ${status || 'sconosciuto'}${elapsedSec !== undefined ? ` · tempo ${elapsedSec.toFixed(2)}s` : ''}`;
+  return makeDiagnostic(
+    'highs',
+    'solve',
+    infeasible ? 'model_infeasible' : 'no_solution',
+    'warning',
+    infeasible
+      ? 'Il modello non ha trovato una soluzione ammissibile con i vincoli attuali'
+      : 'HiGHS non ha prodotto una soluzione utilizzabile',
+    detail,
+    { status: status || 'sconosciuto' }
+  );
+}
+
+function buildGLPKSolveDiagnostic(statusName, elapsedSec) {
+  const normalizedStatus = String(statusName || '').toLowerCase();
+  const infeasible = normalizedStatus.includes('infeasible') || normalizedStatus.includes('nofeas');
+  const detail = `Stato solver: ${statusName || 'sconosciuto'}${elapsedSec !== undefined ? ` · tempo ${elapsedSec.toFixed(2)}s` : ''}`;
+  return makeDiagnostic(
+    'glpk',
+    'solve',
+    infeasible ? 'model_infeasible' : 'no_solution',
+    'warning',
+    infeasible
+      ? 'Il modello non ha trovato una soluzione ammissibile con i vincoli attuali'
+      : 'GLPK non ha prodotto una soluzione utilizzabile',
+    detail,
+    { status: statusName || 'sconosciuto' }
+  );
+}
+
 function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
   const lp = buildLP(ctx, perturbSeed);
   const lpLines = lp.split('\n');
@@ -236,22 +355,81 @@ function loadGLPK() {
           inst
             .then(g => {
               console.log(`[GLPK] Loaded successfully in ${Date.now() - t0}ms, solve=${typeof g?.solve}`);
+              if (!g || typeof g.solve !== 'function') {
+                rememberDiagnostic(
+                  'glpk',
+                  makeDiagnostic(
+                    'glpk',
+                    'script_load',
+                    'solver_unavailable',
+                    'error',
+                    'GLPK non disponibile',
+                    'Inizializzazione completata ma .solve() non è disponibile'
+                  )
+                );
+              } else {
+                rememberDiagnostic(
+                  'glpk',
+                  makeDiagnostic('glpk', 'script_load', 'ready', 'info', 'GLPK pronto', `OK (${Date.now() - t0}ms)`)
+                );
+              }
               resolve(g);
             })
             .catch(err => {
-              console.error('[GLPK] Init promise rejected:', err);
+              rememberDiagnostic(
+                'glpk',
+                makeDiagnostic(
+                  'glpk',
+                  'script_load',
+                  'wasm_init_failed',
+                  'error',
+                  'GLPK non disponibile',
+                  `Init promise rejected: ${err?.message || err}`
+                )
+              );
               resolve(null);
             });
         } else {
           console.log(`[GLPK] Loaded (sync) in ${Date.now() - t0}ms, solve=${typeof inst?.solve}`);
+          if (!inst || typeof inst.solve !== 'function') {
+            rememberDiagnostic(
+              'glpk',
+              makeDiagnostic(
+                'glpk',
+                'script_load',
+                'solver_unavailable',
+                'error',
+                'GLPK non disponibile',
+                'Caricato in modo sincrono ma .solve() non è disponibile'
+              )
+            );
+          } else {
+            rememberDiagnostic(
+              'glpk',
+              makeDiagnostic('glpk', 'script_load', 'ready', 'info', 'GLPK pronto', `OK sync (${Date.now() - t0}ms)`)
+            );
+          }
           resolve(inst);
         }
       } else {
-        console.error('[GLPK] initGLPK is not a function:', typeof initGLPK);
+        rememberDiagnostic(
+          'glpk',
+          makeDiagnostic(
+            'glpk',
+            'script_load',
+            'solver_unavailable',
+            'error',
+            'GLPK non disponibile',
+            `initGLPK is not a function: ${typeof initGLPK}`
+          )
+        );
         resolve(null);
       }
-    } catch (_e) {
-      console.error('[GLPK] Load failed with exception:', _e.message || _e);
+    } catch (e) {
+      rememberDiagnostic(
+        'glpk',
+        makeDiagnostic('glpk', 'script_load', 'cdn_load_failed', 'error', 'GLPK non caricato: errore rete/CDN', `Load failed with exception: ${e.message || e}`)
+      );
       resolve(null);
     }
   });
@@ -295,6 +473,7 @@ async function solveOneGLPK(glpk, ctx, perturbSeed, timeLimit) {
 
     const status = result.result.status;
     const statusName = GLPK_STATUS_NAMES[status] || `unknown(${status})`;
+    _lastGLPKStatusName = statusName;
     const vars = result.result.vars;
     const varCount = vars ? Object.keys(vars).length : 0;
     const assignedCount = vars ? Object.values(vars).filter(v => Math.round(v) === 1).length : 0;
@@ -379,6 +558,16 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
   const totalBudget = timeBudget && timeBudget > 0 ? timeBudget : MILP_DEFAULT_TOTAL_TIME_BUDGET;
   const ctx = buildContext(config);
   const solutions = [];
+  const diagnostics = [];
+
+  function addDiagnostic(diagnostic) {
+    if (!diagnostic || diagnostic.severity === 'info') return diagnostic;
+    const key = [diagnostic.source, diagnostic.phase, diagnostic.code, diagnostic.userMessage, diagnostic.detail].join('|');
+    if (!diagnostics.some(d => [d.source, d.phase, d.code, d.userMessage, d.detail].join('|') === key)) {
+      diagnostics.push(diagnostic);
+    }
+    return diagnostic;
+  }
 
   console.log(
     `[Solver] Starting solve: solverChoice="${solverChoice}", numSolutions=${numSolutions}, timeBudget=${totalBudget}s, untilZeroViolations=${untilZeroViolations}`
@@ -400,17 +589,16 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       milpAvailable = highs && typeof highs.solve === 'function';
       console.log(`[Solver] HiGHS loaded: available=${milpAvailable}, diag=${_highsLoadDiag}`);
       if (!milpAvailable) {
-        if (solverChoice === 'milp_strict') {
-          throw new Error(
-            `HiGHS MILP non disponibile: ${_highsLoadDiag || 'caricamento fallito'}. ` +
-              'Modalità strict richiede HiGHS funzionante. Verifica la connessione internet e riprova.'
-          );
-        }
-        progress(2, `HiGHS non disponibile: ${_highsLoadDiag}`);
+        addDiagnostic(_highsLoadState);
+        progress(2, _highsLoadState?.userMessage || `HiGHS non disponibile: ${_highsLoadDiag}`);
       }
     } catch (loadErr) {
       console.error('[Solver] HiGHS loading threw exception:', loadErr.message || loadErr);
-      progress(2, `Errore caricamento HiGHS: ${loadErr.message || loadErr}`);
+      addDiagnostic(
+        loadErr.diagnostics?.[0] ||
+          makeDiagnostic('highs', 'script_load', 'load_error', 'error', 'HiGHS non disponibile', loadErr.message || String(loadErr))
+      );
+      progress(2, _highsLoadState?.userMessage || `Errore caricamento HiGHS: ${loadErr.message || loadErr}`);
       milpAvailable = false;
     }
   }
@@ -421,18 +609,36 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     try {
       glpk = await loadGLPK();
       glpkAvailable = glpk && typeof glpk.solve === 'function';
-      console.log(`[Solver] GLPK loaded: available=${glpkAvailable}`);
+      console.log(`[Solver] GLPK loaded: available=${glpkAvailable}, diag=${_glpkLoadDiag}`);
+      if (!glpkAvailable) {
+        addDiagnostic(_glpkLoadState);
+        progress(3, _glpkLoadState?.userMessage || `GLPK non disponibile: ${_glpkLoadDiag}`);
+      }
     } catch (loadErr) {
       console.error('[Solver] GLPK loading threw exception:', loadErr.message || loadErr);
+      addDiagnostic(
+        loadErr.diagnostics?.[0] ||
+          makeDiagnostic('glpk', 'script_load', 'load_error', 'error', 'GLPK non disponibile', loadErr.message || String(loadErr))
+      );
       glpkAvailable = false;
     }
   }
 
   // In strict mode, at least one MILP solver must be available
   if (solverChoice === 'milp_strict' && !milpAvailable && !glpkAvailable) {
-    throw new Error(
-      'Impossibile caricare nessun solver MILP (HiGHS e GLPK). ' +
-        'Modalità strict richiede almeno un solver MILP funzionante. Verifica la connessione internet e riprova.'
+    const diagnostic = makeDiagnostic(
+      'solver',
+      'availability',
+      'solver_unavailable',
+      'error',
+      'Nessun solver MILP disponibile',
+      'Modalità strict richiede almeno un solver MILP funzionante. Verifica la connessione internet e riprova.'
+    );
+    addDiagnostic(diagnostic);
+    throw makeSolverError(
+      'Impossibile caricare nessun solver MILP (HiGHS e GLPK). Modalità strict richiede almeno un solver MILP funzionante.',
+      diagnostics,
+      'solver_unavailable'
     );
   }
 
@@ -455,6 +661,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       const pctBase = 5 + Math.floor((i * 80) / numSolutions);
       const seed = seedOffset + i;
       let solved = false;
+      let highsFailure = null;
+      let glpkFailure = null;
 
       console.log(`[Solver] === Solution ${i + 1}/${numSolutions} (seed=${seed}) ===`);
 
@@ -482,10 +690,11 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
           } else {
             const status = _lastHighsStatus || 'sconosciuto';
             const reason = `nessuna soluzione ammissibile in ${milpElapsed.toFixed(0)}s (stato: ${status})`;
+            highsFailure = addDiagnostic(buildHighsSolveDiagnostic(status, milpElapsed));
             console.warn(
               `[Solver] HiGHS returned null (no feasible solution) after ${milpElapsed.toFixed(2)}s, status="${status}"`
             );
-            progress(pctBase, `${batchLabel}HiGHS fallito: ${reason}`);
+            progress(pctBase, `${batchLabel}HiGHS fallito: ${highsFailure?.userMessage || reason}`);
             // Reload corrupted instance for next attempt
             if (_highsCorrupted) {
               try {
@@ -504,7 +713,17 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
         } catch (highsErr) {
           console.error('[Solver] HiGHS solve threw exception:', highsErr.message || highsErr);
           if (highsErr.stack) console.error('[Solver]   Stack:', highsErr.stack);
-          progress(pctBase, `${batchLabel}HiGHS errore: ${highsErr.message || highsErr}`);
+          highsFailure = addDiagnostic(
+            makeDiagnostic(
+              'highs',
+              'solve',
+              'solve_error',
+              'error',
+              'Errore HiGHS durante la generazione',
+              highsErr.message || String(highsErr)
+            )
+          );
+          progress(pctBase, `${batchLabel}${highsFailure.userMessage}`);
         }
 
         // Reload HiGHS if corrupted (for next solution attempt)
@@ -545,10 +764,22 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
             solved = true;
           } else {
             console.warn(`[Solver] GLPK returned null (no feasible solution) after ${glpkElapsed.toFixed(2)}s`);
+            glpkFailure = addDiagnostic(buildGLPKSolveDiagnostic(_lastGLPKStatusName, glpkElapsed));
+            progress(pctBase, `${batchLabel}GLPK fallito: ${glpkFailure?.userMessage || 'nessuna soluzione trovata'}`);
           }
         } catch (glpkErr) {
           console.error('[Solver] GLPK solve threw exception:', glpkErr.message || glpkErr);
           if (glpkErr.stack) console.error('[Solver]   Stack:', glpkErr.stack);
+          glpkFailure = addDiagnostic(
+            makeDiagnostic(
+              'glpk',
+              'solve',
+              'solve_error',
+              'error',
+              'Errore GLPK durante la generazione',
+              glpkErr.message || String(glpkErr)
+            )
+          );
         }
       }
 
@@ -556,17 +787,50 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       if (!solved) {
         if (strictMode) {
           const attempted = [useHiGHS && 'HiGHS', useGLPK && 'GLPK'].filter(Boolean);
-          throw new Error(
+          addDiagnostic(
+            makeDiagnostic(
+              'solver',
+              'solve',
+              'solver_no_solution',
+              'error',
+              'Nessun solver MILP ha prodotto una soluzione utilizzabile',
+              `Solver tentati: ${attempted.join(', ') || 'nessuno'}. Modalità strict non consente fallback euristico.`
+            )
+          );
+          throw makeSolverError(
             `Nessun solver MILP ha prodotto una soluzione per la soluzione ${i + 1}/${numSolutions}. ` +
-              `Solver tentati: ${attempted.join(', ') || 'nessuno'}. ` +
-              'Modalità strict non consente fallback euristico. ' +
-              'Prova ad aumentare il tempo di calcolo o rilassare i vincoli.'
+              `Solver tentati: ${attempted.join(', ') || 'nessuno'}. Modalità strict non consente fallback euristico. ` +
+              'Prova ad aumentare il tempo di calcolo o rilassare i vincoli.',
+            diagnostics,
+            'solver_no_solution'
           );
         }
         const attempted = [useHiGHS && 'HiGHS', useGLPK && 'GLPK'].filter(Boolean);
         const label = attempted.length > 0 ? `Fallback euristica (${attempted.join('+')})` : 'Euristica';
+        const fallbackReason =
+          attempted.length === 1
+            ? `${attempted[0]} fallito, uso euristica come fallback`
+            : attempted.length > 1
+              ? `${attempted.join(' e ')} falliti, uso euristica come fallback`
+              : solverChoice === 'milp'
+                ? 'HiGHS non disponibile, uso euristica come fallback'
+                : solverChoice === 'glpk'
+                  ? 'GLPK non disponibile, uso euristica come fallback'
+                  : 'Solver MILP non disponibili, uso euristica come fallback';
+        addDiagnostic(
+          makeDiagnostic(
+            'solver',
+            'fallback',
+            'fallback_used',
+            'warning',
+            fallbackReason,
+            [highsFailure?.userMessage, glpkFailure?.userMessage, _highsLoadState?.userMessage, _glpkLoadState?.userMessage]
+              .filter(Boolean)
+              .join(' · ')
+          )
+        );
         console.log(`[Solver] MILP solvers failed/unavailable [${attempted.join(',')}], using fallback`);
-        progress(pctBase, `${batchLabel}${label} ${i + 1}/${numSolutions}…`);
+        progress(pctBase, `${batchLabel}${fallbackReason}. ${label} ${i + 1}/${numSolutions}…`);
         const schedule = construct(ctx);
         const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec);
         const violations = collectViolations(improved, ctx);
@@ -595,6 +859,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     const reasons = [];
     if (solverChoice === 'auto' || solverChoice === 'milp' || solverChoice === 'milp_strict')
       reasons.push(`HiGHS: ${_highsLoadDiag || 'non caricato'}`);
+    if (solverChoice === 'auto' || solverChoice === 'glpk' || solverChoice === 'milp_strict')
+      reasons.push(`GLPK: ${_glpkLoadDiag || 'non caricato'}`);
     progress(5, `Nessun solver MILP disponibile (${reasons.join('; ')}). Uso euristica…`);
   }
 
@@ -640,5 +906,5 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
   progress(95, 'Validazione…');
   progress(100, 'Fatto!');
 
-  return solutions;
+  return { solutions, diagnostics };
 }
