@@ -316,6 +316,18 @@ function buildGLPKSolveDiagnostic(statusName, elapsedSec) {
   );
 }
 
+function buildHighsSolveOptions(timeLimit, perturbSeed) {
+  return {
+    time_limit: timeLimit,
+    presolve: 'off', // avoid highs-js solution parse bug when presolve reduces the problem
+    mip_rel_gap: 0.05, // relaxed from 0.02 to find feasible solutions faster
+    mip_feasibility_tolerance: 1e-4,
+    random_seed: perturbSeed * 137,
+    output_flag: false,
+    log_to_console: false,
+  };
+}
+
 function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
   const lp = buildLP(ctx, perturbSeed);
   const lpLines = lp.split('\n');
@@ -325,15 +337,7 @@ function solveOneMILP(highs, ctx, perturbSeed, timeLimit) {
     `[HiGHS] Building LP: ~${constraintCount} constraints, ~${binCount} binary var lines, seed=${perturbSeed}, timeLimit=${timeLimit}s`
   );
 
-  const opts = {
-    time_limit: timeLimit,
-    presolve: 'off', // avoid highs-js solution parse bug when presolve reduces the problem
-    mip_rel_gap: 0.05, // relaxed from 0.02 to find feasible solutions faster
-    mip_feasibility_tolerance: 1e-4,
-    random_seed: perturbSeed * 137,
-    output_flag: false,
-    log_to_console: false,
-  };
+  const opts = buildHighsSolveOptions(timeLimit, perturbSeed);
   const t0 = Date.now();
   const result = highs.solve(lp, opts);
   const elapsed = ((Date.now() - t0) / 1000).toFixed(2);

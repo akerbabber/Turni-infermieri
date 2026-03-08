@@ -722,14 +722,8 @@ describe('computeScore', () => {
     const mHardFromCov = mExcessPerDay * numDays; // 1 per day
     const nHardFromCov = nExcessDay0 * 3; // 3× for night on 1 day
     // The N schedule has fewer total coverage hard violations but night ones count 3×
-    assert.ok(
-      nHardFromCov === 3,
-      `Night overcoverage penalty per unit should be 3, got ${nHardFromCov}`
-    );
-    assert.ok(
-      mHardFromCov === numDays,
-      `Morning overcoverage penalty should be ${numDays}, got ${mHardFromCov}`
-    );
+    assert.ok(nHardFromCov === 3, `Night overcoverage penalty per unit should be 3, got ${nHardFromCov}`);
+    assert.ok(mHardFromCov === numDays, `Morning overcoverage penalty should be ${numDays}, got ${mHardFromCov}`);
   });
 });
 
@@ -1026,7 +1020,10 @@ describe('computeScore with hourDeltas', () => {
 describe('buildContext with previousMonthTail', () => {
   it('should store prevTail in context when provided', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
-    config.previousMonthTail = [['M', 'P', 'R'], ['R', 'N', 'S']];
+    config.previousMonthTail = [
+      ['M', 'P', 'R'],
+      ['R', 'N', 'S'],
+    ];
     const bctx = ctx.buildContext(config);
     assert.ok(bctx.prevTail);
     assert.equal(bctx.prevTail.length, 2);
@@ -1179,7 +1176,10 @@ describe('collectViolations with previousMonthTail', () => {
 describe('buildContext with 5-day previousMonthTail', () => {
   it('should accept and store a 5-element tail', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
-    config.previousMonthTail = [['M', 'P', 'R', 'M', 'P'], ['R', 'R', 'N', 'S', 'R']];
+    config.previousMonthTail = [
+      ['M', 'P', 'R', 'M', 'P'],
+      ['R', 'R', 'N', 'S', 'R'],
+    ];
     const bctx = ctx.buildContext(config);
     assert.ok(bctx.prevTail);
     assert.equal(bctx.prevTail[0].length, 5);
@@ -1357,6 +1357,16 @@ describe('solver diagnostics', () => {
     ctx = loadSolver();
   });
 
+  it('should keep HiGHS presolve disabled in solve options', () => {
+    const opts = toPlain(ctx.buildHighsSolveOptions(17, 3));
+    assert.equal(opts.time_limit, 17);
+    assert.equal(opts.presolve, 'off');
+    assert.equal(opts.random_seed, 411);
+    assert.equal(opts.mip_rel_gap, 0.05);
+    assert.equal(opts.output_flag, false);
+    assert.equal(opts.log_to_console, false);
+  });
+
   it('should classify HiGHS infeasible statuses with a user-friendly diagnostic', () => {
     const diagnostic = toPlain(ctx.buildHighsSolveDiagnostic('Infeasible', 12.34));
     assert.equal(diagnostic.source, 'highs');
@@ -1422,8 +1432,6 @@ describe('solver diagnostics', () => {
     assert.equal(result.solutions.length, 1);
     assert.equal(result.solutions[0].solverMethod, 'fallback');
     assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non caricato: errore rete/CDN'));
-    assert.ok(
-      diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback')
-    );
+    assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback'));
   });
 });
