@@ -222,3 +222,65 @@ describe('config CSV helpers', () => {
     assert.equal(nextState.solverMethod, null);
   });
 });
+
+describe('previous month hour compensation', () => {
+  it('should compute previous-month deltas relative to the imported roster average', () => {
+    const currentState = toPlain(ctx._getAppState());
+    ctx._setAppState({
+      ...currentState,
+      totalNurses: 4,
+      absentNurses: 0,
+      nurses: [
+        { id: 'n1', name: 'A', tags: [], absencePeriods: {} },
+        { id: 'n2', name: 'B', tags: [], absencePeriods: {} },
+        { id: 'n3', name: 'C', tags: [], absencePeriods: {} },
+        { id: 'n4', name: 'D', tags: [], absencePeriods: {} },
+      ],
+      previousMonthSchedule: [
+        ['M', 'M'],
+        ['M', 'M'],
+        ['M', 'M'],
+        [null, null],
+      ],
+      previousMonthHours: [124.0, 130.2, 136.4, null],
+    });
+
+    const deltas = toPlain(ctx.computePrevMonthDeltas());
+
+    assert.deepEqual(deltas, {
+      A: -6.2,
+      B: 0,
+      C: 6.2,
+    });
+    const deltaSum = Object.values(deltas).reduce((sum, value) => sum + value, 0);
+    assert.equal(deltaSum, 0);
+  });
+
+  it('should build zero-sum hourDeltas for the solver', () => {
+    const currentState = toPlain(ctx._getAppState());
+    ctx._setAppState({
+      ...currentState,
+      totalNurses: 4,
+      absentNurses: 0,
+      nurses: [
+        { id: 'n1', name: 'A', tags: [], absencePeriods: {} },
+        { id: 'n2', name: 'B', tags: [], absencePeriods: {} },
+        { id: 'n3', name: 'C', tags: [], absencePeriods: {} },
+        { id: 'n4', name: 'D', tags: [], absencePeriods: {} },
+      ],
+      previousMonthSchedule: [
+        ['M', 'M'],
+        ['M', 'M'],
+        ['M', 'M'],
+        [null, null],
+      ],
+      previousMonthHours: [124.0, 130.2, 136.4, null],
+    });
+
+    const hourDeltas = toPlain(ctx.buildHourDeltas());
+
+    assert.deepEqual(hourDeltas, [6.2, 0, -6.2, 0]);
+    const deltaSum = hourDeltas.reduce((sum, value) => sum + value, 0);
+    assert.equal(deltaSum, 0);
+  });
+});

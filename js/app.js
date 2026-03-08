@@ -905,7 +905,7 @@ function renderPrevMonthStatus() {
   let html =
     '<div class="mt-2 p-3 bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-lg max-h-48 overflow-y-auto">';
   html +=
-    '<p class="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-2">📊 Delta ore mese precedente:</p>';
+    '<p class="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-2">📊 Scostamento ore rispetto alla media del mese precedente:</p>';
   html += '<div class="grid grid-cols-2 sm:grid-cols-3 gap-1">';
   for (let n = 0; n < activeNurses.length; n++) {
     const name = activeNurses[n].name;
@@ -1329,27 +1329,27 @@ function formatCsv(rows) {
 
 /**
  * Compute per-nurse hour deltas from the previous month schedule.
- * Returns an object mapping nurse name → delta (actual - target).
- * Positive delta means nurse worked MORE than target (should work less next month).
- * Negative delta means nurse worked LESS than target (should work more next month).
+ * Returns an object mapping nurse name → delta (actual - imported-month average).
+ * Positive delta means nurse worked MORE than the roster average
+ * (should work less next month). Negative delta means nurse worked LESS
+ * than average (should work more next month).
+ *
+ * Using deviations from the imported month average keeps the compensation
+ * zero-sum, so the next month rebalances only relative inequities instead of
+ * shifting the whole roster above/below the new month's achievable total hours.
  */
 function computePrevMonthDeltas() {
   if (!state.previousMonthSchedule || !state.previousMonthHours) return null;
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
-  const targetH = state.rules.targetHours;
-  // Previous month had 4 or 5 weeks — compute monthly target from weekly
-  const prevNumDays = state.previousMonthSchedule[0]?.length || 0;
-  if (prevNumDays === 0) return null;
-  // Monthly target approximation: targetHours (weekly) × numDays/7.
-  // This is an approximation since months have 28–31 days (4–4.4 weeks),
-  // but the relative differences between nurses remain accurate.
-  const monthlyTarget = targetH * (prevNumDays / 7);
+  const knownHours = state.previousMonthHours.filter(h => h !== undefined && h !== null);
+  if (knownHours.length === 0) return null;
+  const avgHours = knownHours.reduce((sum, h) => sum + h, 0) / knownHours.length;
   const deltas = {};
   for (let n = 0; n < activeNurses.length; n++) {
     const name = activeNurses[n].name;
     const h = state.previousMonthHours[n];
     if (h !== undefined && h !== null) {
-      deltas[name] = Math.round((h - monthlyTarget) * 10) / 10;
+      deltas[name] = Math.round((h - avgHours) * 10) / 10;
     }
   }
   return deltas;
@@ -1363,8 +1363,9 @@ function buildHourDeltas() {
   const deltas = computePrevMonthDeltas();
   if (!deltas) return null;
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
-  // Negate: if nurse worked +5h MORE last month (positive delta from computePrevMonthDeltas),
-  // they should work LESS this month → solver needs negative adjustment (hourDeltas = -5).
+  // Negate: if nurse worked +5h MORE than the imported-month average
+  // (positive delta from computePrevMonthDeltas), they should work LESS this
+  // month → solver needs a negative adjustment (hourDeltas = -5).
   // The solver interprets positive hourDeltas as "nurse should work more hours".
   const hourDeltas = activeNurses.map(n => -(deltas[n.name] || 0));
   // Only return if at least one delta is nonzero
