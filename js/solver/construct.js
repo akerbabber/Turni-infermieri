@@ -58,6 +58,7 @@ function construct(ctx) {
   for (let n = 0; n < numNurses; n++) {
     if (
       !nurseProps[n].soloMattine &&
+      !nurseProps[n].soloPomeriggi &&
       !nurseProps[n].soloDiurni &&
       !nurseProps[n].noNotti &&
       !nurseProps[n].diurniNoNotti
@@ -255,6 +256,7 @@ function construct(ctx) {
   function eligible(n, d, s) {
     if (schedule[n][d] !== null) return false;
     if (nurseProps[n].soloMattine) return false;
+    if (nurseProps[n].soloPomeriggi) return false;
     // solo_diurni: only D or R allowed
     if (nurseProps[n].soloDiurni && s !== 'D' && s !== 'R') return false;
     // solo_notti: only N, S, or R allowed
@@ -312,7 +314,11 @@ function construct(ctx) {
 
     if (preferDiurni) {
       for (const n of avail().filter(
-        n => !nurseProps[n].noDiurni && !nurseProps[n].soloMattine && !nurseProps[n].soloNotti
+        n =>
+          !nurseProps[n].noDiurni &&
+          !nurseProps[n].soloMattine &&
+          !nurseProps[n].soloPomeriggi &&
+          !nurseProps[n].soloNotti
       )) {
         if (cov.D >= maxCovD || cov.M >= maxCovM || cov.P >= maxCovP) break;
         if (!eligible(n, d, 'D')) continue;
@@ -375,7 +381,11 @@ function construct(ctx) {
     // Only if D won't push either M or P over their maximum
     if (cov.M < minCovM || cov.P < minCovP) {
       for (const n of avail().filter(
-        n => !nurseProps[n].noDiurni && !nurseProps[n].soloMattine && !nurseProps[n].soloNotti
+        n =>
+          !nurseProps[n].noDiurni &&
+          !nurseProps[n].soloMattine &&
+          !nurseProps[n].soloPomeriggi &&
+          !nurseProps[n].soloNotti
       )) {
         if (cov.M >= maxCovM || cov.P >= maxCovP) break;
         if (cov.D >= maxCovD) break;
@@ -424,6 +434,7 @@ function construct(ctx) {
   for (let n = 0; n < numNurses; n++) {
     if (
       nurseProps[n].soloMattine ||
+      nurseProps[n].soloPomeriggi ||
       nurseProps[n].soloDiurni ||
       nurseProps[n].soloNotti ||
       nurseProps[n].diurniENotturni

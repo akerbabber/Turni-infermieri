@@ -192,7 +192,13 @@ function computeScore(schedule, ctx) {
 
   // Soft: night-count fairness
   for (let n = 0; n < numNurses; n++) {
-    if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].noNotti || nurseProps[n].diurniNoNotti)
+    if (
+      nurseProps[n].soloMattine ||
+      nurseProps[n].soloPomeriggi ||
+      nurseProps[n].soloDiurni ||
+      nurseProps[n].noNotti ||
+      nurseProps[n].diurniNoNotti
+    )
       continue;
     const nc = nightCount(schedule, n, numDays);
     soft += Math.abs(nc - targetNights) * 3;
@@ -202,7 +208,8 @@ function computeScore(schedule, ctx) {
   {
     const dEligible = [];
     for (let n = 0; n < numNurses; n++) {
-      if (nurseProps[n].soloMattine || nurseProps[n].soloNotti || nurseProps[n].noDiurni) continue;
+      if (nurseProps[n].soloMattine || nurseProps[n].soloPomeriggi || nurseProps[n].soloNotti || nurseProps[n].noDiurni)
+        continue;
       dEligible.push(n);
     }
     if (dEligible.length >= 2) {
@@ -217,6 +224,7 @@ function computeScore(schedule, ctx) {
     if (!nurseProps[n].noDiurni) continue;
     if (
       nurseProps[n].soloMattine ||
+      nurseProps[n].soloPomeriggi ||
       nurseProps[n].soloDiurni ||
       nurseProps[n].soloNotti ||
       nurseProps[n].diurniENotturni

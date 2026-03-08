@@ -27,6 +27,7 @@ function buildContext(config) {
   // Per-nurse properties
   const nurseProps = nurses.map(n => ({
     soloMattine: n.tags.includes('solo_mattine'),
+    soloPomeriggi: n.tags.includes('solo_pomeriggi'),
     soloDiurni: n.tags.includes('solo_diurni'),
     soloNotti: n.tags.includes('solo_notti'),
     diurniENotturni: n.tags.includes('diurni_e_notturni'),
@@ -60,7 +61,7 @@ function buildContext(config) {
   const coppiaTurni = rules.coppiaTurni ?? null;
   const consente2D = rules.consente2DiurniConsecutivi ?? false;
 
-  // Pre-compute pinned cells (absences + solo_mattine)
+  // Pre-compute pinned cells (absences + solo_mattine + solo_pomeriggi)
   // pinned[n][d] = shift code or null
   const pinned = Array.from({ length: numNurses }, () => new Array(numDays).fill(null));
   for (let n = 0; n < numNurses; n++) {
@@ -73,6 +74,8 @@ function buildContext(config) {
       }
       if (nurseProps[n].soloMattine) {
         pinned[n][d] = dows[d] === 0 || dows[d] === 6 ? 'R' : 'M';
+      } else if (nurseProps[n].soloPomeriggi) {
+        pinned[n][d] = dows[d] === 0 || dows[d] === 6 ? 'R' : 'P';
       }
     }
   }

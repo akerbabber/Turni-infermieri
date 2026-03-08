@@ -355,6 +355,7 @@ function renderNurseList() {
 
     const tagDefs = [
       { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine', isAbsence: false },
+      { key: 'solo_pomeriggi', label: 'Solo pomeriggi feriali', cls: 'tag-solo_pomeriggi', isAbsence: false },
       { key: 'solo_diurni', label: 'Solo diurni 12h', cls: 'tag-solo_diurni', isAbsence: false },
       { key: 'solo_notti', label: 'Solo notti', cls: 'tag-solo_notti', isAbsence: false },
       { key: 'diurni_e_notturni', label: 'Diurni e Notturni', cls: 'tag-diurni_e_notturni', isAbsence: false },

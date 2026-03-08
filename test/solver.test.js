@@ -419,6 +419,26 @@ describe('buildContext', () => {
     assert.equal(bctx.pinned[1][0], null);
   });
 
+  it('should pin solo_pomeriggi nurses to P on weekdays and R on weekends', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      year: 2025,
+      month: 0, // Jan 2025
+      nurseOverrides: {
+        0: { tags: ['solo_pomeriggi'] },
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    // Jan 1, 2025 is Wednesday (weekday) => P
+    assert.equal(bctx.pinned[0][0], 'P');
+    // Jan 4, 2025 is Saturday (weekend) => R
+    assert.equal(bctx.pinned[0][3], 'R');
+    // Jan 5, 2025 is Sunday (weekend) => R
+    assert.equal(bctx.pinned[0][4], 'R');
+    // Nurse 1 (no tag) should have all nulls
+    assert.equal(bctx.pinned[1][0], null);
+  });
+
   it('should set diurniNoNotti property for diurni_no_notti nurses', () => {
     const config = makeMinimalConfig({
       numNurses: 2,
