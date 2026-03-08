@@ -77,6 +77,42 @@ function requiredRest(weekLen, minR) {
   return Math.max(1, Math.ceil((weekLen * minR) / 7));
 }
 
+const MP_CYCLE_PATTERNS = [
+  ['M', 'M', 'P', 'P', 'R', 'R'],
+  ['M', 'P', 'P', 'P', 'R', 'R'],
+  ['M', 'M', 'M', 'P', 'R', 'R'],
+];
+
+function isMPCycleLimitedNurse(props) {
+  return props.mattineEPomeriggi || (props.noNotti && props.noDiurni);
+}
+
+function isAllowedMPCycleShift(shift) {
+  return shift === 'M' || shift === 'P' || shift === 'R';
+}
+
+function getMPCycleBlockMismatch(schedule, nurseIdx, startDay, numDays) {
+  const row = schedule[nurseIdx];
+  const blockLen = Math.min(6, numDays - startDay);
+  let bestMismatch = Infinity;
+  for (const pattern of MP_CYCLE_PATTERNS) {
+    let mismatch = 0;
+    let comparable = false;
+    for (let offset = 0; offset < blockLen; offset++) {
+      const shift = row[startDay + offset];
+      if (!isAllowedMPCycleShift(shift)) {
+        comparable = false;
+        mismatch = 0;
+        break;
+      }
+      comparable = true;
+      if (shift !== pattern[offset]) mismatch++;
+    }
+    if (comparable) bestMismatch = Math.min(bestMismatch, mismatch);
+  }
+  return Number.isFinite(bestMismatch) ? bestMismatch : 0;
+}
+
 // ---------------------------------------------------------------------------
 // Scoring — lower is better (0 = perfect)
 // ---------------------------------------------------------------------------
@@ -177,6 +213,9 @@ function computeScore(schedule, ctx) {
         const have = countWeekRest(schedule, n, wDays);
         if (have < need) hard += need - have;
       }
+    }
+    if (isMPCycleLimitedNurse(nurseProps[n])) {
+      for (let d = 0; d < numDays; d += 6) hard += getMPCycleBlockMismatch(schedule, n, d, numDays);
     }
   }
 
@@ -430,6 +469,20 @@ function collectViolations(schedule, ctx) {
             type: 'DDD',
             msg: `Infermiere ${n + 1}, giorno ${d + 1}: 3 diurni consecutivi non consentiti`,
           });
+      }
+    }
+    if (isMPCycleLimitedNurse(nurseProps[n])) {
+      for (let d = 0; d < numDays; d += 6) {
+        if (getMPCycleBlockMismatch(schedule, n, d, numDays) > 0) {
+          violations.push({
+            nurse: n,
+            day: d,
+            type: 'mp_cycle_4_2',
+            msg:
+              `Infermiere ${n + 1}, giorni ${d + 1}-${Math.min(numDays, d + 6)}: ` +
+              'il ciclo M/P deve seguire uno tra M-M-P-P-R-R, M-P-P-P-R-R, M-M-M-P-R-R',
+          });
+        }
       }
     }
   }
