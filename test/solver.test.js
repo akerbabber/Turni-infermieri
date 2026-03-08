@@ -419,6 +419,24 @@ describe('buildContext', () => {
     assert.equal(bctx.pinned[1][0], null);
   });
 
+  it('should set mattineEPomeriggi property and not pin cells for mattine_e_pomeriggi nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      year: 2025,
+      month: 0, // Jan 2025
+      nurseOverrides: {
+        0: { tags: ['mattine_e_pomeriggi'] },
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    // nurseProps should reflect the tag
+    assert.equal(bctx.nurseProps[0].mattineEPomeriggi, true);
+    assert.equal(bctx.nurseProps[1].mattineEPomeriggi, false);
+    // Unlike solo_mattine, mattine_e_pomeriggi nurses are NOT pinned
+    assert.equal(bctx.pinned[0][0], null);
+    assert.equal(bctx.pinned[0][3], null);
+  });
+
   it('should set diurniNoNotti property for diurni_no_notti nurses', () => {
     const config = makeMinimalConfig({
       numNurses: 2,

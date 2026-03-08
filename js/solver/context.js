@@ -33,6 +33,7 @@ function buildContext(config) {
     noNotti: n.tags.includes('no_notti'),
     diurniNoNotti: n.tags.includes('diurni_no_notti'),
     noDiurni: n.tags.includes('no_diurni'),
+    mattineEPomeriggi: n.tags.includes('mattine_e_pomeriggi'),
   }));
 
   // Day-of-week cache & week index helpers
