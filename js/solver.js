@@ -82,5 +82,35 @@ self.onmessage = async function (e) {
       console.error('[Worker] Solve failed with uncaught exception:', err.message, err.stack);
       self.postMessage({ type: 'error', message: err.message });
     }
+  } else if (e.data.type === 'rebalance') {
+    // Rebalance: take existing schedule and optimise it via local search
+    console.log('[Worker] Received rebalance message');
+    try {
+      progress(5, 'Riassegnazione turni in corso…');
+      const ctx = buildContext(e.data.config);
+      const schedule = e.data.schedule;
+      const timeBudget = e.data.timeBudget || 15;
+
+      progress(10, 'Ottimizzazione locale…');
+      const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, timeBudget);
+
+      progress(90, 'Validazione…');
+      const violations = collectViolations(improved, ctx);
+      const stats = computeStats(improved, ctx);
+      const score = computeScore(improved, ctx);
+
+      progress(100, 'Fatto!');
+      self.postMessage({
+        type: 'result',
+        schedule: improved,
+        violations: violations,
+        stats: stats,
+        solutions: [{ schedule: improved, violations, stats, score: score.total, solverMethod: 'rebalance' }],
+        solverMethod: 'rebalance',
+      });
+    } catch (err) {
+      console.error('[Worker] Rebalance failed:', err.message, err.stack);
+      self.postMessage({ type: 'error', message: err.message });
+    }
   }
 };

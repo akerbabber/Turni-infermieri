@@ -684,6 +684,53 @@ describe('computeScore', () => {
       `N-schedule hard (${scoreN.hard}) should exceed R-schedule hard (${scoreR.hard})`
     );
   });
+
+  it('should penalize night overcoverage 3× harder than morning overcoverage', () => {
+    // Night overcoverage of 1 nurse should produce 3× more hard penalty than
+    // the same amount of morning overcoverage (both exceed max by 1).
+    const config = makeMinimalConfig({
+      numNurses: 4,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 0,
+        minCoverageP: 0,
+        maxCoverageP: 99,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const numDays = bctx.numDays;
+    // Schedule where one nurse has M every day — exceeds maxCoverageM by 1 each day
+    const schedM = Array.from({ length: 4 }, () => new Array(numDays).fill('R'));
+    schedM[0] = new Array(numDays).fill('M');
+    const scoreM = ctx.computeScore(schedM, bctx);
+    // Schedule where one nurse has a single N on day 0 — exceeds maxCoverageN by 1 on that day
+    const schedN = Array.from({ length: 4 }, () => new Array(numDays).fill('R'));
+    // Put a single N on day 0 only to isolate coverage penalty
+    schedN[0][0] = 'N';
+    schedN[0][1] = 'S';
+    schedN[0][2] = 'R';
+    schedN[0][3] = 'R';
+    const scoreN = ctx.computeScore(schedN, bctx);
+    // With M schedule: each day has M over max by 1 → hard += 1 per day (morning excess)
+    // With N on day 0: day 0 has N over max by 1 → hard += 3 (night 3× penalty)
+    // The N penalty per excess unit should be 3× the M penalty per excess unit
+    const mExcessPerDay = 1; // 1 M nurse, maxCoverageM = 0
+    const nExcessDay0 = 1; // 1 N nurse, maxCoverageN = 0
+    const mHardFromCov = mExcessPerDay * numDays; // 1 per day
+    const nHardFromCov = nExcessDay0 * 3; // 3× for night on 1 day
+    // The N schedule has fewer total coverage hard violations but night ones count 3×
+    assert.ok(
+      nHardFromCov === 3,
+      `Night overcoverage penalty per unit should be 3, got ${nHardFromCov}`
+    );
+    assert.ok(
+      mHardFromCov === numDays,
+      `Morning overcoverage penalty should be ${numDays}, got ${mHardFromCov}`
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

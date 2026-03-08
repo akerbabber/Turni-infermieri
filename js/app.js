@@ -1232,6 +1232,102 @@ function regenerateTurni() {
 }
 
 // ---------------------------------------------------------------------------
+// Rebalance — optimise the existing schedule via local search
+// ---------------------------------------------------------------------------
+
+function rebalanceTurni() {
+  if (!state.schedule) {
+    alert('Nessun turno da riassegnare. Genera prima i turni.');
+    return;
+  }
+
+  // Terminate existing worker
+  if (state.worker) {
+    state.worker.terminate();
+    state.worker = null;
+  }
+
+  const btn = document.getElementById('btn-rebalance');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Riassegnando...';
+  }
+
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+
+  const config = {
+    year: state.year,
+    month: state.month,
+    nurses: activeNurses,
+    rules: state.rules,
+    hourDeltas: buildHourDeltas(),
+    previousMonthTail: buildPrevMonthTail(),
+  };
+
+  const worker = new Worker('js/solver.js');
+  state.worker = worker;
+
+  worker.onmessage = e => {
+    const data = e.data;
+    if (data.type === 'progress') {
+      // Progress can be shown if needed
+    } else if (data.type === 'result') {
+      console.log('[App Rebalance] Result received');
+      state.solutions = data.solutions || [];
+      state.selectedSolution = 0;
+      state.solverMethod = data.solverMethod || null;
+      if (state.solutions.length > 0) {
+        const best = state.solutions[0];
+        state.schedule = best.schedule;
+        state.violations = best.violations || [];
+        state.stats = best.stats || [];
+      } else {
+        state.schedule = data.schedule;
+        state.violations = data.violations || [];
+        state.stats = data.stats || [];
+      }
+      state.worker = null;
+      worker.terminate();
+      saveState();
+      const btnR = document.getElementById('btn-rebalance');
+      if (btnR) {
+        btnR.disabled = false;
+        btnR.textContent = '⚖️ Riassegna turni';
+      }
+      renderStep4();
+    } else if (data.type === 'error') {
+      console.error('[App Rebalance] Solver error:', data.message);
+      alert('Errore nella riassegnazione: ' + data.message);
+      const btnR = document.getElementById('btn-rebalance');
+      if (btnR) {
+        btnR.disabled = false;
+        btnR.textContent = '⚖️ Riassegna turni';
+      }
+      state.worker = null;
+      worker.terminate();
+    }
+  };
+
+  worker.onerror = err => {
+    console.error('[App Rebalance] Worker error:', err.message, err);
+    alert('Errore Worker: ' + err.message);
+    const btnR = document.getElementById('btn-rebalance');
+    if (btnR) {
+      btnR.disabled = false;
+      btnR.textContent = '⚖️ Riassegna turni';
+    }
+    state.worker = null;
+  };
+
+  worker.postMessage({
+    type: 'rebalance',
+    config,
+    schedule: state.schedule,
+    timeBudget: 15,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Step 4 — Risultati
 // ---------------------------------------------------------------------------
 
@@ -1884,6 +1980,7 @@ function init() {
   // ---- Step 4 ----
   document.getElementById('btn-step4-back')?.addEventListener('click', () => goToStep(3));
   document.getElementById('btn-regenerate')?.addEventListener('click', regenerateTurni);
+  document.getElementById('btn-rebalance')?.addEventListener('click', rebalanceTurni);
   document.getElementById('btn-export-csv')?.addEventListener('click', exportCSV);
   document.getElementById('btn-save-config')?.addEventListener('click', saveConfig);
   document.getElementById('btn-print')?.addEventListener('click', () => window.print());
