@@ -102,7 +102,7 @@ function computeScore(schedule, ctx) {
   let hard = 0,
     soft = 0;
 
-  // Coverage — night overcoverage is penalised 3× harder so the solver
+  // Coverage — night overcoverage is penalized 3× harder so the solver
   // prefers to exceed on M/P/D positions rather than on night shifts.
   for (let d = 0; d < numDays; d++) {
     const cov = dayCoverage(schedule, d, numNurses);

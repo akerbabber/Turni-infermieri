@@ -685,7 +685,7 @@ describe('computeScore', () => {
     );
   });
 
-  it('should penalise night overcoverage 3× harder than morning overcoverage', () => {
+  it('should penalize night overcoverage 3× harder than morning overcoverage', () => {
     // Night overcoverage of 1 nurse should produce 3× more hard penalty than
     // the same amount of morning overcoverage (both exceed max by 1).
     const config = makeMinimalConfig({
@@ -706,7 +706,7 @@ describe('computeScore', () => {
     const schedM = Array.from({ length: 4 }, () => new Array(numDays).fill('R'));
     schedM[0] = new Array(numDays).fill('M');
     const scoreM = ctx.computeScore(schedM, bctx);
-    // Schedule where one nurse has repeating N-S-R-R pattern — exceeds maxCoverageN by 1 on night days
+    // Schedule where one nurse has a single N on day 0 — exceeds maxCoverageN by 1 on that day
     const schedN = Array.from({ length: 4 }, () => new Array(numDays).fill('R'));
     // Put a single N on day 0 only to isolate coverage penalty
     schedN[0][0] = 'N';
