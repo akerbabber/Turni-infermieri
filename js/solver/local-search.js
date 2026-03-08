@@ -134,13 +134,123 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
       }
     }
   }
-  return best;
+  return repairNightCoverage(best, ctx);
 }
 
 // Helper: record a cell change for undo
 function setCell(schedule, n, d, val, changes) {
   if (changes) changes.push({ n, d, old: schedule[n][d] });
   schedule[n][d] = val;
+}
+
+function repairNightCoverage(schedule, ctx, maxPasses) {
+  const { numDays, numNurses, minCovN, maxCovN } = ctx;
+  if (minCovN === maxCovN && minCovN === 0) return schedule;
+
+  let current = deepCopy(schedule);
+  let currentScore = computeScore(current, ctx);
+  const limit = Math.max(1, maxPasses || numDays);
+
+  for (let pass = 0; pass < limit; pass++) {
+    const currentPenalty = nightCoveragePenalty(current, ctx);
+    if (currentPenalty === 0) break;
+
+    const deficits = [];
+    const excesses = [];
+    for (let d = 0; d < numDays; d++) {
+      const covN = dayCoverage(current, d, numNurses).N;
+      if (covN < minCovN) deficits.push(d);
+      if (covN > maxCovN) excesses.push(d);
+    }
+    if (!deficits.length || !excesses.length) break;
+
+    let bestCandidate = null;
+    for (const deficitDay of deficits) {
+      const orderedExcesses = [...excesses].sort((a, b) => Math.abs(a - deficitDay) - Math.abs(b - deficitDay));
+      for (const excessDay of orderedExcesses) {
+        for (let n = 0; n < numNurses; n++) {
+          if (current[n][excessDay] !== 'N') continue;
+          const candidateSchedule = relocateNightBlock(current, ctx, n, excessDay, deficitDay);
+          if (!candidateSchedule) continue;
+
+          const candidatePenalty = nightCoveragePenalty(candidateSchedule, ctx);
+          if (candidatePenalty >= currentPenalty) continue;
+
+          const candidateScore = computeScore(candidateSchedule, ctx);
+          if (
+            !bestCandidate ||
+            candidateScore.total < bestCandidate.score.total ||
+            (candidateScore.total === bestCandidate.score.total && candidatePenalty < bestCandidate.penalty)
+          ) {
+            bestCandidate = {
+              schedule: candidateSchedule,
+              score: candidateScore,
+              penalty: candidatePenalty,
+            };
+          }
+        }
+      }
+    }
+
+    if (!bestCandidate || bestCandidate.score.total >= currentScore.total) break;
+    current = bestCandidate.schedule;
+    currentScore = bestCandidate.score;
+  }
+
+  return current;
+}
+
+function nightCoveragePenalty(schedule, ctx) {
+  const { numDays, numNurses, minCovN, maxCovN } = ctx;
+  let penalty = 0;
+  for (let d = 0; d < numDays; d++) {
+    const covN = dayCoverage(schedule, d, numNurses).N;
+    if (covN < minCovN) penalty += minCovN - covN;
+    if (covN > maxCovN) penalty += (covN - maxCovN) * 3;
+  }
+  return penalty;
+}
+
+function relocateNightBlock(schedule, ctx, nurseIdx, oldStart, newStart) {
+  const { numDays, pinned, nurseProps } = ctx;
+  if (oldStart === newStart || schedule[nurseIdx][oldStart] !== 'N' || newStart < 0 || newStart >= numDays) return null;
+
+  const noDiurni = nurseProps[nurseIdx].noDiurni;
+  const oldDays = getNightBlockDays(oldStart, noDiurni, numDays);
+  const oldDaySet = new Set(oldDays);
+  const newDays = getNightBlockDays(newStart, noDiurni, numDays);
+  for (const d of oldDays) {
+    if (pinned[nurseIdx][d]) return null;
+  }
+
+  const candidate = deepCopy(schedule);
+  for (const d of oldDays) candidate[nurseIdx][d] = 'R';
+
+  for (const d of newDays) {
+    if (pinned[nurseIdx][d] && !oldDaySet.has(d)) return null;
+    if (!oldDaySet.has(d)) {
+      const existing = candidate[nurseIdx][d];
+      if (existing !== null && existing !== 'R') return null;
+    }
+  }
+
+  placeNightBlock(candidate, nurseIdx, newStart, noDiurni, numDays);
+  return candidate;
+}
+
+function getNightBlockDays(start, noDiurni, numDays) {
+  const days = [start];
+  if (start + 1 < numDays) days.push(start + 1);
+  if (start + 2 < numDays) days.push(start + 2);
+  if (!noDiurni && start + 3 < numDays) days.push(start + 3);
+  return days;
+}
+
+function placeNightBlock(schedule, nurseIdx, start, noDiurni, numDays) {
+  schedule[nurseIdx][start] = 'N';
+  if (start + 1 < numDays) schedule[nurseIdx][start + 1] = 'S';
+  if (start + 2 < numDays) schedule[nurseIdx][start + 2] = 'R';
+  if (!noDiurni && start + 3 < numDays) schedule[nurseIdx][start + 3] = 'R';
 }
 
 function trySwapMove(schedule, ctx, changes) {
