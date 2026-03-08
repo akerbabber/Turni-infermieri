@@ -254,6 +254,30 @@
             <div id="nurse-list" class="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1"></div>
           </div>
 
+          <div class="rule-card mb-6 no-print">
+            <h3 class="font-semibold mb-2 text-base">🧾 Configurazione CSV</h3>
+            <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
+              Esporta o importa infermieri e vincoli in un unico file CSV compatibile con Excel.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                id="btn-export-config-csv"
+                class="btn px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow transition-colors"
+                title="Esporta infermieri e vincoli in CSV"
+              >
+                📤 Esporta config CSV
+              </button>
+              <button
+                id="btn-load-config-csv"
+                class="btn px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold rounded-lg shadow transition-colors"
+                title="Importa infermieri e vincoli da CSV"
+              >
+                📥 Importa config CSV
+              </button>
+              <input id="inp-load-config-csv-file" type="file" accept=".csv,text/csv" class="hidden" />
+            </div>
+          </div>
+
           <!-- Next button -->
           <div class="flex justify-end no-print">
             <button

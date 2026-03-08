@@ -5,7 +5,7 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "test": "node --test test/solver.test.js",
+    "test": "node --test test/solver.test.js test/app-config-csv.test.js",
     "lint": "eslint js/",
     "lint:fix": "eslint js/ --fix",
     "format": "prettier --write 'js/**/*.js' 'css/**/*.css' '*.html'",
