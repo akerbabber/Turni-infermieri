@@ -1373,7 +1373,7 @@ describe('solver diagnostics', () => {
     assert.match(diagnostic.detail, /GLP_NOFEAS/);
   });
 
-  it('should return fallback diagnostics when explicit HiGHS loading fails', async () => {
+  it('should use fallback solver and include diagnostic when HiGHS loading fails', async () => {
     vm.runInContext(
       `
       loadHiGHS = async function () {
@@ -1412,13 +1412,18 @@ describe('solver diagnostics', () => {
       ctx
     );
 
-    const config = makeMinimalConfig({ numNurses: 1, rules: { minCoverageM: 0, maxCoverageM: 0, minCoverageP: 0, maxCoverageP: 0, minCoverageN: 0, maxCoverageN: 0 } });
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      rules: { minCoverageM: 0, maxCoverageM: 0, minCoverageP: 0, maxCoverageP: 0, minCoverageN: 0, maxCoverageN: 0 },
+    });
     const result = await ctx.solve(config, 1, 15, false, 'milp');
     const diagnostics = toPlain(result.diagnostics);
 
     assert.equal(result.solutions.length, 1);
     assert.equal(result.solutions[0].solverMethod, 'fallback');
     assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non caricato: errore rete/CDN'));
-    assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback'));
+    assert.ok(
+      diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback')
+    );
   });
 });

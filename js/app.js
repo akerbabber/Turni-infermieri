@@ -519,6 +519,13 @@ function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/**
+ * Normalize diagnostics received from the worker so the UI can render them
+ * consistently. Duplicate entries are removed using a composite key built from
+ * source, phase, code, userMessage, and detail.
+ * @param {object[]} diagnostics
+ * @returns {object[]}
+ */
 function normalizeDiagnostics(diagnostics) {
   if (!Array.isArray(diagnostics)) return [];
   const seen = new Set();
@@ -603,6 +610,8 @@ function renderDiagnosticsPanel(elementId, diagnostics) {
 }
 
 function updateSolverProgress(percent, message) {
+  // Progress state is the source of truth so the same message can be re-rendered
+  // after step changes or late worker updates, even if the DOM is not visible yet.
   state.solverProgress = { percent: percent || 0, message: message || '' };
   const bar = document.getElementById('progress-bar');
   const msg = document.getElementById('progress-msg');
@@ -622,7 +631,9 @@ function resetSolverFeedback() {
 }
 
 function applySolveResult(data) {
-  console.log(`[App] Applicazione risultato solver: ${data.solutions?.length || 0} soluzioni, metodo="${data.solverMethod}"`);
+  console.log(
+    `[App] Applicazione risultato solver: ${data.solutions?.length || 0} soluzioni, metodo="${data.solverMethod}"`
+  );
   state.solutions = data.solutions || [];
   state.selectedSolution = 0;
   state.solverMethod = data.solverMethod || null;
@@ -639,6 +650,14 @@ function applySolveResult(data) {
   }
 }
 
+/**
+ * Build a structured diagnostic array for a Worker runtime error in the main
+ * thread UI. `actionLabel` should be a user-facing phrase such as
+ * "la generazione" or "la rigenerazione".
+ * @param {ErrorEvent} err
+ * @param {string} actionLabel
+ * @returns {object[]}
+ */
 function buildWorkerRuntimeDiagnostic(err, actionLabel) {
   return [
     {

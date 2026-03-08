@@ -50,6 +50,18 @@ let _highsLoadState = null;
 let _glpkLoadDiag = '';
 let _glpkLoadState = null;
 
+/**
+ * Build a structured diagnostic entry that can be propagated from the worker
+ * to the main thread and rendered in the UI.
+ * @param {string} source - Diagnostic origin ('highs', 'glpk', 'solver', 'worker').
+ * @param {string} phase - Pipeline stage ('script_load', 'wasm_init', 'solve', etc.).
+ * @param {string} code - Stable machine-readable code for the failure/warning type.
+ * @param {string} severity - 'info' | 'warning' | 'error'.
+ * @param {string} userMessage - User-facing message shown in the UI.
+ * @param {string} detail - Debug-oriented detail for logs and diagnostic panels.
+ * @param {object} extra - Optional extra metadata merged into the diagnostic object.
+ * @returns {object}
+ */
 function makeDiagnostic(source, phase, code, severity, userMessage, detail, extra) {
   return {
     source,
@@ -69,10 +81,18 @@ function makeSolverError(message, diagnostics, code) {
   return err;
 }
 
+/**
+ * Persist the latest load diagnostic for a solver, while logging the same entry
+ * with a consistent prefix for debugging. Valid targets are 'highs' and 'glpk'.
+ * @param {string} target
+ * @param {object} diagnostic
+ * @returns {object|null}
+ */
 function rememberDiagnostic(target, diagnostic) {
   if (!diagnostic) return null;
   const summary = diagnostic.detail ? `${diagnostic.userMessage} — ${diagnostic.detail}` : diagnostic.userMessage;
-  const logger = diagnostic.severity === 'error' ? console.error : diagnostic.severity === 'warning' ? console.warn : console.log;
+  const logger =
+    diagnostic.severity === 'error' ? console.error : diagnostic.severity === 'warning' ? console.warn : console.log;
   logger(`[${diagnostic.source.toUpperCase()}] ${summary}`);
   if (target === 'highs') {
     _highsLoadState = diagnostic;
@@ -178,7 +198,14 @@ function _createHighsInstance() {
       const msg = `Instance creation failed: ${e.message || e}`;
       rememberDiagnostic(
         'highs',
-        makeDiagnostic('highs', 'wasm_init', 'wasm_init_failed', 'error', 'HiGHS inizializzato ma WASM non disponibile', msg)
+        makeDiagnostic(
+          'highs',
+          'wasm_init',
+          'wasm_init_failed',
+          'error',
+          'HiGHS inizializzato ma WASM non disponibile',
+          msg
+        )
       );
       resolve(null);
     }
@@ -243,6 +270,12 @@ function loadHiGHS() {
 let _lastHighsStatus = ''; // last HiGHS solver status for diagnostics
 let _lastGLPKStatusName = '';
 
+/**
+ * Classify a HiGHS solver status into a user-friendly diagnostic object.
+ * @param {string} status
+ * @param {number} elapsedSec
+ * @returns {object}
+ */
 function buildHighsSolveDiagnostic(status, elapsedSec) {
   const normalizedStatus = String(status || '').toLowerCase();
   const infeasible = normalizedStatus.includes('infeasible');
@@ -260,6 +293,12 @@ function buildHighsSolveDiagnostic(status, elapsedSec) {
   );
 }
 
+/**
+ * Classify a GLPK solver status into a user-friendly diagnostic object.
+ * @param {string} statusName
+ * @param {number} elapsedSec
+ * @returns {object}
+ */
 function buildGLPKSolveDiagnostic(statusName, elapsedSec) {
   const normalizedStatus = String(statusName || '').toLowerCase();
   const infeasible = normalizedStatus.includes('infeasible') || normalizedStatus.includes('nofeas');
@@ -428,7 +467,14 @@ function loadGLPK() {
     } catch (e) {
       rememberDiagnostic(
         'glpk',
-        makeDiagnostic('glpk', 'script_load', 'cdn_load_failed', 'error', 'GLPK non caricato: errore rete/CDN', `Load failed with exception: ${e.message || e}`)
+        makeDiagnostic(
+          'glpk',
+          'script_load',
+          'cdn_load_failed',
+          'error',
+          'GLPK non caricato: errore rete/CDN',
+          `Load failed with exception: ${e.message || e}`
+        )
       );
       resolve(null);
     }
@@ -559,13 +605,26 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
   const ctx = buildContext(config);
   const solutions = [];
   const diagnostics = [];
+  const diagnosticKeys = new Set();
+
+  function diagnosticKey(diagnostic) {
+    return [diagnostic.source, diagnostic.phase, diagnostic.code, diagnostic.userMessage, diagnostic.detail].join('|');
+  }
+
+  function buildFallbackReason(attempted) {
+    if (attempted.length === 1) return `${attempted[0]} fallito, uso euristica come fallback`;
+    if (attempted.length > 1) return `${attempted.join(' e ')} falliti, uso euristica come fallback`;
+    if (solverChoice === 'milp') return 'HiGHS non disponibile, uso euristica come fallback';
+    if (solverChoice === 'glpk') return 'GLPK non disponibile, uso euristica come fallback';
+    return 'Solver MILP non disponibili, uso euristica come fallback';
+  }
 
   function addDiagnostic(diagnostic) {
     if (!diagnostic || diagnostic.severity === 'info') return diagnostic;
-    const key = [diagnostic.source, diagnostic.phase, diagnostic.code, diagnostic.userMessage, diagnostic.detail].join('|');
-    if (!diagnostics.some(d => [d.source, d.phase, d.code, d.userMessage, d.detail].join('|') === key)) {
-      diagnostics.push(diagnostic);
-    }
+    const key = diagnosticKey(diagnostic);
+    if (diagnosticKeys.has(key)) return diagnostic;
+    diagnosticKeys.add(key);
+    diagnostics.push(diagnostic);
     return diagnostic;
   }
 
@@ -596,7 +655,14 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       console.error('[Solver] HiGHS loading threw exception:', loadErr.message || loadErr);
       addDiagnostic(
         loadErr.diagnostics?.[0] ||
-          makeDiagnostic('highs', 'script_load', 'load_error', 'error', 'HiGHS non disponibile', loadErr.message || String(loadErr))
+          makeDiagnostic(
+            'highs',
+            'script_load',
+            'load_error',
+            'error',
+            'HiGHS non disponibile',
+            loadErr.message || String(loadErr)
+          )
       );
       progress(2, _highsLoadState?.userMessage || `Errore caricamento HiGHS: ${loadErr.message || loadErr}`);
       milpAvailable = false;
@@ -618,7 +684,14 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       console.error('[Solver] GLPK loading threw exception:', loadErr.message || loadErr);
       addDiagnostic(
         loadErr.diagnostics?.[0] ||
-          makeDiagnostic('glpk', 'script_load', 'load_error', 'error', 'GLPK non disponibile', loadErr.message || String(loadErr))
+          makeDiagnostic(
+            'glpk',
+            'script_load',
+            'load_error',
+            'error',
+            'GLPK non disponibile',
+            loadErr.message || String(loadErr)
+          )
       );
       glpkAvailable = false;
     }
@@ -807,16 +880,7 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
         }
         const attempted = [useHiGHS && 'HiGHS', useGLPK && 'GLPK'].filter(Boolean);
         const label = attempted.length > 0 ? `Fallback euristica (${attempted.join('+')})` : 'Euristica';
-        const fallbackReason =
-          attempted.length === 1
-            ? `${attempted[0]} fallito, uso euristica come fallback`
-            : attempted.length > 1
-              ? `${attempted.join(' e ')} falliti, uso euristica come fallback`
-              : solverChoice === 'milp'
-                ? 'HiGHS non disponibile, uso euristica come fallback'
-                : solverChoice === 'glpk'
-                  ? 'GLPK non disponibile, uso euristica come fallback'
-                  : 'Solver MILP non disponibili, uso euristica come fallback';
+        const fallbackReason = buildFallbackReason(attempted);
         addDiagnostic(
           makeDiagnostic(
             'solver',
@@ -824,7 +888,12 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
             'fallback_used',
             'warning',
             fallbackReason,
-            [highsFailure?.userMessage, glpkFailure?.userMessage, _highsLoadState?.userMessage, _glpkLoadState?.userMessage]
+            [
+              highsFailure?.userMessage,
+              glpkFailure?.userMessage,
+              _highsLoadState?.userMessage,
+              _glpkLoadState?.userMessage,
+            ]
               .filter(Boolean)
               .join(' · ')
           )

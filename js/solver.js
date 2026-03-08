@@ -30,7 +30,15 @@ function progress(percent, message) {
   self.postMessage({ type: 'progress', percent, message });
 }
 
-function normalizeWorkerError(err, fallbackDiagnostics) {
+/**
+ * Convert a thrown worker error into a serializable payload and preserve any
+ * structured diagnostics that were already attached to it. `fallbackDiagnostics`
+ * is used when the thrown error has no embedded diagnostics of its own.
+ * @param {Error} err
+ * @param {object[]} fallbackDiagnostics
+ * @returns {{name: string, code: string, message: string, diagnostics: object[]}}
+ */
+function serializeError(err, fallbackDiagnostics) {
   const diagnostics = Array.isArray(err?.diagnostics)
     ? err.diagnostics
     : Array.isArray(fallbackDiagnostics)
@@ -97,7 +105,7 @@ self.onmessage = async function (e) {
       });
     } catch (err) {
       console.error('[Worker] Solve failed with uncaught exception:', err.message, err.stack);
-      const error = normalizeWorkerError(err);
+      const error = serializeError(err);
       self.postMessage({ type: 'error', message: error.message, error, diagnostics: error.diagnostics });
     }
   } else if (e.data.type === 'rebalance') {
@@ -138,7 +146,7 @@ self.onmessage = async function (e) {
           detail: err.message || String(err),
         },
       ];
-      const error = normalizeWorkerError(err, diagnostics);
+      const error = serializeError(err, diagnostics);
       self.postMessage({ type: 'error', message: error.message, error, diagnostics: error.diagnostics });
     }
   }
