@@ -104,6 +104,12 @@ function construct(ctx) {
     return false;
   }
 
+  function shiftCoverageAboveMin(cov, shift) {
+    if (shift === 'M') return cov.M > minCovM;
+    if (shift === 'P') return cov.P > minCovP;
+    return false;
+  }
+
   function canNight(n, d) {
     if (schedule[n][d] !== null || nc[n] >= maxNights) return false;
     const noDiurni = nurseProps[n].noDiurni;
@@ -183,7 +189,7 @@ function construct(ctx) {
         .sort((a, b) => {
           // Primary: prefer nurses with fewer nights to keep distribution fair
           if (nc[a] !== nc[b]) return nc[a] - nc[b];
-          // Primary: prefer nurses whose offset matches their cycle
+          // Secondary: prefer nurses whose offset matches their cycle
           const aCycle = nurseCycleLen.get(a);
           const bCycle = nurseCycleLen.get(b);
           const aMatch = d % aCycle === nurseStartOffset.get(a) ? 0 : 1;
@@ -265,9 +271,9 @@ function construct(ctx) {
   }
 
   // 2c — Fill nights to target per nurse, prioritizing days with less coverage
-  let addedTargetNight = true;
-  while (addedTargetNight) {
-    addedTargetNight = false;
+  let madeNightProgress = true;
+  while (madeNightProgress) {
+    madeNightProgress = false;
     const orderedNightEligible = shuffle([...nightEligible]).sort((a, b) => {
       const aGap = Math.max(0, targetNights - nc[a]);
       const bGap = Math.max(0, targetNights - nc[b]);
@@ -277,7 +283,9 @@ function construct(ctx) {
     for (const n of orderedNightEligible) {
       if (nc[n] >= targetNights) continue;
       const days = shuffle(
-        Array.from({ length: numDays }, (_, i) => i).filter(d => canNight(n, d) && nightStarts[d] < desiredNightLoads[d])
+        Array.from({ length: numDays }, (_, i) => i).filter(
+          d => canNight(n, d) && nightStarts[d] < desiredNightLoads[d]
+        )
       );
       days.sort((a, b) => {
         const aGap = desiredNightLoads[a] - (nightStarts[a] || 0);
@@ -290,7 +298,7 @@ function construct(ctx) {
         if (!canNight(n, d)) continue;
         placeNight(n, d);
         nightStarts[d]++;
-        addedTargetNight = true;
+        madeNightProgress = true;
         break;
       }
     }
@@ -601,8 +609,8 @@ function construct(ctx) {
       if (schedule[n][r2] !== 'M' && schedule[n][r2] !== 'P') continue;
       const cov1 = dayCoverage(schedule, r1, numNurses);
       const cov2 = dayCoverage(schedule, r2, numNurses);
-      if ((schedule[n][r1] === 'M' ? cov1.M : cov1.P) <= (schedule[n][r1] === 'M' ? minCovM : minCovP)) continue;
-      if ((schedule[n][r2] === 'M' ? cov2.M : cov2.P) <= (schedule[n][r2] === 'M' ? minCovM : minCovP)) continue;
+      if (!shiftCoverageAboveMin(cov1, schedule[n][r1])) continue;
+      if (!shiftCoverageAboveMin(cov2, schedule[n][r2])) continue;
       const prev = r1 > 0 ? schedule[n][r1 - 1] : null;
       const next = r2 < numDays - 1 ? schedule[n][r2 + 1] : null;
       if (!transitionOk(prev, 'R', ctx, schedule, n, r1)) continue;
