@@ -11,6 +11,10 @@
 
 function buildContext(config) {
   const { year, month, nurses, rules, hourDeltas, previousMonthTail } = config;
+
+  // Apply fascia oraria before any hour-dependent computation
+  applyFasciaOraria(rules.fasciaOraria || 'standard');
+
   const numDays = daysInMonth(year, month);
   const numNurses = nurses.length;
 

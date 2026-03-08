@@ -384,6 +384,43 @@
             </div>
           </div>
 
+          <!-- Fascia oraria -->
+          <div class="rule-card mb-4">
+            <h3 class="font-semibold mb-4 text-base">🕐 Fascia oraria</h3>
+            <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
+              Seleziona la durata dei turni: incide su ore M, P, N e assenze (F, MA, L104, PR, MT)
+            </p>
+            <div class="space-y-2">
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="fascia-oraria"
+                  value="standard"
+                  checked
+                  class="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <span class="text-sm font-medium">Standard (6h12 / 12h12)</span>
+                  <p class="text-xs text-gray-500 dark:text-slate-400">M/P = 6,12h · D/N = 12,12h · Assenze = 6,12h</p>
+                </div>
+              </label>
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="fascia-oraria"
+                  value="7-10"
+                  class="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <span class="text-sm font-medium">Estesa (7h12 / 10h12)</span>
+                  <p class="text-xs text-gray-500 dark:text-slate-400">
+                    M/P = 7,12h · D = 12,12h · N = 10,12h · Assenze = 7,12h
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
           <!-- Weekly hours -->
           <div class="rule-card mb-4">
             <h3 class="font-semibold mb-4 text-base">⏱️ Ore settimanali</h3>

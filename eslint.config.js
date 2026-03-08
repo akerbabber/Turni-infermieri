@@ -10,6 +10,9 @@ const globals = require('globals');
 const solverSharedGlobals = {
   // constants.js
   SHIFT_HOURS: 'writable',
+  FASCIA_PRESETS: 'writable',
+  FASCIA_SHIFT_START: 'writable',
+  FASCIA_SHIFT_END: 'writable',
   DEBUG: 'writable',
   EQUITY_THRESHOLD_HOURS: 'writable',
   HOUR_EQUITY_MILP_WEIGHT: 'writable',
@@ -31,6 +34,7 @@ const solverSharedGlobals = {
   daysInMonth: 'writable',
   gapHours: 'writable',
   deepCopy: 'writable',
+  applyFasciaOraria: 'writable',
   // context.js
   buildContext: 'writable',
   getAbsenceShift: 'writable',

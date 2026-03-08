@@ -90,6 +90,9 @@ function loadSolver() {
          SHIFT_END: SHIFT_END,
          BASE_FORBIDDEN_NEXT: BASE_FORBIDDEN_NEXT,
          ABSENCE_TAG_TO_SHIFT: ABSENCE_TAG_TO_SHIFT,
+         FASCIA_PRESETS: FASCIA_PRESETS,
+         FASCIA_SHIFT_START: FASCIA_SHIFT_START,
+         FASCIA_SHIFT_END: FASCIA_SHIFT_END,
        };
        return lookup[name];
      }`,
@@ -367,6 +370,78 @@ describe('SHIFT_HOURS', () => {
 
   it('should have F = 6.12', () => {
     assert.equal(SHIFT_HOURS.F, 6.12);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7b. applyFasciaOraria
+// ---------------------------------------------------------------------------
+describe('applyFasciaOraria', () => {
+  it('should switch SHIFT_HOURS to 7-10 preset', () => {
+    ctx.applyFasciaOraria('7-10');
+    const hrs = toPlain(ctx._getConst('SHIFT_HOURS'));
+    assert.equal(hrs.M, 7.2);
+    assert.equal(hrs.P, 7.2);
+    assert.equal(hrs.D, 12.2);
+    assert.equal(hrs.N, 10.2);
+    assert.equal(hrs.F, 7.12);
+    assert.equal(hrs.MA, 7.12);
+    assert.equal(hrs.L104, 7.12);
+    assert.equal(hrs.PR, 7.12);
+    assert.equal(hrs.MT, 7.12);
+    assert.equal(hrs.S, 0);
+    assert.equal(hrs.R, 0);
+  });
+
+  it('should switch SHIFT_START/END to 7-10 preset', () => {
+    ctx.applyFasciaOraria('7-10');
+    const start = toPlain(ctx._getConst('SHIFT_START'));
+    const end = toPlain(ctx._getConst('SHIFT_END'));
+    assert.equal(start.M, 7);
+    assert.equal(start.P, 14);
+    assert.equal(start.N, 21);
+    assert.equal(end.M, 14.2);
+    assert.equal(end.P, 21.2);
+    assert.equal(end.N, 7.2);
+  });
+
+  it('should revert to standard when called with "standard"', () => {
+    ctx.applyFasciaOraria('7-10');
+    ctx.applyFasciaOraria('standard');
+    const hrs = toPlain(ctx._getConst('SHIFT_HOURS'));
+    assert.equal(hrs.M, 6.2);
+    assert.equal(hrs.P, 6.2);
+    assert.equal(hrs.N, 12.2);
+    assert.equal(hrs.F, 6.12);
+    const start = toPlain(ctx._getConst('SHIFT_START'));
+    assert.equal(start.M, 8);
+    assert.equal(start.N, 20);
+  });
+
+  it('should default to standard for unknown fascia', () => {
+    ctx.applyFasciaOraria('unknown');
+    const hrs = toPlain(ctx._getConst('SHIFT_HOURS'));
+    assert.equal(hrs.M, 6.2);
+    assert.equal(hrs.N, 12.2);
+  });
+
+  it('should affect nurseHours calculation after switching fascia', () => {
+    ctx.applyFasciaOraria('7-10');
+    // M=7.2, P=7.2 in 7-10 fascia
+    const schedule = [['M', 'P', 'R']];
+    const hours = ctx.nurseHours(schedule, 0, 3);
+    assert.ok(Math.abs(hours - 14.4) < 0.001);
+    // Reset to standard
+    ctx.applyFasciaOraria('standard');
+  });
+
+  it('should affect gapHours calculation after switching fascia', () => {
+    ctx.applyFasciaOraria('7-10');
+    // P ends at 21.2, M starts at 7 => gap = 24 - 21.2 + 7 = 9.8
+    const gap = ctx.gapHours('P', 'M');
+    assert.ok(Math.abs(gap - 9.8) < 0.001);
+    // Reset to standard
+    ctx.applyFasciaOraria('standard');
   });
 });
 
