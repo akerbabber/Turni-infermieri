@@ -775,6 +775,36 @@ describe('computeScore', () => {
       `Expected no_notti imbalance penalty, got ${scoreImbalanced.soft} vs ${scoreBalanced.soft}`
     );
   });
+
+  it('should penalize an extra optional rest after N-S-R for no_diurni nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['no_diurni'] },
+      },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 1,
+        minCoverageP: 0,
+        maxCoverageP: 1,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        targetNights: 0,
+        maxNights: 4,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 4;
+    const withExtraRest = [['N', 'S', 'R', 'R']];
+    const withRecoveryShift = [['N', 'S', 'R', 'M']];
+    const restScore = ctx.computeScore(withExtraRest, bctx);
+    const recoveryScore = ctx.computeScore(withRecoveryShift, bctx);
+    assert.ok(
+      restScore.soft > recoveryScore.soft,
+      `Expected extra rest to be penalized, got ${restScore.soft} vs ${recoveryScore.soft}`
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1288,6 +1318,56 @@ describe('localSearch night coverage repair', () => {
       .filter(v => v.type === 'coverage_N' || v.type === 'coverage_N_max');
     assert.deepEqual(toPlain(afterViolations), []);
     assert.ok(ctx.computeScore(improved, bctx).total < ctx.computeScore(schedule, bctx).total);
+  });
+});
+
+describe('solve fallback path', () => {
+  it('should reach zero violations on the real fallback solve path without leaving extra no_diurni recovery rests', async () => {
+    const config = makeMinimalConfig({
+      numNurses: 8,
+      nurseOverrides: {
+        0: { tags: ['no_diurni'] },
+        1: { tags: ['no_diurni'] },
+        2: { tags: ['no_notti'] },
+      },
+      rules: {
+        minCoverageM: 2,
+        maxCoverageM: 3,
+        minCoverageP: 2,
+        maxCoverageP: 3,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 1,
+        maxCoverageN: 2,
+        targetNights: 3,
+        maxNights: 6,
+        minRPerWeek: 1,
+      },
+    });
+    const origRandom = Math.random;
+    let state = 1;
+    Math.random = () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 4294967296;
+    };
+    try {
+      const result = await ctx.solve(config, 1, 3, false, 'fallback');
+      assert.equal(result.solutions.length, 1);
+      const solution = result.solutions[0];
+      assert.equal(solution.violations.length, 0, `Fallback solver should reach zero violations, got ${solution.violations.length}`);
+      for (const nurseIdx of [0, 1]) {
+        const row = solution.schedule[nurseIdx];
+        for (let d = 3; d < row.length; d++) {
+          assert.notDeepEqual(
+            row.slice(d - 3, d + 1),
+            ['N', 'S', 'R', 'R'],
+            `no_diurni nurse ${nurseIdx} should resume work after N-S-R, got ${row.slice(d - 3, d + 1).join('-')}`
+          );
+        }
+      }
+    } finally {
+      Math.random = origRandom;
+    }
   });
 });
 
