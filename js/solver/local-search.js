@@ -323,8 +323,19 @@ function canRepairShiftChange(schedule, ctx, n, d, nextShift) {
 }
 
 function repairDayCoverage(schedule, ctx) {
-  const { numDays, numNurses, minCovM, maxCovM, minCovP, maxCovP, pinned, nurseProps, minRPerWeek, weekDaysList, weekOf } =
-    ctx;
+  const {
+    numDays,
+    numNurses,
+    minCovM,
+    maxCovM,
+    minCovP,
+    maxCovP,
+    pinned,
+    nurseProps,
+    minRPerWeek,
+    weekDaysList,
+    weekOf,
+  } = ctx;
   const repaired = deepCopy(schedule);
 
   function hasSpareWeeklyRest(n, d) {
@@ -511,7 +522,9 @@ function repairWeeklyRestDeficits(schedule, ctx) {
             const score = computeScore(candidate, ctx);
             if (
               (score.hard < currentScore.hard || score.total < currentScore.total) &&
-              (!best || score.hard < best.score.hard || (score.hard === best.score.hard && score.total < best.score.total))
+              (!best ||
+                score.hard < best.score.hard ||
+                (score.hard === best.score.hard && score.total < best.score.total))
             ) {
               best = { schedule: candidate, score };
             }
@@ -523,7 +536,10 @@ function repairWeeklyRestDeficits(schedule, ctx) {
             if (other === n || repaired[other][d] !== 'R' || pinned[other][d]) continue;
             if (!hasSpareWeeklyRest(other, weekDays)) continue;
             if (isMPCycleLimitedNurse(nurseProps[other]) || nurseProps[other].noDiurni) continue;
-            if (!canRepairShiftChange(repaired, ctx, n, d, 'R') || !canRepairShiftChange(repaired, ctx, other, d, shift))
+            if (
+              !canRepairShiftChange(repaired, ctx, n, d, 'R') ||
+              !canRepairShiftChange(repaired, ctx, other, d, shift)
+            )
               continue;
             const candidate = deepCopy(repaired);
             candidate[n][d] = 'R';
@@ -531,7 +547,9 @@ function repairWeeklyRestDeficits(schedule, ctx) {
             const score = computeScore(candidate, ctx);
             if (
               (score.hard < currentScore.hard || score.total < currentScore.total) &&
-              (!best || score.hard < best.score.hard || (score.hard === best.score.hard && score.total < best.score.total))
+              (!best ||
+                score.hard < best.score.hard ||
+                (score.hard === best.score.hard && score.total < best.score.total))
             ) {
               best = { schedule: candidate, score };
             }
