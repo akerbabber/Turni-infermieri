@@ -6,7 +6,7 @@
 
 'use strict';
 
-/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, isSplitRestDay, getRestPromotionPriority */
+/* global computeScore, countWeekRest, dayCoverage, deepCopy, getRestPromotionPriority, isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
@@ -469,11 +469,12 @@ function repairSplitRestDays(schedule, ctx) {
   }
 
   function candidateShiftOrder(n, d) {
-    const ordered = [];
     const prev = d > 0 ? repaired[n][d - 1] : null;
     const next = d < numDays - 1 ? repaired[n][d + 1] : null;
-    for (const shift of [prev, next, 'M', 'P', 'D']) {
-      if ((shift === 'M' || shift === 'P' || shift === 'D') && !ordered.includes(shift)) ordered.push(shift);
+    const ordered = [];
+    const candidates = [prev, next, 'M', 'P', 'D'].filter(shift => shift === 'M' || shift === 'P' || shift === 'D');
+    for (const shift of candidates) {
+      if (!ordered.includes(shift)) ordered.push(shift);
     }
     return ordered;
   }

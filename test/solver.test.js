@@ -794,7 +794,7 @@ describe('computeScore', () => {
     );
   });
 
-  it('should prefer clustering an extra rest after a night instead of splitting it between work shifts', () => {
+  it('should prefer a post-night extra rest over a split M-R-P-N work stretch', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
       nurseOverrides: {
@@ -1184,9 +1184,10 @@ describe('construct', () => {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
       const row = schedule[0];
-      const hasClusteredRest = Array.from({ length: bctx.numDays - 3 }, (_, d) =>
-        row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R'
-      ).some(Boolean);
+      const hasClusteredRest = Array.from(
+        { length: bctx.numDays - 3 },
+        (_, d) => row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R'
+      ).some(match => match);
       assert.equal(hasClusteredRest, true, `Expected at least one N-S-R-R cluster, got ${row.join('-')}`);
     } finally {
       Math.random = origRandom;

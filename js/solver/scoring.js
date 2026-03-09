@@ -72,8 +72,16 @@ function isWorkShift(shift) {
   return shift === 'M' || shift === 'P' || shift === 'D' || shift === 'N';
 }
 
+function isDRDNBridge(schedule, ctx, nurseIdx, dayIdx) {
+  return (
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'D' &&
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx + 1) === 'D' &&
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx + 2) === 'N'
+  );
+}
+
 function isSplitRestDay(schedule, ctx, nurseIdx, dayIdx) {
-  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
+  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0 || dayIdx >= ctx.numDays) return false;
   if (ctx.pinned && ctx.pinned[nurseIdx] && ctx.pinned[nurseIdx][dayIdx]) return false;
   if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
   if (isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx)) return false;
@@ -84,7 +92,7 @@ function isSplitRestDay(schedule, ctx, nurseIdx, dayIdx) {
   if (!isWorkShift(prev) || !isWorkShift(next)) return false;
 
   // Keep the D-R-D-N bridge available when diurni need to stay separated before a night.
-  if (prev === 'D' && next === 'D' && getShiftAt(schedule, ctx, nurseIdx, dayIdx + 2) === 'N') return false;
+  if (isDRDNBridge(schedule, ctx, nurseIdx, dayIdx)) return false;
 
   return true;
 }
