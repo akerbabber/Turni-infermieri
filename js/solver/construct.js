@@ -15,7 +15,7 @@
 
 'use strict';
 
-/* global MP_CYCLE_PATTERNS, isMPCycleLimitedNurse, isMandatoryNightRestDay */
+/* global MP_CYCLE_PATTERNS, isMPCycleLimitedNurse, isMandatoryNightRestDay, getRestPromotionPriority */
 
 // ---------------------------------------------------------------------------
 // Construction heuristic (one attempt)
@@ -129,8 +129,8 @@ function construct(ctx) {
     const candidates = shuffle(Array.from({ length: numNurses }, (_, i) => i))
       .filter(n => canPromoteRestToShift(n, d, shiftType))
       .sort((a, b) => {
-        const aPriority = nurseProps[a].noDiurni ? 0 : nurseProps[a].mattineEPomeriggi ? 1 : 2;
-        const bPriority = nurseProps[b].noDiurni ? 0 : nurseProps[b].mattineEPomeriggi ? 1 : 2;
+        const aPriority = getRestPromotionPriority(nurseProps[a]);
+        const bPriority = getRestPromotionPriority(nurseProps[b]);
         if (aPriority !== bPriority) return aPriority - bPriority;
         const aMp = countMPForNurse(a);
         const bMp = countMPForNurse(b);
@@ -723,7 +723,7 @@ function construct(ctx) {
     }
   }
 
-  // Phase 4.9 — Repair residual M/P coverage deficits using optional rest days.
+  // Post-construction M/P repair — cover residual deficits using optional rest days.
   for (let d = 0; d < numDays; d++) {
     let cov = dayCoverage(schedule, d, numNurses);
     while (cov.M < minCovM || cov.P < minCovP) {

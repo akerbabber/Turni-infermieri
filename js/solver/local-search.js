@@ -6,7 +6,7 @@
 
 'use strict';
 
-/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, isNoDiurniRecoveryDay */
+/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, getRestPromotionPriority */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
@@ -296,8 +296,8 @@ function repairDayCoverage(schedule, ctx) {
     const candidates = shuffle(Array.from({ length: numNurses }, (_, i) => i))
       .filter(n => canPromoteRest(n, d, shiftType))
       .sort((a, b) => {
-        const aPriority = nurseProps[a].noDiurni ? 0 : nurseProps[a].mattineEPomeriggi ? 1 : 2;
-        const bPriority = nurseProps[b].noDiurni ? 0 : nurseProps[b].mattineEPomeriggi ? 1 : 2;
+        const aPriority = getRestPromotionPriority(nurseProps[a]);
+        const bPriority = getRestPromotionPriority(nurseProps[b]);
         if (aPriority !== bPriority) return aPriority - bPriority;
         const aMp = countMP(a);
         const bMp = countMP(b);
@@ -346,8 +346,8 @@ function trySwapMove(schedule, ctx, changes) {
   if (s1 === s2) return false;
   if (s1 === 'R' && isMandatoryNightRestDay(schedule, ctx, n1, d)) return false;
   if (s2 === 'R' && isMandatoryNightRestDay(schedule, ctx, n2, d)) return false;
-  if (s2 === 'R' && isNoDiurniRecoveryDay(schedule, ctx, n1, d)) return false;
-  if (s1 === 'R' && isNoDiurniRecoveryDay(schedule, ctx, n2, d)) return false;
+  if (s2 === 'R' && isOptionalRestAfterNSR(schedule, ctx, n1, d)) return false;
+  if (s1 === 'R' && isOptionalRestAfterNSR(schedule, ctx, n2, d)) return false;
   if (s1 === 'N' || s1 === 'S' || s2 === 'N' || s2 === 'S') return false;
   // solo_diurni: can only have D or R
   if (nurseProps[n1].soloDiurni && s2 !== 'D' && s2 !== 'R') return false;
@@ -381,7 +381,7 @@ function tryChangeMove(schedule, ctx, changes) {
   if (pinned[n][d]) return false;
   const old = schedule[n][d];
   if (old === 'R' && isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
-  if (old !== 'R' && isNoDiurniRecoveryDay(schedule, ctx, n, d)) return false;
+  if (old !== 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) return false;
   if (old === 'N' || old === 'S') return false;
   if (nurseProps[n].soloMattine) return false;
   // solo_diurni: can only change to D or R
@@ -480,7 +480,7 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
         if (cov.M <= minCovM || cov.P <= minCovP) continue;
       } else {
         if (s !== 'M' && s !== 'P') continue;
-        if (isNoDiurniRecoveryDay(schedule, ctx, n, d)) continue;
+        if (isOptionalRestAfterNSR(schedule, ctx, n, d)) continue;
         const cov = dayCoverage(schedule, d, numNurses);
         if ((s === 'M' ? cov.M : cov.P) <= (s === 'M' ? ctx.minCovM : ctx.minCovP)) continue;
       }

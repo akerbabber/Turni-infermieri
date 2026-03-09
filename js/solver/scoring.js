@@ -57,7 +57,7 @@ function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
   return !ctx.nurseProps[nurseIdx].noDiurni && prev1 === 'R' && prev2 === 'S';
 }
 
-function isNoDiurniRecoveryDay(schedule, ctx, nurseIdx, dayIdx) {
+function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
   if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
   const props = ctx.nurseProps[nurseIdx];
   if (!props || !props.noDiurni || props.noNotti || props.soloNotti) return false;
@@ -66,6 +66,12 @@ function isNoDiurniRecoveryDay(schedule, ctx, nurseIdx, dayIdx) {
     getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2) === 'S' &&
     getShiftAt(schedule, ctx, nurseIdx, dayIdx - 3) === 'N'
   );
+}
+
+function getRestPromotionPriority(props) {
+  if (props.noDiurni) return 0;
+  if (props.mattineEPomeriggi) return 1;
+  return 2;
 }
 
 function dayCoverage(schedule, d, numNurses) {
@@ -337,7 +343,7 @@ function computeScore(schedule, ctx) {
   for (let n = 0; n < numNurses; n++) {
     if (!nurseProps[n].noDiurni || nurseProps[n].noNotti || nurseProps[n].soloNotti) continue;
     for (let d = ctx.prevTail ? 0 : 3; d < numDays; d++) {
-      if (schedule[n][d] === 'R' && isNoDiurniRecoveryDay(schedule, ctx, n, d)) soft += 4;
+      if (schedule[n][d] === 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) soft += 4;
     }
   }
 
