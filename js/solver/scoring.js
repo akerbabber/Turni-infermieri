@@ -29,6 +29,9 @@ function transitionOk(prev, next, ctx, schedule, nurseIdx, dayIdx) {
   return true;
 }
 
+// Read a shift from the current month schedule, or from previousMonthTail when
+// dayIdx is negative. Negative indices are translated from the tail end so
+// dayIdx === -1 means "last shift of previous month", dayIdx === -2 the one before, etc.
 function getShiftAt(schedule, ctx, nurseIdx, dayIdx) {
   if (dayIdx >= 0) {
     if (nurseIdx === undefined || nurseIdx === null) return null;
@@ -42,6 +45,9 @@ function getShiftAt(schedule, ctx, nurseIdx, dayIdx) {
   return tailIdx >= 0 ? tail[tailIdx] : null;
 }
 
+// Detect mandatory rest days inside an N-S-R-R block:
+// - the first R immediately after S is always locked
+// - the second R after N-S-R is also locked for nurses who are not noDiurni
 function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
   if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
   if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;

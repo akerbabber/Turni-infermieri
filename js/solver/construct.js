@@ -473,20 +473,24 @@ function construct(ctx) {
       mpCount[n] = { m: mc, p: pc };
     }
 
-    function tryAssignMPShift(s, respectWeekBudget) {
-      if (s === 'M' && cov.M >= maxCovM) return false;
-      if (s === 'P' && cov.P >= maxCovP) return false;
-      const candidates = avail().filter(n => eligible(n, d, s) && (!respectWeekBudget || hasWeekBudget(n, d)));
+    function tryAssignMPShift(shiftType, respectWeekBudget) {
+      if (shiftType === 'M' && cov.M >= maxCovM) return false;
+      if (shiftType === 'P' && cov.P >= maxCovP) return false;
+      const candidates = avail().filter(
+        n => eligible(n, d, shiftType) && (!respectWeekBudget || hasWeekBudget(n, d))
+      );
       // Sort candidates: prefer nurses who need this shift type for personal M/P balance
       candidates.sort((a, b) => {
-        const aBal = s === 'M' ? mpCount[a].m - mpCount[a].p : mpCount[a].p - mpCount[a].m;
-        const bBal = s === 'M' ? mpCount[b].m - mpCount[b].p : mpCount[b].p - mpCount[b].m;
+        const aBal =
+          shiftType === 'M' ? mpCount[a].m - mpCount[a].p : mpCount[a].p - mpCount[a].m;
+        const bBal =
+          shiftType === 'M' ? mpCount[b].m - mpCount[b].p : mpCount[b].p - mpCount[b].m;
         return aBal - bBal;
       });
       if (candidates.length === 0) return false;
       const n = candidates[0];
-      schedule[n][d] = s;
-      if (s === 'M') {
+      schedule[n][d] = shiftType;
+      if (shiftType === 'M') {
         cov.M++;
         mpCount[n].m++;
       } else {
@@ -499,6 +503,8 @@ function construct(ctx) {
     while (cov.M < minCovM || cov.P < minCovP) {
       const mGap = Math.max(0, minCovM - cov.M);
       const pGap = Math.max(0, minCovP - cov.P);
+      // On ties prefer P so the heuristic keeps morning headroom available for a later D
+      // assignment, which covers both M and P and helps avoid afternoon shortages.
       const first = mGap > pGap ? 'M' : 'P';
       const second = first === 'M' ? 'P' : 'M';
       let assigned = false;
