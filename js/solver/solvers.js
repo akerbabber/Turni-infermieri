@@ -565,7 +565,9 @@ function solveFallback(config) {
     progress(5 + Math.floor(r * (80 / NUM_RESTARTS)), `Tentativo ${r + 1}/${NUM_RESTARTS}…`);
 
     const schedule = construct(ctx);
-    const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS);
+    // The standalone fallback path has no MILP guidance or time-budgeted polish,
+    // so give local search a deeper pass to converge more reliably toward 0 violations.
+    const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS * 4);
     const score = computeScore(improved, ctx);
 
     if (score.total < bestScore.total) {

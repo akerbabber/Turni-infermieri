@@ -57,6 +57,23 @@ function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
   return !ctx.nurseProps[nurseIdx].noDiurni && prev1 === 'R' && prev2 === 'S';
 }
 
+function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
+  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
+  const props = ctx.nurseProps[nurseIdx];
+  if (!props || !props.noDiurni || props.noNotti || props.soloNotti) return false;
+  return (
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'R' &&
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2) === 'S' &&
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 3) === 'N'
+  );
+}
+
+function getRestPromotionPriority(props) {
+  if (props.noDiurni) return 0;
+  if (props.mattineEPomeriggi) return 1;
+  return 2;
+}
+
 function dayCoverage(schedule, d, numNurses) {
   let M = 0,
     P = 0,
@@ -319,6 +336,15 @@ function computeScore(schedule, ctx) {
       else if (schedule[n][d] === 'P') pC++;
     }
     soft += Math.abs(mC - pC) * 2;
+  }
+
+  // Soft: no_diurni nurses who can still do M/P/N should resume work after N-S-R
+  // instead of accumulating optional extra rest days when coverage can be distributed.
+  for (let n = 0; n < numNurses; n++) {
+    if (!nurseProps[n].noDiurni || nurseProps[n].noNotti || nurseProps[n].soloNotti) continue;
+    for (let d = ctx.prevTail ? 0 : 3; d < numDays; d++) {
+      if (schedule[n][d] === 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) soft += 4;
+    }
   }
 
   return { hard, soft, total: hard * 1000 + soft };

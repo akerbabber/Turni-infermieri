@@ -6,7 +6,7 @@
 
 'use strict';
 
-/* global isMPCycleLimitedNurse, isMandatoryNightRestDay */
+/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, getRestPromotionPriority */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
@@ -136,7 +136,7 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
       }
     }
   }
-  return repairNightCoverage(best, ctx);
+  return repairDayCoverage(repairNightCoverage(best, ctx), ctx);
 }
 
 // Helper: record a cell change for undo
@@ -255,6 +255,84 @@ function placeNightBlock(schedule, nurseIdx, start, noDiurni, numDays) {
   if (!noDiurni && start + 3 < numDays) schedule[nurseIdx][start + 3] = 'R';
 }
 
+function repairDayCoverage(schedule, ctx) {
+  const { numDays, numNurses, minCovM, minCovP, pinned, nurseProps, minRPerWeek, weekDaysList, weekOf } = ctx;
+  const repaired = deepCopy(schedule);
+
+  function hasSpareWeeklyRest(n, d) {
+    if (minRPerWeek <= 0) return true;
+    const wDays = weekDaysList[weekOf(d)];
+    return countWeekRest(repaired, n, wDays) > requiredRest(wDays.length, minRPerWeek);
+  }
+
+  function canPromoteRest(n, d, shiftType) {
+    if (repaired[n][d] !== 'R' || pinned[n][d]) return false;
+    if (isMandatoryNightRestDay(repaired, ctx, n, d)) return false;
+    if (isMPCycleLimitedNurse(nurseProps[n])) return false;
+    if (!hasSpareWeeklyRest(n, d)) return false;
+    if (
+      nurseProps[n].soloMattine ||
+      nurseProps[n].soloDiurni ||
+      nurseProps[n].soloNotti ||
+      nurseProps[n].diurniENotturni
+    )
+      return false;
+    const prev = d > 0 ? repaired[n][d - 1] : null;
+    const next = d < numDays - 1 ? repaired[n][d + 1] : null;
+    return transitionOk(prev, shiftType, ctx, repaired, n, d) && transitionOk(shiftType, next, ctx, repaired, n, d + 1);
+  }
+
+  function countMP(n) {
+    let m = 0;
+    let p = 0;
+    for (let d = 0; d < numDays; d++) {
+      if (repaired[n][d] === 'M') m++;
+      else if (repaired[n][d] === 'P') p++;
+    }
+    return { m, p };
+  }
+
+  function promoteRestDay(d, shiftType) {
+    const candidates = shuffle(Array.from({ length: numNurses }, (_, i) => i))
+      .filter(n => canPromoteRest(n, d, shiftType))
+      .sort((a, b) => {
+        const aPriority = getRestPromotionPriority(nurseProps[a]);
+        const bPriority = getRestPromotionPriority(nurseProps[b]);
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        const aMp = countMP(a);
+        const bMp = countMP(b);
+        const aDiff = Math.abs(aMp.m + (shiftType === 'M' ? 1 : 0) - (aMp.p + (shiftType === 'P' ? 1 : 0)));
+        const bDiff = Math.abs(bMp.m + (shiftType === 'M' ? 1 : 0) - (bMp.p + (shiftType === 'P' ? 1 : 0)));
+        if (aDiff !== bDiff) return aDiff - bDiff;
+        return (SHIFT_HOURS[repaired[a][d]] || 0) - (SHIFT_HOURS[repaired[b][d]] || 0);
+      });
+    if (!candidates.length) return false;
+    repaired[candidates[0]][d] = shiftType;
+    return true;
+  }
+
+  for (let d = 0; d < numDays; d++) {
+    let cov = dayCoverage(repaired, d, numNurses);
+    while (cov.M < minCovM || cov.P < minCovP) {
+      const mGap = Math.max(0, minCovM - cov.M);
+      const pGap = Math.max(0, minCovP - cov.P);
+      const first = mGap >= pGap ? 'M' : 'P';
+      const second = first === 'M' ? 'P' : 'M';
+      if ((first === 'M' ? cov.M : cov.P) < (first === 'M' ? minCovM : minCovP) && promoteRestDay(d, first)) {
+        cov = dayCoverage(repaired, d, numNurses);
+        continue;
+      }
+      if ((second === 'M' ? cov.M : cov.P) < (second === 'M' ? minCovM : minCovP) && promoteRestDay(d, second)) {
+        cov = dayCoverage(repaired, d, numNurses);
+        continue;
+      }
+      break;
+    }
+  }
+
+  return repaired;
+}
+
 function trySwapMove(schedule, ctx, changes) {
   const { numDays, numNurses, pinned, nurseProps } = ctx;
   const d = Math.floor(Math.random() * numDays);
@@ -268,6 +346,8 @@ function trySwapMove(schedule, ctx, changes) {
   if (s1 === s2) return false;
   if (s1 === 'R' && isMandatoryNightRestDay(schedule, ctx, n1, d)) return false;
   if (s2 === 'R' && isMandatoryNightRestDay(schedule, ctx, n2, d)) return false;
+  if (s2 === 'R' && isOptionalRestAfterNSR(schedule, ctx, n1, d)) return false;
+  if (s1 === 'R' && isOptionalRestAfterNSR(schedule, ctx, n2, d)) return false;
   if (s1 === 'N' || s1 === 'S' || s2 === 'N' || s2 === 'S') return false;
   // solo_diurni: can only have D or R
   if (nurseProps[n1].soloDiurni && s2 !== 'D' && s2 !== 'R') return false;
@@ -301,6 +381,7 @@ function tryChangeMove(schedule, ctx, changes) {
   if (pinned[n][d]) return false;
   const old = schedule[n][d];
   if (old === 'R' && isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
+  if (old !== 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) return false;
   if (old === 'N' || old === 'S') return false;
   if (nurseProps[n].soloMattine) return false;
   // solo_diurni: can only change to D or R
@@ -399,6 +480,7 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
         if (cov.M <= minCovM || cov.P <= minCovP) continue;
       } else {
         if (s !== 'M' && s !== 'P') continue;
+        if (isOptionalRestAfterNSR(schedule, ctx, n, d)) continue;
         const cov = dayCoverage(schedule, d, numNurses);
         if ((s === 'M' ? cov.M : cov.P) <= (s === 'M' ? ctx.minCovM : ctx.minCovP)) continue;
       }

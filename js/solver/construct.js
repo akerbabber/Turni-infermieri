@@ -15,7 +15,7 @@
 
 'use strict';
 
-/* global MP_CYCLE_PATTERNS, isMPCycleLimitedNurse */
+/* global MP_CYCLE_PATTERNS, isMPCycleLimitedNurse, isMandatoryNightRestDay, getRestPromotionPriority */
 
 // ---------------------------------------------------------------------------
 // Construction heuristic (one attempt)
@@ -107,6 +107,41 @@ function construct(ctx) {
       return true;
     }
     return false;
+  }
+
+  function canPromoteRestToShift(n, d, shiftType) {
+    if (schedule[n][d] !== 'R' || pinned[n][d] || !hasSpareWeeklyRest(n, d)) return false;
+    if (isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
+    if (isMPCycleLimitedNurse(nurseProps[n])) return false;
+    if (
+      nurseProps[n].soloMattine ||
+      nurseProps[n].soloDiurni ||
+      nurseProps[n].soloNotti ||
+      nurseProps[n].diurniENotturni
+    )
+      return false;
+    const prev = d > 0 ? schedule[n][d - 1] : null;
+    const next = d < numDays - 1 ? schedule[n][d + 1] : null;
+    return transitionOk(prev, shiftType, ctx, schedule, n, d) && transitionOk(shiftType, next, ctx, schedule, n, d + 1);
+  }
+
+  function repairCoverageWithRestDay(d, shiftType) {
+    const candidates = shuffle(Array.from({ length: numNurses }, (_, i) => i))
+      .filter(n => canPromoteRestToShift(n, d, shiftType))
+      .sort((a, b) => {
+        const aPriority = getRestPromotionPriority(nurseProps[a]);
+        const bPriority = getRestPromotionPriority(nurseProps[b]);
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        const aMp = countMPForNurse(a);
+        const bMp = countMPForNurse(b);
+        const aDiff = Math.abs(aMp.m + (shiftType === 'M' ? 1 : 0) - (aMp.p + (shiftType === 'P' ? 1 : 0)));
+        const bDiff = Math.abs(bMp.m + (shiftType === 'M' ? 1 : 0) - (bMp.p + (shiftType === 'P' ? 1 : 0)));
+        if (aDiff !== bDiff) return aDiff - bDiff;
+        return nurseHours(schedule, a, numDays) - nurseHours(schedule, b, numDays);
+      });
+    if (!candidates.length) return false;
+    schedule[candidates[0]][d] = shiftType;
+    return true;
   }
 
   function scoreMPCyclePattern(n, startDay, pattern) {
@@ -685,6 +720,32 @@ function construct(ctx) {
           if (cov.M > minCovM && cov.P > minCovP && cov.D > 1) schedule[n][d + 1] = 'R';
         }
       }
+    }
+  }
+
+  // Post-construction M/P repair — cover residual deficits using optional rest days.
+  for (let d = 0; d < numDays; d++) {
+    let cov = dayCoverage(schedule, d, numNurses);
+    while (cov.M < minCovM || cov.P < minCovP) {
+      const mGap = Math.max(0, minCovM - cov.M);
+      const pGap = Math.max(0, minCovP - cov.P);
+      const first = mGap >= pGap ? 'M' : 'P';
+      const second = first === 'M' ? 'P' : 'M';
+      if (
+        (first === 'M' ? cov.M : cov.P) < (first === 'M' ? minCovM : minCovP) &&
+        repairCoverageWithRestDay(d, first)
+      ) {
+        cov = dayCoverage(schedule, d, numNurses);
+        continue;
+      }
+      if (
+        (second === 'M' ? cov.M : cov.P) < (second === 'M' ? minCovM : minCovP) &&
+        repairCoverageWithRestDay(d, second)
+      ) {
+        cov = dayCoverage(schedule, d, numNurses);
+        continue;
+      }
+      break;
     }
   }
 
