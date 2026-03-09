@@ -167,12 +167,30 @@ const MP_CYCLE_PATTERNS = [
   ['M', 'M', 'M', 'P', 'R', 'R'],
 ];
 
-function assertMatchesMPCycle(row, messagePrefix) {
-  for (let start = 0; start < row.length; start += 6) {
-    const block = row.slice(start, start + 6);
-    const ok = MP_CYCLE_PATTERNS.some(pattern => block.every((shift, idx) => shift === pattern[idx]));
-    assert.ok(ok, `${messagePrefix} block ${start + 1}-${start + block.length}: ${block.join('-')}`);
+const SHORT_MP_CYCLE_PATTERNS = [
+  ['M', 'M', 'P', 'R', 'R'],
+  ['M', 'P', 'P', 'R', 'R'],
+];
+
+function assertMatchesMPCycle(row, messagePrefix, patterns = MP_CYCLE_PATTERNS) {
+  const memo = new Map();
+
+  function matches(start) {
+    if (start >= row.length) return true;
+    if (memo.has(start)) return memo.get(start);
+    for (const pattern of patterns) {
+      const blockLen = Math.min(pattern.length, row.length - start);
+      const ok = row.slice(start, start + blockLen).every((shift, idx) => shift === pattern[idx]);
+      if (ok && matches(start + blockLen)) {
+        memo.set(start, true);
+        return true;
+      }
+    }
+    memo.set(start, false);
+    return false;
   }
+
+  assert.ok(matches(0), `${messagePrefix}: ${row.join('-')}`);
 }
 
 // ===========================================================================
@@ -1163,7 +1181,11 @@ describe('construct', () => {
     try {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
-      assertMatchesMPCycle(schedule[0], 'mattine_e_pomeriggi nurse should follow 4+2 cycle');
+      assertMatchesMPCycle(
+        schedule[0],
+        'mattine_e_pomeriggi nurse should follow an allowed M/P cycle',
+        MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)
+      );
       assert.equal(schedule[0][0], 'M');
     } finally {
       Math.random = origRandom;
@@ -1264,6 +1286,34 @@ describe('construct', () => {
     assert.match(lp, /mpcM0_0:/);
     assert.match(lp, /mpcR0_4:/);
   });
+
+  it('should accept shorter 5-day M/P patterns for mattine_e_pomeriggi nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['mattine_e_pomeriggi', 'no_notti', 'no_diurni'] },
+      },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 10,
+        minCoverageP: 0,
+        maxCoverageP: 10,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const shortPattern = ['M', 'M', 'P', 'R', 'R', 'M', 'P', 'P', 'R', 'R'];
+    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => shortPattern[idx % shortPattern.length])];
+
+    const mpViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'mp_cycle_4_2');
+    assert.deepEqual(toPlain(mpViolations), []);
+  });
 });
 
 describe('localSearch night coverage repair', () => {
@@ -1318,6 +1368,45 @@ describe('localSearch night coverage repair', () => {
       .filter(v => v.type === 'coverage_N' || v.type === 'coverage_N_max');
     assert.deepEqual(toPlain(afterViolations), []);
     assert.ok(ctx.computeScore(improved, bctx).total < ctx.computeScore(schedule, bctx).total);
+  });
+
+  it('should rebalance excess-only night coverage by moving a block onto a day below max coverage', () => {
+    const config = makeMinimalConfig({
+      numNurses: 4,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 0,
+        minCoverageP: 0,
+        maxCoverageP: 0,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        targetNights: 1,
+        maxNights: 4,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 7;
+    bctx.weekDaysList = [[0, 1, 2, 3, 4, 5, 6]];
+    bctx.weekOf = () => 0;
+
+    const schedule = Array.from({ length: 4 }, () => new Array(7).fill('R'));
+    [0, 0, 2, 3].forEach((start, nurseIdx) => placeNightBlock(schedule[nurseIdx], start, bctx.numDays));
+
+    const beforeViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'coverage_N_max');
+    assert.equal(beforeViolations.length, 1);
+
+    const improved = ctx.localSearch(schedule, bctx, 0);
+    const afterNightCoverage = Array.from(
+      { length: bctx.numDays },
+      (_, d) => ctx.dayCoverage(improved, d, bctx.numNurses).N
+    );
+
+    assert.deepEqual(afterNightCoverage.slice(0, 4), [1, 1, 1, 1]);
+    const afterViolations = ctx.collectViolations(improved, bctx).filter(v => v.type === 'coverage_N_max');
+    assert.deepEqual(toPlain(afterViolations), []);
   });
 });
 

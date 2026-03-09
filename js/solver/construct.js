@@ -15,7 +15,7 @@
 
 'use strict';
 
-/* global MP_CYCLE_PATTERNS, isMPCycleLimitedNurse, isMandatoryNightRestDay, getRestPromotionPriority */
+/* global getAllowedMPCyclePatterns, isMPCycleLimitedNurse, isMandatoryNightRestDay, getRestPromotionPriority */
 
 // ---------------------------------------------------------------------------
 // Construction heuristic (one attempt)
@@ -148,7 +148,7 @@ function construct(ctx) {
     let score = 0;
     let mAdd = 0;
     let pAdd = 0;
-    for (let offset = 0; offset < 6 && startDay + offset < numDays; offset++) {
+    for (let offset = 0; offset < pattern.length && startDay + offset < numDays; offset++) {
       const day = startDay + offset;
       const desired = pattern[offset];
       const current = schedule[n][day];
@@ -401,21 +401,29 @@ function construct(ctx) {
   // Phase 3 — Day shifts (M, P, D)
   for (let n = 0; n < numNurses; n++) {
     if (!isMPCycleLimitedNurse(nurseProps[n])) continue;
-    for (let startDay = 0; startDay < numDays; startDay += 6) {
+    const patterns = getAllowedMPCyclePatterns(nurseProps[n]);
+    for (let startDay = 0; startDay < numDays; ) {
       let bestPattern = null;
       let bestScore = -Infinity;
-      for (const pattern of MP_CYCLE_PATTERNS) {
+      for (const pattern of patterns) {
         const score = scoreMPCyclePattern(n, startDay, pattern);
         if (score > bestScore) {
           bestScore = score;
           bestPattern = pattern;
         }
       }
-      if (!bestPattern || bestScore === -Infinity) continue;
-      for (let offset = 0; offset < 6 && startDay + offset < numDays; offset++) {
+      if (!bestPattern || bestScore === -Infinity) {
+        // Advance by one day so mattine_e_pomeriggi nurses can still pick up a shorter
+        // 5-day pattern starting at the next slot when the current alignment is blocked.
+        startDay++;
+        continue;
+      }
+      const blockLen = Math.min(bestPattern.length, numDays - startDay);
+      for (let offset = 0; offset < blockLen; offset++) {
         const day = startDay + offset;
         if (schedule[n][day] === null) schedule[n][day] = bestPattern[offset];
       }
+      startDay += blockLen;
     }
   }
 

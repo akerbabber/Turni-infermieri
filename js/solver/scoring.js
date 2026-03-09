@@ -128,34 +128,74 @@ const MP_CYCLE_PATTERNS = [
   ['M', 'M', 'M', 'P', 'R', 'R'],
 ];
 
+const SHORT_MP_CYCLE_PATTERNS = [
+  ['M', 'M', 'P', 'R', 'R'],
+  ['M', 'P', 'P', 'R', 'R'],
+];
+const MP_CYCLE_PATTERN_LABELS = MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)
+  .map(pattern => pattern.join('-'))
+  .join(', ');
+
 function isMPCycleLimitedNurse(props) {
   return props.mattineEPomeriggi || (props.noNotti && props.noDiurni);
+}
+
+function getAllowedMPCyclePatterns(props) {
+  return props.mattineEPomeriggi ? MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS) : MP_CYCLE_PATTERNS;
 }
 
 function isAllowedMPCycleShift(shift) {
   return shift === 'M' || shift === 'P' || shift === 'R';
 }
 
-function getMPCycleBlockMismatch(schedule, nurseIdx, startDay, numDays) {
+function getMPCyclePlan(schedule, nurseIdx, numDays, props) {
   const row = schedule[nurseIdx];
-  const blockLen = Math.min(6, numDays - startDay);
-  let bestMismatch = Infinity;
-  for (const pattern of MP_CYCLE_PATTERNS) {
-    let mismatch = 0;
-    let comparable = false;
-    for (let offset = 0; offset < blockLen; offset++) {
-      const shift = row[startDay + offset];
-      if (!isAllowedMPCycleShift(shift)) {
-        comparable = false;
-        mismatch = 0;
-        break;
+  const patterns = getAllowedMPCyclePatterns(props);
+  const memo = new Map();
+
+  function solve(startDay) {
+    if (startDay >= numDays) return { mismatch: 0, segments: [] };
+    if (memo.has(startDay)) return memo.get(startDay);
+
+    let best = { mismatch: Infinity, segments: [] };
+    for (const pattern of patterns) {
+      const blockLen = Math.min(pattern.length, numDays - startDay);
+      let mismatch = 0;
+      let comparable = false;
+      for (let offset = 0; offset < blockLen; offset++) {
+        const shift = row[startDay + offset];
+        if (!isAllowedMPCycleShift(shift)) {
+          comparable = false;
+          mismatch = Infinity;
+          break;
+        }
+        comparable = true;
+        if (shift !== pattern[offset]) mismatch++;
       }
-      comparable = true;
-      if (shift !== pattern[offset]) mismatch++;
+      if (!comparable || !Number.isFinite(mismatch)) continue;
+
+      const tail = solve(startDay + blockLen);
+      const totalMismatch = mismatch + tail.mismatch;
+      if (totalMismatch < best.mismatch) {
+        best = {
+          mismatch: totalMismatch,
+          segments: [{ startDay, blockLen, mismatch, pattern }, ...tail.segments],
+        };
+      }
     }
-    if (comparable) bestMismatch = Math.min(bestMismatch, mismatch);
+
+    const result = Number.isFinite(best.mismatch) ? best : { mismatch: 0, segments: [] };
+    memo.set(startDay, result);
+    return result;
   }
-  return Number.isFinite(bestMismatch) ? bestMismatch : 0;
+
+  return solve(0);
+}
+
+function getMPCycleBlockMismatch(schedule, nurseIdx, startDay, numDays, props) {
+  const plan = getMPCyclePlan(schedule, nurseIdx, numDays, props);
+  const segment = plan.segments.find(entry => entry.startDay === startDay);
+  return segment ? segment.mismatch : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +304,7 @@ function computeScore(schedule, ctx) {
       }
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
-      for (let d = 0; d < numDays; d += 6) hard += getMPCycleBlockMismatch(schedule, n, d, numDays);
+      hard += getMPCyclePlan(schedule, n, numDays, nurseProps[n]).mismatch;
     }
   }
 
@@ -536,15 +576,16 @@ function collectViolations(schedule, ctx) {
       }
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
-      for (let d = 0; d < numDays; d += 6) {
-        if (getMPCycleBlockMismatch(schedule, n, d, numDays) > 0) {
+      const plan = getMPCyclePlan(schedule, n, numDays, nurseProps[n]);
+      for (const segment of plan.segments) {
+        if (segment.mismatch > 0) {
           violations.push({
             nurse: n,
-            day: d,
+            day: segment.startDay,
             type: 'mp_cycle_4_2',
             msg:
-              `Infermiere ${n + 1}, giorni ${d + 1}-${Math.min(numDays, d + 6)}: ` +
-              'il ciclo M/P deve seguire uno tra M-M-P-P-R-R, M-P-P-P-R-R, M-M-M-P-R-R',
+              `Infermiere ${n + 1}, giorni ${segment.startDay + 1}-${Math.min(numDays, segment.startDay + segment.blockLen)}: ` +
+              `il ciclo M/P deve seguire uno tra ${MP_CYCLE_PATTERN_LABELS}`,
           });
         }
       }
