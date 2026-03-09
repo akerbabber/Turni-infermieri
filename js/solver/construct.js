@@ -413,6 +413,8 @@ function construct(ctx) {
         }
       }
       if (!bestPattern || bestScore === -Infinity) {
+        // Advance by one day so mattine_e_pomeriggi nurses can still pick up a shorter
+        // 5-day pattern starting at the next slot when the current alignment is blocked.
         startDay++;
         continue;
       }

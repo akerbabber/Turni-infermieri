@@ -138,11 +138,13 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
   }
   let repaired = deepCopy(best);
   for (let pass = 0; pass < 2; pass++) {
+    const beforePass = repaired.map(row => row.join('|')).join('\n');
     repaired = repairNightCoverage(repaired, ctx);
     repaired = repairNightRestContinuity(repaired, ctx);
     repaired = repairNoDiurniRecoveryRests(repaired, ctx);
     repaired = repairDayCoverage(repaired, ctx);
     repaired = repairWeeklyRestDeficits(repaired, ctx);
+    if (repaired.map(row => row.join('|')).join('\n') === beforePass) break;
   }
   return repaired;
 }
@@ -312,6 +314,7 @@ function canRepairShiftChange(schedule, ctx, n, d, nextShift) {
   if (pinned[n][d] || schedule[n][d] === nextShift) return false;
   if (isMPCycleLimitedNurse(nurseProps[n])) return false;
   if (!isRepairShiftAllowed(nurseProps[n], nextShift)) return false;
+  // Repairs must never introduce new discretionary R days for no_diurni nurses.
   if (nextShift === 'R' && nurseProps[n].noDiurni) return false;
   if (nextShift !== 'R' && schedule[n][d] === 'R' && isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift === 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) return false;

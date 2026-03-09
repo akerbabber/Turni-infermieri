@@ -132,6 +132,9 @@ const SHORT_MP_CYCLE_PATTERNS = [
   ['M', 'M', 'P', 'R', 'R'],
   ['M', 'P', 'P', 'R', 'R'],
 ];
+const MP_CYCLE_PATTERN_LABELS = MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)
+  .map(pattern => pattern.join('-'))
+  .join(', ');
 
 function isMPCycleLimitedNurse(props) {
   return props.mattineEPomeriggi || (props.noNotti && props.noDiurni);
@@ -582,7 +585,7 @@ function collectViolations(schedule, ctx) {
             type: 'mp_cycle_4_2',
             msg:
               `Infermiere ${n + 1}, giorni ${segment.startDay + 1}-${Math.min(numDays, segment.startDay + segment.blockLen)}: ` +
-              'il ciclo M/P deve seguire uno tra M-M-P-P-R-R, M-P-P-P-R-R, M-M-M-P-R-R, M-M-P-R-R, M-P-P-R-R',
+              `il ciclo M/P deve seguire uno tra ${MP_CYCLE_PATTERN_LABELS}`,
           });
         }
       }

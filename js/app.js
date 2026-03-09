@@ -1023,8 +1023,10 @@ function applyConfigPayload(cfg) {
     Array.isArray(cfg.nurses) && cfg.nurses.length > 0
       ? cfg.nurses.map((nurse, index) => normalizeNurse(nurse, index))
       : null;
+  const cappedImportedNurses =
+    importedNurses && explicitTotalNurses !== null ? importedNurses.slice(0, explicitTotalNurses) : importedNurses;
   if (importedNurses) {
-    state.nurses = explicitTotalNurses !== null ? importedNurses.slice(0, explicitTotalNurses) : importedNurses;
+    state.nurses = cappedImportedNurses;
   }
 
   if (explicitTotalNurses !== null) {
