@@ -505,10 +505,7 @@ function construct(ctx) {
       if ((first === 'M' ? cov.M : cov.P) < (first === 'M' ? minCovM : minCovP)) {
         assigned = tryAssignMPShift(first, false);
       }
-      if (
-        !assigned &&
-        (second === 'M' ? cov.M : cov.P) < (second === 'M' ? minCovM : minCovP)
-      ) {
+      if (!assigned && (second === 'M' ? cov.M : cov.P) < (second === 'M' ? minCovM : minCovP)) {
         assigned = tryAssignMPShift(second, false);
       }
       if (!assigned) break;
