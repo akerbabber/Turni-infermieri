@@ -1184,7 +1184,7 @@ describe('construct', () => {
     }
   });
 
-  it('should reserve morning headroom for a diurni_e_notturni nurse when afternoon minimum still needs coverage', () => {
+  it('should assign a D shift to meet the afternoon minimum when morning headroom allows it', () => {
     const config = makeMinimalConfig({
       numNurses: 5,
       nurseOverrides: {
@@ -1210,6 +1210,7 @@ describe('construct', () => {
     const day1Coverage = ctx.dayCoverage(schedule, 0, bctx.numNurses);
     assert.equal(day1Coverage.M, 3);
     assert.ok(day1Coverage.P >= 2, `Day 1 afternoon coverage should reach the minimum, got ${day1Coverage.P}`);
+    assert.ok(day1Coverage.P <= 3, `Day 1 afternoon coverage should stay within the maximum, got ${day1Coverage.P}`);
     assert.equal(day1Coverage.D, 1);
     assert.equal(schedule[4][0], 'D', 'The diurni_e_notturni nurse should cover day 1 with D');
   });

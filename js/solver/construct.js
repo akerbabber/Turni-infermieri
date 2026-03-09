@@ -476,15 +476,11 @@ function construct(ctx) {
     function tryAssignMPShift(shiftType, respectWeekBudget) {
       if (shiftType === 'M' && cov.M >= maxCovM) return false;
       if (shiftType === 'P' && cov.P >= maxCovP) return false;
-      const candidates = avail().filter(
-        n => eligible(n, d, shiftType) && (!respectWeekBudget || hasWeekBudget(n, d))
-      );
+      const candidates = avail().filter(n => eligible(n, d, shiftType) && (!respectWeekBudget || hasWeekBudget(n, d)));
       // Sort candidates: prefer nurses who need this shift type for personal M/P balance
       candidates.sort((a, b) => {
-        const aBal =
-          shiftType === 'M' ? mpCount[a].m - mpCount[a].p : mpCount[a].p - mpCount[a].m;
-        const bBal =
-          shiftType === 'M' ? mpCount[b].m - mpCount[b].p : mpCount[b].p - mpCount[b].m;
+        const aBal = shiftType === 'M' ? mpCount[a].m - mpCount[a].p : mpCount[a].p - mpCount[a].m;
+        const bBal = shiftType === 'M' ? mpCount[b].m - mpCount[b].p : mpCount[b].p - mpCount[b].m;
         return aBal - bBal;
       });
       if (candidates.length === 0) return false;
@@ -500,11 +496,13 @@ function construct(ctx) {
       return true;
     }
 
+    // Phase 3a — fill minimum M/P coverage before using the remaining headroom.
     while (cov.M < minCovM || cov.P < minCovP) {
       const mGap = Math.max(0, minCovM - cov.M);
       const pGap = Math.max(0, minCovP - cov.P);
-      // On ties prefer P so the heuristic keeps morning headroom available for a later D
-      // assignment, which covers both M and P and helps avoid afternoon shortages.
+      // On ties (mGap === pGap) prefer P so the heuristic keeps morning headroom available for a later D
+      // assignment. This works because D shifts count toward both M and P coverage, so assigning D later
+      // can simultaneously fill the remaining gaps and reduce afternoon shortages.
       const first = mGap > pGap ? 'M' : 'P';
       const second = first === 'M' ? 'P' : 'M';
       let assigned = false;
@@ -537,6 +535,7 @@ function construct(ctx) {
       }
     }
 
+    // Phase 3b — once minimums are safe, use any remaining headroom up to the configured maximums.
     while (cov.M < maxCovM || cov.P < maxCovP) {
       const mSpare = maxCovM - cov.M;
       const pSpare = maxCovP - cov.P;

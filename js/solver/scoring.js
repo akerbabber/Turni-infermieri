@@ -33,12 +33,12 @@ function transitionOk(prev, next, ctx, schedule, nurseIdx, dayIdx) {
 // dayIdx is negative. Negative indices are translated from the tail end so
 // dayIdx === -1 means "last shift of previous month", dayIdx === -2 the one before, etc.
 function getShiftAt(schedule, ctx, nurseIdx, dayIdx) {
+  if (nurseIdx === undefined || nurseIdx === null) return null;
   if (dayIdx >= 0) {
-    if (nurseIdx === undefined || nurseIdx === null) return null;
     if (dayIdx >= schedule[nurseIdx].length) return null;
     return schedule[nurseIdx][dayIdx];
   }
-  if (nurseIdx === undefined || nurseIdx === null || !ctx.prevTail) return null;
+  if (!ctx.prevTail) return null;
   const tail = ctx.prevTail[nurseIdx];
   if (!tail) return null;
   const tailIdx = tail.length + dayIdx;
