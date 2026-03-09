@@ -89,26 +89,6 @@ function construct(ctx) {
     return countWeekRest(schedule, n, wDays) > requiredRest(wDays.length, minRPerWeek);
   }
 
-  function assignBestMPShift(n, d) {
-    if (schedule[n][d] !== 'R' || pinned[n][d] || !hasSpareWeeklyRest(n, d)) return false;
-    const cov = dayCoverage(schedule, d, numNurses);
-    const mp = countMPForNurse(n);
-    const mGap = Math.max(0, minCovM - cov.M);
-    const pGap = Math.max(0, minCovP - cov.P);
-    const preferM = mGap === pGap ? mp.m <= mp.p : mGap > pGap;
-    const prev = d > 0 ? schedule[n][d - 1] : null;
-    const next = d < numDays - 1 ? schedule[n][d + 1] : null;
-    for (const s of preferM ? ['M', 'P'] : ['P', 'M']) {
-      if (s === 'M' && cov.M >= maxCovM) continue;
-      if (s === 'P' && cov.P >= maxCovP) continue;
-      if (!transitionOk(prev, s, ctx, schedule, n, d)) continue;
-      if (!transitionOk(s, next, ctx, schedule, n, d + 1)) continue;
-      schedule[n][d] = s;
-      return true;
-    }
-    return false;
-  }
-
   function canPromoteRestToShift(n, d, shiftType) {
     if (schedule[n][d] !== 'R' || pinned[n][d] || !hasSpareWeeklyRest(n, d)) return false;
     if (isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
@@ -619,16 +599,6 @@ function construct(ctx) {
           if (!converted) break;
         }
       }
-    }
-  }
-
-  // Phase 4.55 — For no_diurni nurses, prefer M/P immediately after N-S-R when possible
-  for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].noDiurni) continue;
-    for (let d = 3; d < numDays; d++) {
-      if (schedule[n][d] !== 'R') continue;
-      if (schedule[n][d - 1] !== 'R' || schedule[n][d - 2] !== 'S' || schedule[n][d - 3] !== 'N') continue;
-      assignBestMPShift(n, d);
     }
   }
 
