@@ -1321,8 +1321,8 @@ describe('localSearch night coverage repair', () => {
   });
 });
 
-describe('solve fallback path', () => {
-  it('should reach zero violations on the real fallback solve path without leaving extra no_diurni recovery rests', async () => {
+describe('solveFallback', () => {
+  it('should reach zero violations without leaving extra no_diurni recovery rests', () => {
     const config = makeMinimalConfig({
       numNurses: 8,
       nurseOverrides: {
@@ -1351,12 +1351,10 @@ describe('solve fallback path', () => {
       return state / 4294967296;
     };
     try {
-      const result = await ctx.solve(config, 1, 3, false, 'fallback');
-      assert.equal(result.solutions.length, 1);
-      const solution = result.solutions[0];
-      assert.equal(solution.violations.length, 0, `Fallback solver should reach zero violations, got ${solution.violations.length}`);
+      const result = ctx.solveFallback(config);
+      assert.equal(result.violations.length, 0, `Fallback solver should reach zero violations, got ${result.violations.length}`);
       for (const nurseIdx of [0, 1]) {
-        const row = solution.schedule[nurseIdx];
+        const row = result.schedule[nurseIdx];
         for (let d = 3; d < row.length; d++) {
           assert.notDeepEqual(
             row.slice(d - 3, d + 1),

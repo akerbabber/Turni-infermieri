@@ -113,7 +113,12 @@ function construct(ctx) {
     if (schedule[n][d] !== 'R' || pinned[n][d] || !hasSpareWeeklyRest(n, d)) return false;
     if (isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
     if (isMPCycleLimitedNurse(nurseProps[n])) return false;
-    if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti || nurseProps[n].diurniENotturni)
+    if (
+      nurseProps[n].soloMattine ||
+      nurseProps[n].soloDiurni ||
+      nurseProps[n].soloNotti ||
+      nurseProps[n].diurniENotturni
+    )
       return false;
     const prev = d > 0 ? schedule[n][d - 1] : null;
     const next = d < numDays - 1 ? schedule[n][d + 1] : null;
@@ -726,7 +731,10 @@ function construct(ctx) {
       const pGap = Math.max(0, minCovP - cov.P);
       const first = mGap >= pGap ? 'M' : 'P';
       const second = first === 'M' ? 'P' : 'M';
-      if ((first === 'M' ? cov.M : cov.P) < (first === 'M' ? minCovM : minCovP) && repairCoverageWithRestDay(d, first)) {
+      if (
+        (first === 'M' ? cov.M : cov.P) < (first === 'M' ? minCovM : minCovP) &&
+        repairCoverageWithRestDay(d, first)
+      ) {
         cov = dayCoverage(schedule, d, numNurses);
         continue;
       }

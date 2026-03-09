@@ -565,7 +565,7 @@ function solveFallback(config) {
     progress(5 + Math.floor(r * (80 / NUM_RESTARTS)), `Tentativo ${r + 1}/${NUM_RESTARTS}…`);
 
     const schedule = construct(ctx);
-    const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS);
+    const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS * 4);
     const score = computeScore(improved, ctx);
 
     if (score.total < bestScore.total) {

@@ -270,7 +270,12 @@ function repairDayCoverage(schedule, ctx) {
     if (isMandatoryNightRestDay(repaired, ctx, n, d)) return false;
     if (isMPCycleLimitedNurse(nurseProps[n])) return false;
     if (!hasSpareWeeklyRest(n, d)) return false;
-    if (nurseProps[n].soloMattine || nurseProps[n].soloDiurni || nurseProps[n].soloNotti || nurseProps[n].diurniENotturni)
+    if (
+      nurseProps[n].soloMattine ||
+      nurseProps[n].soloDiurni ||
+      nurseProps[n].soloNotti ||
+      nurseProps[n].diurniENotturni
+    )
       return false;
     const prev = d > 0 ? repaired[n][d - 1] : null;
     const next = d < numDays - 1 ? repaired[n][d + 1] : null;
