@@ -1184,6 +1184,36 @@ describe('construct', () => {
     }
   });
 
+  it('should reserve morning headroom for a diurni_e_notturni nurse when afternoon minimum still needs coverage', () => {
+    const config = makeMinimalConfig({
+      numNurses: 5,
+      nurseOverrides: {
+        0: { tags: ['solo_mattine'] },
+        4: { tags: ['diurni_e_notturni'] },
+      },
+      rules: {
+        minCoverageM: 3,
+        maxCoverageM: 3,
+        minCoverageP: 2,
+        maxCoverageP: 3,
+        minCoverageD: 0,
+        maxCoverageD: 1,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = ctx.construct(bctx);
+    const day1Coverage = ctx.dayCoverage(schedule, 0, bctx.numNurses);
+    assert.equal(day1Coverage.M, 3);
+    assert.ok(day1Coverage.P >= 2, `Day 1 afternoon coverage should reach the minimum, got ${day1Coverage.P}`);
+    assert.equal(day1Coverage.D, 1);
+    assert.equal(schedule[4][0], 'D', 'The diurni_e_notturni nurse should cover day 1 with D');
+  });
+
   it('should encode LP cycle constraints for M/P-only nurses', () => {
     const config = makeMinimalConfig({
       numNurses: 2,
@@ -1257,6 +1287,126 @@ describe('localSearch night coverage repair', () => {
       .filter(v => v.type === 'coverage_N' || v.type === 'coverage_N_max');
     assert.deepEqual(toPlain(afterViolations), []);
     assert.ok(ctx.computeScore(improved, bctx).total < ctx.computeScore(schedule, bctx).total);
+  });
+});
+
+describe('localSearch mandatory night-rest protection', () => {
+  it('should not change the second mandatory rest after a night block', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 2,
+        minCoverageP: 0,
+        maxCoverageP: 2,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'N';
+    schedule[0][1] = 'S';
+    schedule[0][2] = 'R';
+    schedule[0][3] = 'R';
+    schedule[1][3] = 'M';
+    const changes = [];
+    const origRandom = Math.random;
+    let step = 0;
+    Math.random = () => {
+      step++;
+      return step === 1 ? 0.11 : 0.1;
+    };
+    try {
+      assert.equal(ctx.isMandatoryNightRestDay(schedule, bctx, 0, 3), true);
+      assert.equal(ctx.tryChangeMove(schedule, bctx, changes), false);
+      assert.equal(schedule[0][3], 'R');
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+
+  it('should not swap away a mandatory rest day after a night block', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 2,
+        minCoverageP: 0,
+        maxCoverageP: 2,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'N';
+    schedule[0][1] = 'S';
+    schedule[0][2] = 'R';
+    schedule[0][3] = 'R';
+    schedule[1][3] = 'M';
+    const changes = [];
+    const origRandom = Math.random;
+    let step = 0;
+    Math.random = () => {
+      step++;
+      if (step === 1) return 0.11; // day 3
+      if (step === 2) return 0.1; // nurse 0
+      return 0.6; // nurse 1
+    };
+    try {
+      assert.equal(ctx.trySwapMove(schedule, bctx, changes), false);
+      assert.equal(schedule[0][3], 'R');
+      assert.equal(schedule[1][3], 'M');
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+
+  it('should not assign new work onto a mandatory rest day during equity moves', () => {
+    const config = makeMinimalConfig({
+      numNurses: 2,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 2,
+        minCoverageP: 0,
+        maxCoverageP: 2,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'N';
+    schedule[0][1] = 'S';
+    schedule[0][2] = 'R';
+    schedule[0][3] = 'R';
+    for (let d = 0; d < bctx.numDays; d++) schedule[1][d] = 'M';
+    const changes = [];
+    const cachedHours = [ctx.nurseHours(schedule, 0, bctx.numDays), ctx.nurseHours(schedule, 1, bctx.numDays)];
+    const origRandom = Math.random;
+    Math.random = () => 0.1; // pick nurse 0
+    try {
+      assert.equal(ctx.tryEquityMove(schedule, bctx, changes, cachedHours, [3]), false);
+      assert.equal(schedule[0][3], 'R');
+    } finally {
+      Math.random = origRandom;
+    }
   });
 });
 
@@ -1486,6 +1636,18 @@ describe('computeScore with previousMonthTail', () => {
 
     assert.equal(scoreWith.hard, scoreNo.hard, 'Should have same hard violations when boundary transition is valid');
   });
+
+  it('should add a hard penalty when a boundary night block is missing the second rest day', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'N'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'S';
+    schedule[0][1] = 'R';
+    schedule[0][2] = 'M';
+    const score = ctx.computeScore(schedule, bctx);
+    assert.ok(score.hard > 0, 'Expected a hard violation for the missing second R after a boundary N-S-R sequence');
+  });
 });
 
 describe('collectViolations with previousMonthTail', () => {
@@ -1499,6 +1661,20 @@ describe('collectViolations with previousMonthTail', () => {
     const boundaryViolations = violations.filter(v => v.day === -1 && v.type === 'transition');
     assert.ok(boundaryViolations.length > 0, 'Should have boundary transition violations');
     assert.ok(boundaryViolations[0].msg.includes('confine mese'));
+  });
+
+  it('should report missing second rest after a boundary night block', () => {
+    const config = makeMinimalConfig({ numNurses: 2 });
+    config.previousMonthTail = [['M', 'P', 'N'], null];
+    const bctx = ctx.buildContext(config);
+    const schedule = Array.from({ length: 2 }, () => new Array(bctx.numDays).fill('R'));
+    schedule[0][0] = 'S';
+    schedule[0][1] = 'R';
+    schedule[0][2] = 'M';
+    const violations = ctx.collectViolations(schedule, bctx);
+    const boundaryNightRest = violations.find(v => v.type === 'need_2R_after_night');
+    assert.ok(boundaryNightRest, 'Expected a boundary second-rest violation to be reported');
+    assert.match(boundaryNightRest.msg, /confine mese/);
   });
 });
 
