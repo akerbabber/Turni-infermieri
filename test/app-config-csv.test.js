@@ -221,6 +221,42 @@ describe('config CSV helpers', () => {
     assert.equal(nextState.selectedSolution, 0);
     assert.equal(nextState.solverMethod, null);
   });
+
+  it('should respect totalNurses from imported config and ignore extra nurse rows', () => {
+    const currentState = toPlain(ctx._getAppState());
+    ctx.renderAll = () => {};
+    ctx.saveState = () => {};
+    ctx._setAppState({
+      ...currentState,
+      totalNurses: 2,
+      absentNurses: 0,
+      nurses: [
+        { id: 'n1', name: 'A', tags: [], absencePeriods: {} },
+        { id: 'n2', name: 'B', tags: [], absencePeriods: {} },
+      ],
+    });
+
+    ctx.applyConfigPayload({
+      totalNurses: 3,
+      absentNurses: 0,
+      nurses: [
+        { name: 'Uno', tags: [], absencePeriods: {} },
+        { name: 'Due', tags: [], absencePeriods: {} },
+        { name: 'Tre', tags: [], absencePeriods: {} },
+        { name: 'Quattro', tags: [], absencePeriods: {} },
+        { name: 'Cinque', tags: [], absencePeriods: {} },
+      ],
+      rules: { ...defaultRulesForApply(ctx), fasciaOraria: 'standard' },
+    });
+
+    const nextState = toPlain(ctx._getAppState());
+    assert.equal(nextState.totalNurses, 3);
+    assert.equal(nextState.nurses.length, 3);
+    assert.deepEqual(
+      nextState.nurses.map(nurse => nurse.name),
+      ['Uno', 'Due', 'Tre']
+    );
+  });
 });
 
 describe('previous month hour compensation', () => {

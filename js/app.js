@@ -1017,16 +1017,19 @@ function applyConfigPayload(cfg) {
   if (cfg.month !== undefined) state.month = Math.max(0, Math.min(11, parseInt(cfg.month) || 0));
   if (cfg.year !== undefined) state.year = Math.max(2020, parseInt(cfg.year) || state.year);
 
+  const explicitTotalNurses =
+    cfg.totalNurses !== undefined ? Math.max(1, parseInt(cfg.totalNurses, 10) || 1) : null;
+
   const importedNurses =
     Array.isArray(cfg.nurses) && cfg.nurses.length > 0
       ? cfg.nurses.map((nurse, index) => normalizeNurse(nurse, index))
       : null;
   if (importedNurses) {
-    state.nurses = importedNurses;
+    state.nurses = explicitTotalNurses !== null ? importedNurses.slice(0, explicitTotalNurses) : importedNurses;
   }
 
-  if (cfg.totalNurses !== undefined) {
-    state.totalNurses = Math.max(1, parseInt(cfg.totalNurses) || 1);
+  if (explicitTotalNurses !== null) {
+    state.totalNurses = explicitTotalNurses;
   } else if (importedNurses) {
     state.totalNurses = importedNurses.length;
   }
@@ -1035,7 +1038,7 @@ function applyConfigPayload(cfg) {
     state.nurses.push(normalizeNurse({}, state.nurses.length));
   }
   if (state.nurses.length > state.totalNurses) {
-    state.totalNurses = state.nurses.length;
+    state.nurses = state.nurses.slice(0, state.totalNurses);
   }
 
   if (cfg.absentNurses !== undefined) {
