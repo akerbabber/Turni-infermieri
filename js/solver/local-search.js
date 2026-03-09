@@ -6,7 +6,7 @@
 
 'use strict';
 
-/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, getRestPromotionPriority */
+/* global computeScore, countWeekRest, dayCoverage, deepCopy, getRestPromotionPriority, isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
@@ -141,7 +141,7 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     const beforePass = repaired.map(row => row.join('|')).join('\n');
     repaired = repairNightCoverage(repaired, ctx);
     repaired = repairNightRestContinuity(repaired, ctx);
-    repaired = repairNoDiurniRecoveryRests(repaired, ctx);
+    repaired = repairSplitRestDays(repaired, ctx);
     repaired = repairDayCoverage(repaired, ctx);
     repaired = repairWeeklyRestDeficits(repaired, ctx);
     if (repaired.map(row => row.join('|')).join('\n') === beforePass) break;
@@ -458,25 +458,50 @@ function repairDayCoverage(schedule, ctx) {
   return repaired;
 }
 
-function repairNoDiurniRecoveryRests(schedule, ctx) {
-  const { numDays, numNurses, nurseProps, pinned, maxCovM, maxCovP } = ctx;
+function repairSplitRestDays(schedule, ctx) {
+  const { numDays, numNurses, nurseProps, maxCovM, maxCovP, maxCovD, minRPerWeek, weekDaysList, weekOf } = ctx;
   const repaired = deepCopy(schedule);
 
+  function hasSpareWeeklyRest(n, d) {
+    if (minRPerWeek <= 0) return true;
+    const wDays = weekDaysList[weekOf(d)];
+    return countWeekRest(repaired, n, wDays) > requiredRest(wDays.length, minRPerWeek);
+  }
+
+  function candidateShiftOrder(n, d) {
+    const prev = d > 0 ? repaired[n][d - 1] : null;
+    const next = d < numDays - 1 ? repaired[n][d + 1] : null;
+    const ordered = [];
+    const candidates = [prev, next, 'M', 'P', 'D'].filter(shift => shift === 'M' || shift === 'P' || shift === 'D');
+    for (const shift of candidates) {
+      if (!ordered.includes(shift)) ordered.push(shift);
+    }
+    return ordered;
+  }
+
   for (let n = 0; n < numNurses; n++) {
-    const props = nurseProps[n];
-    if (!props.noDiurni || props.noNotti || props.soloNotti || isMPCycleLimitedNurse(props)) continue;
-    for (let d = 3; d < numDays; d++) {
-      if (repaired[n][d] !== 'R' || pinned[n][d] || !isOptionalRestAfterNSR(repaired, ctx, n, d)) continue;
+    if (isMPCycleLimitedNurse(nurseProps[n])) continue;
+    for (let d = 1; d < numDays - 1; d++) {
+      if (!isSplitRestDay(repaired, ctx, n, d) || !hasSpareWeeklyRest(n, d)) continue;
       const cov = dayCoverage(repaired, d, numNurses);
-      const options = cov.M <= cov.P ? ['M', 'P'] : ['P', 'M'];
-      for (const shiftType of options) {
-        if ((shiftType === 'M' && cov.M >= maxCovM) || (shiftType === 'P' && cov.P >= maxCovP)) continue;
-        const prev = d > 0 ? repaired[n][d - 1] : null;
-        const next = d < numDays - 1 ? repaired[n][d + 1] : null;
-        if (!transitionOk(prev, shiftType, ctx, repaired, n, d)) continue;
-        if (!transitionOk(shiftType, next, ctx, repaired, n, d + 1)) continue;
-        repaired[n][d] = shiftType;
-        break;
+      const currentScore = computeScore(repaired, ctx);
+      let bestShift = null;
+      let bestScore = currentScore;
+      for (const shiftType of candidateShiftOrder(n, d)) {
+        if (shiftType === 'M' && cov.M >= maxCovM) continue;
+        if (shiftType === 'P' && cov.P >= maxCovP) continue;
+        if (shiftType === 'D' && (cov.M >= maxCovM || cov.P >= maxCovP || cov.D >= maxCovD)) continue;
+        if (!canRepairShiftChange(repaired, ctx, n, d, shiftType)) continue;
+        const candidate = deepCopy(repaired);
+        candidate[n][d] = shiftType;
+        const score = computeScore(candidate, ctx);
+        if (score.hard < bestScore.hard || (score.hard === bestScore.hard && score.total < bestScore.total)) {
+          bestShift = shiftType;
+          bestScore = score;
+        }
+      }
+      if (bestShift) {
+        repaired[n][d] = bestShift;
       }
     }
   }

@@ -68,6 +68,35 @@ function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
   );
 }
 
+function isWorkShift(shift) {
+  return shift === 'M' || shift === 'P' || shift === 'D' || shift === 'N';
+}
+
+function isDRDNBridge(schedule, ctx, nurseIdx, dayIdx) {
+  return (
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'D' &&
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx + 1) === 'D' &&
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx + 2) === 'N'
+  );
+}
+
+function isSplitRestDay(schedule, ctx, nurseIdx, dayIdx) {
+  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0 || dayIdx >= ctx.numDays) return false;
+  if (ctx.pinned && ctx.pinned[nurseIdx] && ctx.pinned[nurseIdx][dayIdx]) return false;
+  if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
+  if (isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx)) return false;
+  if (isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx)) return false;
+
+  const prev = getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1);
+  const next = getShiftAt(schedule, ctx, nurseIdx, dayIdx + 1);
+  if (!isWorkShift(prev) || !isWorkShift(next)) return false;
+
+  // Keep the D-R-D-N bridge available when diurni need to stay separated before a night.
+  if (isDRDNBridge(schedule, ctx, nurseIdx, dayIdx)) return false;
+
+  return true;
+}
+
 function getRestPromotionPriority(props) {
   if (props.noDiurni) return 0;
   if (props.mattineEPomeriggi) return 1;
@@ -378,12 +407,11 @@ function computeScore(schedule, ctx) {
     soft += Math.abs(mC - pC) * 2;
   }
 
-  // Soft: no_diurni nurses who can still do M/P/N should resume work after N-S-R
-  // instead of accumulating optional extra rest days when coverage can be distributed.
+  // Soft: discourage isolated discretionary rest days between work stretches.
+  // If extra rest is needed, prefer keeping it attached to post-night recovery.
   for (let n = 0; n < numNurses; n++) {
-    if (!nurseProps[n].noDiurni || nurseProps[n].noNotti || nurseProps[n].soloNotti) continue;
-    for (let d = ctx.prevTail ? 0 : 3; d < numDays; d++) {
-      if (schedule[n][d] === 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) soft += 4;
+    for (let d = ctx.prevTail ? 0 : 1; d < numDays - 1; d++) {
+      if (isSplitRestDay(schedule, ctx, n, d)) soft += 4;
     }
   }
 

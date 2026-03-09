@@ -794,7 +794,7 @@ describe('computeScore', () => {
     );
   });
 
-  it('should penalize an extra optional rest after N-S-R for no_diurni nurses', () => {
+  it('should prefer a post-night extra rest over a split M-R-P-N work stretch', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
       nurseOverrides: {
@@ -813,20 +813,66 @@ describe('computeScore', () => {
       },
     });
     const bctx = ctx.buildContext(config);
-    bctx.numDays = 4;
-    const withExtraRest = [['N', 'S', 'R', 'R']];
-    const withRecoveryShift = [['N', 'S', 'R', 'M']];
-    const restScore = ctx.computeScore(withExtraRest, bctx);
-    const recoveryScore = ctx.computeScore(withRecoveryShift, bctx);
+    bctx.numDays = 6;
+    const clusteredRest = [['N', 'S', 'R', 'R', 'M', 'P']];
+    const splitRest = [['M', 'R', 'P', 'N', 'S', 'R']];
+    const clusteredScore = ctx.computeScore(clusteredRest, bctx);
+    const splitScore = ctx.computeScore(splitRest, bctx);
     assert.ok(
-      restScore.soft > recoveryScore.soft,
-      `Expected extra rest to be penalized, got ${restScore.soft} vs ${recoveryScore.soft}`
+      splitScore.soft > clusteredScore.soft,
+      `Expected split rest to be penalized, got ${splitScore.soft} vs ${clusteredScore.soft}`
     );
   });
 });
 
 // ---------------------------------------------------------------------------
-// 13. transitionOk
+// 13. isSplitRestDay
+// ---------------------------------------------------------------------------
+describe('isSplitRestDay', () => {
+  it('should detect an isolated rest inside a M-R-P-N work stretch', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 2,
+        minCoverageP: 0,
+        maxCoverageP: 2,
+        minCoverageN: 0,
+        maxCoverageN: 2,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 4;
+    const schedule = [['M', 'R', 'P', 'N']];
+    assert.equal(ctx.isSplitRestDay(schedule, bctx, 0, 1), true);
+  });
+
+  it('should allow the D-R-D-N bridge without flagging it as a split rest', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 2,
+        minCoverageP: 0,
+        maxCoverageP: 2,
+        minCoverageD: 0,
+        maxCoverageD: 2,
+        minCoverageN: 0,
+        maxCoverageN: 2,
+        minRPerWeek: 0,
+        consente2DiurniConsecutivi: true,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 4;
+    const schedule = [['D', 'R', 'D', 'N']];
+    assert.equal(ctx.isSplitRestDay(schedule, bctx, 0, 1), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14. transitionOk
 // ---------------------------------------------------------------------------
 describe('transitionOk', () => {
   let bctx;
@@ -878,7 +924,7 @@ describe('transitionOk', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 14. getAbsenceShift
+// 15. getAbsenceShift
 // ---------------------------------------------------------------------------
 describe('getAbsenceShift', () => {
   it('should return F for a nurse with ferie tag and date in range', () => {
@@ -968,7 +1014,7 @@ describe('getAbsenceShift', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 15. construct
+// 16. construct
 // ---------------------------------------------------------------------------
 describe('construct', () => {
   it('should produce a schedule with correct dimensions (numNurses x numDays)', () => {
@@ -1108,24 +1154,24 @@ describe('construct', () => {
     }
   });
 
-  it('should bring no_diurni nurses back to M/P after the single mandatory rest following a night block', () => {
+  it('should keep extra rest attached to a night block when no_diurni nurses have slack days', () => {
     const config = makeMinimalConfig({
-      numNurses: 8,
+      numNurses: 1,
       nurseOverrides: {
         0: { tags: ['no_diurni'] },
       },
       rules: {
-        minCoverageM: 1,
-        maxCoverageM: 2,
-        minCoverageP: 1,
-        maxCoverageP: 2,
+        minCoverageM: 0,
+        maxCoverageM: 0,
+        minCoverageP: 0,
+        maxCoverageP: 0,
         minCoverageD: 0,
         maxCoverageD: 0,
         minCoverageN: 1,
-        maxCoverageN: 2,
-        targetNights: 4,
-        maxNights: 6,
-        minRPerWeek: 1,
+        maxCoverageN: 1,
+        targetNights: 1,
+        maxNights: 8,
+        minRPerWeek: 0,
       },
     });
     const origRandom = Math.random;
@@ -1138,15 +1184,11 @@ describe('construct', () => {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
       const row = schedule[0];
-      for (let d = 0; d < bctx.numDays - 3; d++) {
-        if (row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R') {
-          assert.notEqual(
-            row[d + 3],
-            'R',
-            `no_diurni nurse should resume M/P after N-S-R, got ${row.slice(d, d + 4).join('-')}`
-          );
-        }
-      }
+      const hasClusteredRest = Array.from(
+        { length: bctx.numDays - 3 },
+        (_, d) => row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R'
+      ).some(match => match);
+      assert.equal(hasClusteredRest, true, `Expected at least one N-S-R-R cluster, got ${row.join('-')}`);
     } finally {
       Math.random = origRandom;
     }
@@ -1411,7 +1453,7 @@ describe('localSearch night coverage repair', () => {
 });
 
 describe('solveFallback', () => {
-  it('should reach zero violations without leaving extra no_diurni recovery rests', () => {
+  it('should reach zero violations without generating M-R-P-N or P-R-M-N split-rest patterns', () => {
     const config = makeMinimalConfig({
       numNurses: 8,
       nurseOverrides: {
@@ -1444,17 +1486,63 @@ describe('solveFallback', () => {
       assert.equal(result.violations.length, 0, `Fallback solver should reach zero violations, got ${result.violations.length}`);
       for (const nurseIdx of [0, 1]) {
         const row = result.schedule[nurseIdx];
-        for (let d = 3; d < row.length; d++) {
-          assert.notDeepEqual(
-            row.slice(d - 3, d + 1),
-            ['N', 'S', 'R', 'R'],
-            `no_diurni nurse ${nurseIdx} should resume work after N-S-R, got ${row.slice(d - 3, d + 1).join('-')}`
-          );
+        for (let d = 0; d < row.length - 3; d++) {
+          const window = row.slice(d, d + 4);
+          assert.notDeepEqual(window, ['M', 'R', 'P', 'N'], `Unexpected split-rest pattern for nurse ${nurseIdx}: ${window.join('-')}`);
+          assert.notDeepEqual(window, ['P', 'R', 'M', 'N'], `Unexpected split-rest pattern for nurse ${nurseIdx}: ${window.join('-')}`);
         }
       }
     } finally {
       Math.random = origRandom;
     }
+  });
+});
+
+describe('localSearch split rest repair', () => {
+  it('should convert an isolated extra rest back into work when the weekly quota has spare room', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 3,
+        minCoverageP: 0,
+        maxCoverageP: 3,
+        minCoverageD: 0,
+        maxCoverageD: 1,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 6;
+    const schedule = [['M', 'R', 'P', 'N', 'S', 'R']];
+    const repaired = ctx.localSearch(schedule, bctx, 0);
+    assert.notEqual(repaired[0][1], 'R');
+    assert.equal(ctx.isSplitRestDay(repaired, bctx, 0, 1), false);
+  });
+
+  it('should preserve the D-R-D-N bridge when repairs run with zero annealing iterations', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 3,
+        minCoverageP: 0,
+        maxCoverageP: 3,
+        minCoverageD: 0,
+        maxCoverageD: 3,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+        consente2DiurniConsecutivi: true,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 6;
+    const schedule = [['D', 'R', 'D', 'N', 'S', 'R']];
+    const repaired = ctx.localSearch(schedule, bctx, 0);
+    assert.deepEqual(toPlain(repaired[0].slice(0, 4)), ['D', 'R', 'D', 'N']);
   });
 });
 
