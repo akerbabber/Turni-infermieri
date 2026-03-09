@@ -472,38 +472,45 @@ function construct(ctx) {
       }
       mpCount[n] = { m: mc, p: pc };
     }
-    while (cov.M < maxCovM || cov.P < maxCovP) {
-      let assigned = false;
+
+    function tryAssignMPShift(shiftType, respectWeekBudget) {
+      if (shiftType === 'M' && cov.M >= maxCovM) return false;
+      if (shiftType === 'P' && cov.P >= maxCovP) return false;
+      const candidates = avail().filter(n => eligible(n, d, shiftType) && (!respectWeekBudget || hasWeekBudget(n, d)));
+      // Sort candidates: prefer nurses who need this shift type for personal M/P balance
+      candidates.sort((a, b) => {
+        const aBal = shiftType === 'M' ? mpCount[a].m - mpCount[a].p : mpCount[a].p - mpCount[a].m;
+        const bBal = shiftType === 'M' ? mpCount[b].m - mpCount[b].p : mpCount[b].p - mpCount[b].m;
+        return aBal - bBal;
+      });
+      if (candidates.length === 0) return false;
+      const n = candidates[0];
+      schedule[n][d] = shiftType;
+      if (shiftType === 'M') {
+        cov.M++;
+        mpCount[n].m++;
+      } else {
+        cov.P++;
+        mpCount[n].p++;
+      }
+      return true;
+    }
+
+    // Phase 3a — fill minimum M/P coverage before using the remaining headroom.
+    while (cov.M < minCovM || cov.P < minCovP) {
       const mGap = Math.max(0, minCovM - cov.M);
       const pGap = Math.max(0, minCovP - cov.P);
-      const first = mGap >= pGap ? 'M' : 'P';
+      // On ties (mGap === pGap) prefer P so the heuristic keeps morning headroom available for a later D
+      // assignment. This works because D shifts count toward both M and P coverage, so assigning D later
+      // can simultaneously fill the remaining gaps and reduce afternoon shortages.
+      const first = mGap > pGap ? 'M' : 'P';
       const second = first === 'M' ? 'P' : 'M';
-      for (const s of [first, second]) {
-        if (s === 'M' && cov.M >= maxCovM) continue;
-        if (s === 'P' && cov.P >= maxCovP) continue;
-        // Below minCov: prioritize coverage (ignore weekly budget)
-        // At or above minCov: respect weekly budget
-        const belowMin = s === 'M' ? cov.M < minCovM : cov.P < minCovP;
-        const candidates = avail().filter(n => eligible(n, d, s) && (belowMin || hasWeekBudget(n, d)));
-        // Sort candidates: prefer nurses who need this shift type for personal M/P balance
-        candidates.sort((a, b) => {
-          const aBal = s === 'M' ? mpCount[a].m - mpCount[a].p : mpCount[a].p - mpCount[a].m;
-          const bBal = s === 'M' ? mpCount[b].m - mpCount[b].p : mpCount[b].p - mpCount[b].m;
-          return aBal - bBal;
-        });
-        if (candidates.length > 0) {
-          const n = candidates[0];
-          schedule[n][d] = s;
-          if (s === 'M') {
-            cov.M++;
-            mpCount[n].m++;
-          } else {
-            cov.P++;
-            mpCount[n].p++;
-          }
-          assigned = true;
-          break;
-        }
+      let assigned = false;
+      if ((first === 'M' ? cov.M : cov.P) < (first === 'M' ? minCovM : minCovP)) {
+        assigned = tryAssignMPShift(first, false);
+      }
+      if (!assigned && (second === 'M' ? cov.M : cov.P) < (second === 'M' ? minCovM : minCovP)) {
+        assigned = tryAssignMPShift(second, false);
       }
       if (!assigned) break;
     }
@@ -526,6 +533,17 @@ function construct(ctx) {
         cov.M++;
         cov.P++;
       }
+    }
+
+    // Phase 3b — once minimums are safe, use any remaining headroom up to the configured maximums.
+    while (cov.M < maxCovM || cov.P < maxCovP) {
+      const mSpare = maxCovM - cov.M;
+      const pSpare = maxCovP - cov.P;
+      const first = mSpare >= pSpare ? 'M' : 'P';
+      const second = first === 'M' ? 'P' : 'M';
+      if (tryAssignMPShift(first, true)) continue;
+      if (tryAssignMPShift(second, true)) continue;
+      break;
     }
   }
 

@@ -29,6 +29,34 @@ function transitionOk(prev, next, ctx, schedule, nurseIdx, dayIdx) {
   return true;
 }
 
+// Read a shift from the current month schedule, or from previousMonthTail when
+// dayIdx is negative. Negative indices are translated from the tail end so
+// dayIdx === -1 means "last shift of previous month", dayIdx === -2 the one before, etc.
+function getShiftAt(schedule, ctx, nurseIdx, dayIdx) {
+  if (nurseIdx === undefined || nurseIdx === null) return null;
+  if (dayIdx >= 0) {
+    if (dayIdx >= schedule[nurseIdx].length) return null;
+    return schedule[nurseIdx][dayIdx];
+  }
+  if (!ctx.prevTail) return null;
+  const tail = ctx.prevTail[nurseIdx];
+  if (!tail) return null;
+  const tailIdx = tail.length + dayIdx;
+  return tailIdx >= 0 ? tail[tailIdx] : null;
+}
+
+// Detect mandatory rest days inside an N-S-R-R block:
+// - the first R immediately after S is always locked
+// - the second R after N-S-R is also locked for nurses who are not noDiurni
+function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
+  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
+  if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
+  const prev1 = getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1);
+  const prev2 = getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2);
+  if (prev1 === 'S') return true;
+  return !ctx.nurseProps[nurseIdx].noDiurni && prev1 === 'R' && prev2 === 'S';
+}
+
 function dayCoverage(schedule, d, numNurses) {
   let M = 0,
     P = 0,
@@ -188,13 +216,17 @@ function computeScore(schedule, ctx) {
       // S must be followed by R
       if (cur === 'S' && nxt !== 'R') hard++;
     }
-    // N-S-R-R: second R required (except no_diurni nurses need only 1 R)
-    // Now diurni_e_notturni uses the same N-S-R-R pattern as regular nurses
-    for (let d = 0; d < numDays - 3; d++) {
-      if (schedule[n][d] === 'N' && schedule[n][d + 1] === 'S' && schedule[n][d + 2] === 'R') {
-        if (!nurseProps[n].noDiurni && schedule[n][d + 3] !== 'R') {
-          hard++;
-        }
+    // N-S-R-R: second R required (except no_diurni nurses need only 1 R),
+    // including night blocks that started in the previous month tail.
+    for (let d = ctx.prevTail ? -3 : 0; d < numDays - 3; d++) {
+      if (
+        getShiftAt(schedule, ctx, n, d) === 'N' &&
+        getShiftAt(schedule, ctx, n, d + 1) === 'S' &&
+        getShiftAt(schedule, ctx, n, d + 2) === 'R' &&
+        !nurseProps[n].noDiurni &&
+        getShiftAt(schedule, ctx, n, d + 3) !== 'R'
+      ) {
+        hard++;
       }
     }
     // D-D must be followed by R; no 3 consecutive D
@@ -438,17 +470,23 @@ function collectViolations(schedule, ctx) {
           msg: `Infermiere ${n + 1}, giorno ${d + 1}: S non seguito da R (primo riposo dopo smonto)`,
         });
     }
-    for (let d = 0; d < numDays - 3; d++) {
-      if (schedule[n][d] === 'N' && schedule[n][d + 1] === 'S' && schedule[n][d + 2] === 'R') {
-        // N-S-R-R: second R required for diurni_e_notturni and regular nurses (except noDiurni)
-        if (!nurseProps[n].noDiurni && schedule[n][d + 3] !== 'R') {
-          violations.push({
-            nurse: n,
-            day: d,
-            type: 'need_2R_after_night',
-            msg: `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)`,
-          });
-        }
+    for (let d = ctx.prevTail ? -3 : 0; d < numDays - 3; d++) {
+      if (
+        getShiftAt(schedule, ctx, n, d) === 'N' &&
+        getShiftAt(schedule, ctx, n, d + 1) === 'S' &&
+        getShiftAt(schedule, ctx, n, d + 2) === 'R' &&
+        !nurseProps[n].noDiurni &&
+        getShiftAt(schedule, ctx, n, d + 3) !== 'R'
+      ) {
+        violations.push({
+          nurse: n,
+          day: d < 0 ? -1 : d,
+          type: 'need_2R_after_night',
+          msg:
+            d < 0
+              ? `Infermiere ${n + 1}, confine mese: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)`
+              : `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)`,
+        });
       }
     }
     if (consente2D) {

@@ -6,7 +6,7 @@
 
 'use strict';
 
-/* global isMPCycleLimitedNurse */
+/* global isMPCycleLimitedNurse, isMandatoryNightRestDay */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
@@ -266,6 +266,8 @@ function trySwapMove(schedule, ctx, changes) {
   const s1 = schedule[n1][d],
     s2 = schedule[n2][d];
   if (s1 === s2) return false;
+  if (s1 === 'R' && isMandatoryNightRestDay(schedule, ctx, n1, d)) return false;
+  if (s2 === 'R' && isMandatoryNightRestDay(schedule, ctx, n2, d)) return false;
   if (s1 === 'N' || s1 === 'S' || s2 === 'N' || s2 === 'S') return false;
   // solo_diurni: can only have D or R
   if (nurseProps[n1].soloDiurni && s2 !== 'D' && s2 !== 'R') return false;
@@ -298,6 +300,7 @@ function tryChangeMove(schedule, ctx, changes) {
   if (isMPCycleLimitedNurse(nurseProps[n])) return false;
   if (pinned[n][d]) return false;
   const old = schedule[n][d];
+  if (old === 'R' && isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
   if (old === 'N' || old === 'S') return false;
   if (nurseProps[n].soloMattine) return false;
   // solo_diurni: can only change to D or R
@@ -409,6 +412,7 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
   } else if (h < target - EQUITY_THRESHOLD_HOURS) {
     for (const d of days) {
       if (pinned[n][d] || schedule[n][d] !== 'R') continue;
+      if (isMandatoryNightRestDay(schedule, ctx, n, d)) continue;
       if (minRPerWeek > 0) {
         const wIdx = weekOf(d);
         const wDays = weekDaysList[wIdx];
@@ -472,6 +476,7 @@ function tryWeeklyRestMove(schedule, ctx, changes, nurseIndices) {
         for (const o of others) {
           if (isMPCycleLimitedNurse(nurseProps[o])) continue;
           if (pinned[o][d] || schedule[o][d] !== 'R') continue;
+          if (isMandatoryNightRestDay(schedule, ctx, o, d)) continue;
           if (
             nurseProps[o].soloMattine ||
             nurseProps[o].soloDiurni ||
