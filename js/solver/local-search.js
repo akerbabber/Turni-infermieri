@@ -6,7 +6,7 @@
 
 'use strict';
 
-/* global computeScore, countWeekRest, dayCoverage, deepCopy, getRestPromotionPriority, isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
+/* global computeScore, countWeekRest, dayCoverage, deepCopy, getRestPromotionPriority, isForbiddenExtraNightRestDay, isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
@@ -141,6 +141,7 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     const beforePass = repaired.map(row => row.join('|')).join('\n');
     repaired = repairNightCoverage(repaired, ctx);
     repaired = repairNightRestContinuity(repaired, ctx);
+    repaired = repairForbiddenExtraNightRest(repaired, ctx);
     repaired = repairSplitRestDays(repaired, ctx);
     repaired = repairDayCoverage(repaired, ctx);
     repaired = repairWeeklyRestDeficits(repaired, ctx);
@@ -314,8 +315,7 @@ function canRepairShiftChange(schedule, ctx, n, d, nextShift) {
   if (pinned[n][d] || schedule[n][d] === nextShift) return false;
   if (isMPCycleLimitedNurse(nurseProps[n])) return false;
   if (!isRepairShiftAllowed(nurseProps[n], nextShift)) return false;
-  // Repairs must never introduce new discretionary R days for no_diurni nurses.
-  if (nextShift === 'R' && nurseProps[n].noDiurni) return false;
+  if (nextShift === 'R' && isForbiddenExtraNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift !== 'R' && schedule[n][d] === 'R' && isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift === 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) return false;
   const prev = d > 0 ? schedule[n][d - 1] : null;
@@ -509,6 +509,50 @@ function repairSplitRestDays(schedule, ctx) {
   return repaired;
 }
 
+function repairForbiddenExtraNightRest(schedule, ctx) {
+  const { numDays, numNurses, nurseProps, maxCovM, maxCovP, maxCovD } = ctx;
+  const repaired = deepCopy(schedule);
+
+  function candidateShiftOrder(n, d) {
+    const props = nurseProps[n];
+    if (props.soloDiurni || props.diurniENotturni) return ['D'];
+    const prev = d > 0 ? repaired[n][d - 1] : null;
+    const next = d < numDays - 1 ? repaired[n][d + 1] : null;
+    const base = props.noDiurni ? [prev, next, 'M', 'P'] : [prev, next, 'D', 'M', 'P'];
+    const ordered = [];
+    for (const shift of base) {
+      if ((shift === 'M' || shift === 'P' || shift === 'D') && !ordered.includes(shift)) ordered.push(shift);
+    }
+    return ordered;
+  }
+
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (!isForbiddenExtraNightRestDay(repaired, ctx, n, d)) continue;
+      const cov = dayCoverage(repaired, d, numNurses);
+      const currentScore = computeScore(repaired, ctx);
+      let bestShift = null;
+      let bestScore = currentScore;
+      for (const shiftType of candidateShiftOrder(n, d)) {
+        if (shiftType === 'M' && cov.M >= maxCovM) continue;
+        if (shiftType === 'P' && cov.P >= maxCovP) continue;
+        if (shiftType === 'D' && (cov.M >= maxCovM || cov.P >= maxCovP || cov.D >= maxCovD)) continue;
+        if (!canRepairShiftChange(repaired, ctx, n, d, shiftType)) continue;
+        const candidate = deepCopy(repaired);
+        candidate[n][d] = shiftType;
+        const score = computeScore(candidate, ctx);
+        if (score.hard < bestScore.hard || (score.hard === bestScore.hard && score.total < bestScore.total)) {
+          bestShift = shiftType;
+          bestScore = score;
+        }
+      }
+      if (bestShift) repaired[n][d] = bestShift;
+    }
+  }
+
+  return repaired;
+}
+
 function repairWeeklyRestDeficits(schedule, ctx) {
   const { numNurses, minRPerWeek, weekDaysList, pinned, nurseProps } = ctx;
   if (minRPerWeek <= 0) return schedule;
@@ -621,6 +665,8 @@ function trySwapMove(schedule, ctx, changes) {
   // diurni_e_notturni: can only have D, N, S, R (N/S already handled above)
   if (nurseProps[n1].diurniENotturni && s2 !== 'D' && s2 !== 'R') return false;
   if (nurseProps[n2].diurniENotturni && s1 !== 'D' && s1 !== 'R') return false;
+  if (!canRepairShiftChange(schedule, ctx, n1, d, s2)) return false;
+  if (!canRepairShiftChange(schedule, ctx, n2, d, s1)) return false;
   const prev1 = d > 0 ? schedule[n1][d - 1] : null,
     next1 = d < numDays - 1 ? schedule[n1][d + 1] : null;
   const prev2 = d > 0 ? schedule[n2][d - 1] : null,
@@ -652,10 +698,7 @@ function tryChangeMove(schedule, ctx, changes) {
     const choices = ['D', 'R'].filter(s => s !== old);
     shuffle(choices);
     for (const s of choices) {
-      const prev = d > 0 ? schedule[n][d - 1] : null;
-      const next = d < numDays - 1 ? schedule[n][d + 1] : null;
-      if (!transitionOk(prev, s, ctx, schedule, n, d)) continue;
-      if (!transitionOk(s, next, ctx, schedule, n, d + 1)) continue;
+      if (!canRepairShiftChange(schedule, ctx, n, d, s)) continue;
       setCell(schedule, n, d, s, changes);
       return true;
     }
@@ -668,10 +711,7 @@ function tryChangeMove(schedule, ctx, changes) {
     const choices = ['D', 'R'].filter(s => s !== old);
     shuffle(choices);
     for (const s of choices) {
-      const prev = d > 0 ? schedule[n][d - 1] : null;
-      const next = d < numDays - 1 ? schedule[n][d + 1] : null;
-      if (!transitionOk(prev, s, ctx, schedule, n, d)) continue;
-      if (!transitionOk(s, next, ctx, schedule, n, d + 1)) continue;
+      if (!canRepairShiftChange(schedule, ctx, n, d, s)) continue;
       setCell(schedule, n, d, s, changes);
       return true;
     }
@@ -681,11 +721,7 @@ function tryChangeMove(schedule, ctx, changes) {
   if (!nurseProps[n].noDiurni && old !== 'D') choices.push('D');
   shuffle(choices);
   for (const s of choices) {
-    if (s === 'D' && nurseProps[n].noDiurni) continue;
-    const prev = d > 0 ? schedule[n][d - 1] : null;
-    const next = d < numDays - 1 ? schedule[n][d + 1] : null;
-    if (!transitionOk(prev, s, ctx, schedule, n, d)) continue;
-    if (!transitionOk(s, next, ctx, schedule, n, d + 1)) continue;
+    if (!canRepairShiftChange(schedule, ctx, n, d, s)) continue;
     setCell(schedule, n, d, s, changes);
     return true;
   }
@@ -737,10 +773,7 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
         const cov = dayCoverage(schedule, d, numNurses);
         if ((s === 'M' ? cov.M : cov.P) <= (s === 'M' ? ctx.minCovM : ctx.minCovP)) continue;
       }
-      const prev = d > 0 ? schedule[n][d - 1] : null;
-      const next = d < numDays - 1 ? schedule[n][d + 1] : null;
-      if (!transitionOk(prev, 'R', ctx, schedule, n, d)) continue;
-      if (!transitionOk('R', next, ctx, schedule, n, d + 1)) continue;
+      if (!canRepairShiftChange(schedule, ctx, n, d, 'R')) continue;
       setCell(schedule, n, d, 'R', changes);
       return true;
     }
