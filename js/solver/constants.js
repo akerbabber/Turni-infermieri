@@ -33,6 +33,7 @@ const HOUR_EQUITY_MILP_WEIGHT = 0.3; // weight for minimax hour equity in MILP o
 const NIGHT_EQUITY_MILP_WEIGHT = 0.15; // weight for minimax night equity in MILP objective
 const DIURNI_EQUITY_MILP_WEIGHT = 0.15; // weight for minimax D-shift equity in MILP objective
 const MP_BALANCE_MILP_WEIGHT = 0.1; // weight for M/P balance penalty in MILP objective
+const MONTHLY_HOURS_PER_WEEKDAY = 7.12;
 
 const ABSENCE_TAG_TO_SHIFT = {
   ferie: 'F',
@@ -95,6 +96,20 @@ function isWeekend(year, month, day) {
 }
 function daysInMonth(year, month) {
   return new Date(year, month + 1, 0).getDate();
+}
+
+function countWeekdaysInMonth(year, month) {
+  const totalDays = daysInMonth(year, month);
+  let weekdays = 0;
+  for (let day = 1; day <= totalDays; day++) {
+    const dow = dayOfWeek(year, month, day);
+    if (dow >= 1 && dow <= 5) weekdays++;
+  }
+  return weekdays;
+}
+
+function getMonthlyContractHours(year, month) {
+  return Math.round(countWeekdaysInMonth(year, month) * MONTHLY_HOURS_PER_WEEKDAY * 100) / 100;
 }
 
 function gapHours(prev, next) {

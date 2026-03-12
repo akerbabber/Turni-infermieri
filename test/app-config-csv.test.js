@@ -320,3 +320,10 @@ describe('previous month hour compensation', () => {
     assert.equal(deltaSum, 0);
   });
 });
+
+describe('monthly contract hours helpers', () => {
+  it('should compute April 2026 month-hours from weekdays × 7.12', () => {
+    assert.equal(ctx.countWeekdaysInMonth(2026, 3), 22);
+    assert.equal(ctx.getMonthlyContractHours(2026, 3), 156.64);
+  });
+});

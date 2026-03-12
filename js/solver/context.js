@@ -17,6 +17,7 @@ function buildContext(config) {
 
   const numDays = daysInMonth(year, month);
   const numNurses = nurses.length;
+  const monthlyTargetHours = getMonthlyContractHours(year, month);
 
   // Forbidden-transition table (may be relaxed by rule flags)
   const forbidden = {
@@ -148,6 +149,7 @@ function buildContext(config) {
     preferDiurni,
     coppiaTurni,
     consente2D,
+    monthlyTargetHours,
     hourDeltas: hourDeltas || null,
     prevTail,
   };

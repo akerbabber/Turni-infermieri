@@ -58,14 +58,7 @@ function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
 }
 
 function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
-  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
-  const props = ctx.nurseProps[nurseIdx];
-  if (!props || !props.noDiurni || props.noNotti || props.soloNotti) return false;
-  return (
-    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'R' &&
-    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2) === 'S' &&
-    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 3) === 'N'
-  );
+  return false;
 }
 
 function isWorkShift(shift) {
@@ -161,9 +154,21 @@ const SHORT_MP_CYCLE_PATTERNS = [
   ['M', 'M', 'P', 'R', 'R'],
   ['M', 'P', 'P', 'R', 'R'],
 ];
+const MP_NIGHT_PATTERNS = [
+  ['M', 'M', 'P'],
+  ['M', 'P', 'P'],
+  ['M', 'M', 'M'],
+  ['P', 'P', 'P'],
+  ['M', 'P'],
+  ['M', 'M'],
+  ['P', 'P'],
+];
+const D_NIGHT_PATTERNS = [['D'], ['D', 'R', 'D']];
 const MP_CYCLE_PATTERN_LABELS = MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)
   .map(pattern => pattern.join('-'))
   .join(', ');
+const MP_NIGHT_PATTERN_LABELS = MP_NIGHT_PATTERNS.map(pattern => pattern.join('-')).join(', ');
+const D_NIGHT_PATTERN_LABELS = D_NIGHT_PATTERNS.map(pattern => pattern.join('-')).join(', ');
 
 function isMPCycleLimitedNurse(props) {
   return props.mattineEPomeriggi || (props.noNotti && props.noDiurni);
@@ -227,6 +232,49 @@ function getMPCycleBlockMismatch(schedule, nurseIdx, startDay, numDays, props) {
   return segment ? segment.mismatch : 0;
 }
 
+function matchesPatternEndingAt(schedule, ctx, nurseIdx, endDayIdx, pattern) {
+  const startDayIdx = endDayIdx - pattern.length + 1;
+  for (let offset = 0; offset < pattern.length; offset++) {
+    if (getShiftAt(schedule, ctx, nurseIdx, startDayIdx + offset) !== pattern[offset]) return false;
+  }
+  return true;
+}
+
+function getComparablePatterns(ctx, nurseIdx, nightDayIdx, patterns) {
+  return patterns.filter(pattern => {
+    const startDayIdx = nightDayIdx - pattern.length;
+    if (startDayIdx >= 0) return true;
+    const tail = ctx.prevTail && ctx.prevTail[nurseIdx];
+    return !!(tail && tail.length >= -startDayIdx);
+  });
+}
+
+function getNightPatternInfo(schedule, ctx, nurseIdx, nightDayIdx) {
+  const props = ctx.nurseProps[nurseIdx];
+  if (!props || props.soloNotti) return null;
+  if (props.noDiurni) {
+    const comparablePatterns = getComparablePatterns(ctx, nurseIdx, nightDayIdx, MP_NIGHT_PATTERNS);
+    return {
+      type: 'mp',
+      validLead:
+        comparablePatterns.length === 0 ||
+        comparablePatterns.some(pattern => matchesPatternEndingAt(schedule, ctx, nurseIdx, nightDayIdx - 1, pattern)),
+      hasForbiddenExtraRecovery: getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + 3) === 'R',
+    };
+  }
+  if (props.diurniENotturni) {
+    const comparablePatterns = getComparablePatterns(ctx, nurseIdx, nightDayIdx, D_NIGHT_PATTERNS);
+    return {
+      type: 'd',
+      validLead:
+        comparablePatterns.length === 0 ||
+        comparablePatterns.some(pattern => matchesPatternEndingAt(schedule, ctx, nurseIdx, nightDayIdx - 1, pattern)),
+      hasForbiddenExtraRecovery: getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + 4) === 'R',
+    };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Scoring — lower is better (0 = perfect)
 // ---------------------------------------------------------------------------
@@ -248,6 +296,7 @@ function computeScore(schedule, ctx) {
     nurseProps,
     weekDaysList,
     hourDeltas,
+    monthlyTargetHours,
   } = ctx;
   let hard = 0,
     soft = 0;
@@ -332,6 +381,13 @@ function computeScore(schedule, ctx) {
         if (have < need) hard += need - have;
       }
     }
+    for (let d = 0; d < numDays; d++) {
+      if (schedule[n][d] !== 'N') continue;
+      const info = getNightPatternInfo(schedule, ctx, n, d);
+      if (!info) continue;
+      if (!info.validLead) hard++;
+      if (info.hasForbiddenExtraRecovery) hard++;
+    }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
       hard += getMPCyclePlan(schedule, n, numDays, nurseProps[n]).mismatch;
     }
@@ -342,9 +398,8 @@ function computeScore(schedule, ctx) {
   // target (avg + delta) so that nurses who worked less before work more now.
   const hours = [];
   for (let n = 0; n < numNurses; n++) hours.push(nurseHours(schedule, n, numDays));
-  const avg = hours.reduce((a, b) => a + b, 0) / numNurses;
   for (let n = 0; n < numNurses; n++) {
-    const target = avg + (hourDeltas ? hourDeltas[n] || 0 : 0);
+    const target = monthlyTargetHours + (hourDeltas ? hourDeltas[n] || 0 : 0);
     soft += Math.abs(hours[n] - target) * 3;
   }
 
@@ -600,8 +655,33 @@ function collectViolations(schedule, ctx) {
             day: d,
             type: 'DDD',
             msg: `Infermiere ${n + 1}, giorno ${d + 1}: 3 diurni consecutivi non consentiti`,
-          });
+        });
       }
+    }
+    for (let d = 0; d < numDays; d++) {
+      if (schedule[n][d] !== 'N') continue;
+      const info = getNightPatternInfo(schedule, ctx, n, d);
+      if (!info) continue;
+      if (!info.validLead)
+        violations.push({
+          nurse: n,
+          day: d,
+          type: info.type === 'mp' ? 'mp_night_pattern' : 'd_night_pattern',
+          msg:
+            info.type === 'mp'
+              ? `Infermiere ${n + 1}, giorno ${d + 1}: prima della notte serve una sequenza tra ${MP_NIGHT_PATTERN_LABELS}`
+              : `Infermiere ${n + 1}, giorno ${d + 1}: il blocco diurno/notte deve seguire ${D_NIGHT_PATTERN_LABELS}`,
+        });
+      if (info.hasForbiddenExtraRecovery)
+        violations.push({
+          nurse: n,
+          day: d,
+          type: 'night_extra_rest',
+          msg:
+            info.type === 'mp'
+              ? `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un secondo riposo dopo N-S-R`
+              : `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un terzo riposo dopo D-N-S-R-R`,
+        });
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
       const plan = getMPCyclePlan(schedule, n, numDays, nurseProps[n]);
