@@ -48,6 +48,35 @@ function getShiftAt(schedule, ctx, nurseIdx, dayIdx) {
 const NO_DIURNI_EXTRA_REST_OFFSET = 3;
 const DIURNI_NOTTURNI_EXTRA_REST_OFFSET = 4;
 
+function getForbiddenExtraRecoveryOffset(props) {
+  if (!props || props.soloNotti) return null;
+  return props.noDiurni ? NO_DIURNI_EXTRA_REST_OFFSET : DIURNI_NOTTURNI_EXTRA_REST_OFFSET;
+}
+
+function isForbiddenExtraNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
+  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
+  const props = ctx.nurseProps[nurseIdx];
+  const offset = getForbiddenExtraRecoveryOffset(props);
+  if (offset === null) return false;
+  const nightDayIdx = dayIdx - offset;
+  if (getShiftAt(schedule, ctx, nurseIdx, nightDayIdx) !== 'N') return false;
+  if (getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + 1) !== 'S') return false;
+  if (getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + 2) !== 'R') return false;
+  if (!props.noDiurni && getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + 3) !== 'R') return false;
+  return true;
+}
+
+function hasForbiddenExtraNightRest(schedule, ctx, nurseIdx, nightDayIdx) {
+  const props = ctx.nurseProps[nurseIdx];
+  const offset = getForbiddenExtraRecoveryOffset(props);
+  if (offset === null) return false;
+  const extraRestDayIdx = nightDayIdx + offset;
+  return (
+    getShiftAt(schedule, ctx, nurseIdx, extraRestDayIdx) === 'R' &&
+    isForbiddenExtraNightRestDay(schedule, ctx, nurseIdx, extraRestDayIdx)
+  );
+}
+
 // Detect mandatory rest days inside an N-S-R-R block:
 // - the first R immediately after S is always locked
 // - the second R after N-S-R is also locked for nurses who are not noDiurni
@@ -265,7 +294,6 @@ function getNightPatternInfo(schedule, ctx, nurseIdx, nightDayIdx) {
       validLead:
         comparablePatterns.length === 0 ||
         comparablePatterns.some(pattern => matchesPatternEndingAt(schedule, ctx, nurseIdx, nightDayIdx - 1, pattern)),
-      hasForbiddenExtraRecovery: getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + NO_DIURNI_EXTRA_REST_OFFSET) === 'R',
     };
   }
   if (props.diurniENotturni) {
@@ -275,8 +303,6 @@ function getNightPatternInfo(schedule, ctx, nurseIdx, nightDayIdx) {
       validLead:
         comparablePatterns.length === 0 ||
         comparablePatterns.some(pattern => matchesPatternEndingAt(schedule, ctx, nurseIdx, nightDayIdx - 1, pattern)),
-      hasForbiddenExtraRecovery:
-        getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + DIURNI_NOTTURNI_EXTRA_REST_OFFSET) === 'R',
     };
   }
   return null;
@@ -391,9 +417,8 @@ function computeScore(schedule, ctx) {
     for (let d = 0; d < numDays; d++) {
       if (schedule[n][d] !== 'N') continue;
       const info = getNightPatternInfo(schedule, ctx, n, d);
-      if (!info) continue;
-      if (!info.validLead) hard++;
-      if (info.hasForbiddenExtraRecovery) hard++;
+      if (info && !info.validLead) hard++;
+      if (hasForbiddenExtraNightRest(schedule, ctx, n, d)) hard++;
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
       hard += getMPCyclePlan(schedule, n, numDays, nurseProps[n]).mismatch;
@@ -668,8 +693,7 @@ function collectViolations(schedule, ctx) {
     for (let d = 0; d < numDays; d++) {
       if (schedule[n][d] !== 'N') continue;
       const info = getNightPatternInfo(schedule, ctx, n, d);
-      if (!info) continue;
-      if (!info.validLead)
+      if (info && !info.validLead)
         violations.push({
           nurse: n,
           day: d,
@@ -679,15 +703,14 @@ function collectViolations(schedule, ctx) {
               ? `Infermiere ${n + 1}, giorno ${d + 1}: prima della notte serve una sequenza tra ${MP_NIGHT_PATTERN_LABELS}`
               : `Infermiere ${n + 1}, giorno ${d + 1}: il blocco diurno/notte deve seguire ${D_NIGHT_PATTERN_LABELS}`,
         });
-      if (info.hasForbiddenExtraRecovery)
+      if (hasForbiddenExtraNightRest(schedule, ctx, n, d))
         violations.push({
           nurse: n,
           day: d,
           type: 'night_extra_rest',
-          msg:
-            info.type === 'mp'
-              ? `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un secondo riposo dopo N-S-R`
-              : `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un terzo riposo dopo D-N-S-R-R`,
+          msg: nurseProps[n].noDiurni
+            ? `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un secondo riposo dopo N-S-R`
+            : `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un terzo riposo dopo il blocco N-S-R-R`,
         });
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {

@@ -1204,7 +1204,11 @@ describe('construct', () => {
         { length: bctx.numDays - 3 },
         (_, d) => row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R'
       ).some(match => match);
-      assert.equal(foundForbiddenNSRRPattern, false, `Unexpected N-S-R-R cluster for no_diurni nurse: ${row.join('-')}`);
+      assert.equal(
+        foundForbiddenNSRRPattern,
+        false,
+        `Unexpected N-S-R-R cluster for no_diurni nurse: ${row.join('-')}`
+      );
     } finally {
       Math.random = origRandom;
     }
@@ -1462,7 +1466,11 @@ describe('localSearch night coverage repair', () => {
       (_, d) => ctx.dayCoverage(improved, d, bctx.numNurses).N
     );
 
-    assert.deepEqual(afterNightCoverage.slice(0, 4), [1, 1, 1, 1]);
+    assert.equal(Math.max(...afterNightCoverage), 1);
+    assert.equal(
+      afterNightCoverage.reduce((sum, count) => sum + count, 0),
+      4
+    );
     const afterViolations = ctx.collectViolations(improved, bctx).filter(v => v.type === 'coverage_N_max');
     assert.deepEqual(toPlain(afterViolations), []);
   });
@@ -1499,13 +1507,25 @@ describe('solveFallback', () => {
     };
     try {
       const result = ctx.solveFallback(config);
-      assert.equal(result.violations.length, 0, `Fallback solver should reach zero violations, got ${result.violations.length}`);
+      assert.equal(
+        result.violations.length,
+        0,
+        `Fallback solver should reach zero violations, got ${result.violations.length}`
+      );
       for (const nurseIdx of [0, 1]) {
         const row = result.schedule[nurseIdx];
         for (let d = 0; d < row.length - 3; d++) {
           const window = row.slice(d, d + 4);
-          assert.notDeepEqual(window, ['M', 'R', 'P', 'N'], `Unexpected split-rest pattern for nurse ${nurseIdx}: ${window.join('-')}`);
-          assert.notDeepEqual(window, ['P', 'R', 'M', 'N'], `Unexpected split-rest pattern for nurse ${nurseIdx}: ${window.join('-')}`);
+          assert.notDeepEqual(
+            window,
+            ['M', 'R', 'P', 'N'],
+            `Unexpected split-rest pattern for nurse ${nurseIdx}: ${window.join('-')}`
+          );
+          assert.notDeepEqual(
+            window,
+            ['P', 'R', 'M', 'N'],
+            `Unexpected split-rest pattern for nurse ${nurseIdx}: ${window.join('-')}`
+          );
         }
       }
     } finally {
@@ -1559,6 +1579,35 @@ describe('localSearch split rest repair', () => {
     const schedule = [['D', 'R', 'D', 'N', 'S', 'R']];
     const repaired = ctx.localSearch(schedule, bctx, 0);
     assert.deepEqual(toPlain(repaired[0].slice(0, 4)), ['D', 'R', 'D', 'N']);
+  });
+
+  it('should convert a forbidden third rest after a regular night block back into work', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 3,
+        minCoverageP: 0,
+        maxCoverageP: 3,
+        minCoverageD: 0,
+        maxCoverageD: 1,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 7;
+    const schedule = [['M', 'N', 'S', 'R', 'R', 'R', 'M']];
+    const repaired = ctx.localSearch(schedule, bctx, 0);
+    const violations = ctx.collectViolations(repaired, bctx);
+    assert.notEqual(repaired[0][5], 'R');
+    assert.ok(['M', 'P', 'D'].includes(repaired[0][5]));
+    assert.equal(
+      violations.some(v => v.type === 'night_extra_rest'),
+      false,
+      JSON.stringify(violations)
+    );
   });
 });
 
@@ -2185,9 +2234,9 @@ describe('collectViolations strict night patterns', () => {
     schedule[0][4] = 'R';
     schedule[0][5] = 'R';
 
-    const violations = ctx.collectViolations(schedule, bctx);
+    const extraRestViolation = ctx.collectViolations(schedule, bctx).find(v => v.type === 'night_extra_rest');
 
-    assert.ok(violations.some(v => v.type === 'night_extra_rest'));
+    assert.equal(extraRestViolation && extraRestViolation.day, 2);
   });
 
   it('should report invalid D/N lead-in for diurni_e_notturni nurses', () => {
@@ -2237,6 +2286,35 @@ describe('collectViolations strict night patterns', () => {
     const bctx = ctx.buildContext(config);
     const schedule = [new Array(bctx.numDays).fill('D')];
     schedule[0][0] = 'D';
+    schedule[0][1] = 'N';
+    schedule[0][2] = 'S';
+    schedule[0][3] = 'R';
+    schedule[0][4] = 'R';
+    schedule[0][5] = 'R';
+
+    const violations = ctx.collectViolations(schedule, bctx);
+
+    assert.ok(violations.some(v => v.type === 'night_extra_rest'));
+  });
+
+  it('should report a third rest after a regular night block', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 31,
+        minCoverageP: 0,
+        maxCoverageP: 31,
+        minCoverageD: 0,
+        maxCoverageD: 31,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = [new Array(bctx.numDays).fill('M')];
+    schedule[0][0] = 'M';
     schedule[0][1] = 'N';
     schedule[0][2] = 'S';
     schedule[0][3] = 'R';
