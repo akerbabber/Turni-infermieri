@@ -45,6 +45,9 @@ function getShiftAt(schedule, ctx, nurseIdx, dayIdx) {
   return tailIdx >= 0 ? tail[tailIdx] : null;
 }
 
+const NO_DIURNI_EXTRA_REST_OFFSET = 3;
+const DIURNI_NOTTURNI_EXTRA_REST_OFFSET = 4;
+
 // Detect mandatory rest days inside an N-S-R-R block:
 // - the first R immediately after S is always locked
 // - the second R after N-S-R is also locked for nurses who are not noDiurni
@@ -58,6 +61,9 @@ function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
 }
 
 function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
+  // The historical "optional extra R after N-S-R" rule was removed.
+  // no_diurni nurses now require exactly one R after S, so this hook is kept only
+  // to avoid changing multiple call sites in local-search and split-rest detection.
   return false;
 }
 
@@ -259,7 +265,7 @@ function getNightPatternInfo(schedule, ctx, nurseIdx, nightDayIdx) {
       validLead:
         comparablePatterns.length === 0 ||
         comparablePatterns.some(pattern => matchesPatternEndingAt(schedule, ctx, nurseIdx, nightDayIdx - 1, pattern)),
-      hasForbiddenExtraRecovery: getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + 3) === 'R',
+      hasForbiddenExtraRecovery: getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + NO_DIURNI_EXTRA_REST_OFFSET) === 'R',
     };
   }
   if (props.diurniENotturni) {
@@ -269,7 +275,8 @@ function getNightPatternInfo(schedule, ctx, nurseIdx, nightDayIdx) {
       validLead:
         comparablePatterns.length === 0 ||
         comparablePatterns.some(pattern => matchesPatternEndingAt(schedule, ctx, nurseIdx, nightDayIdx - 1, pattern)),
-      hasForbiddenExtraRecovery: getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + 4) === 'R',
+      hasForbiddenExtraRecovery:
+        getShiftAt(schedule, ctx, nurseIdx, nightDayIdx + DIURNI_NOTTURNI_EXTRA_REST_OFFSET) === 'R',
     };
   }
   return null;
@@ -655,7 +662,7 @@ function collectViolations(schedule, ctx) {
             day: d,
             type: 'DDD',
             msg: `Infermiere ${n + 1}, giorno ${d + 1}: 3 diurni consecutivi non consentiti`,
-        });
+          });
       }
     }
     for (let d = 0; d < numDays; d++) {

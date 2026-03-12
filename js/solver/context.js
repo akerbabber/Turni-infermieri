@@ -5,6 +5,8 @@
 
 'use strict';
 
+/* global getMonthlyContractHours */
+
 // ---------------------------------------------------------------------------
 // Preprocessing — build a shared context object used by all phases
 // ---------------------------------------------------------------------------

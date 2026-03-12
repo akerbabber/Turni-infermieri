@@ -258,7 +258,8 @@ function construct(ctx) {
     if (d > 0 && schedule[n][d - 1] === 'S') return false;
     // If d-1 is R and d-2 is S, we're at second R position (mandatory for non-noDiurni)
     if (d > 1 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'S') return false;
-    // noDiurni nurses need at least two M/P workdays before a new night can start.
+    // noDiurni nurses need at least two M/P workdays before a new night can start,
+    // matching the shortest allowed lead-in patterns before N (M-P, M-M, P-P).
     if (noDiurni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
     // After N-S-R-R (4 days), day 5 is free to start a new night
     return true;
@@ -289,6 +290,8 @@ function construct(ctx) {
   const nurseCycleLen = new Map();
   nightEligible.forEach((n, idx) => {
     const nBlock = nurseProps[n].noDiurni ? 3 : 4;
+    // noDiurni nurses use N-S-R plus at least two M/P workdays before the next night,
+    // so their practical night-start cycle is 5 days instead of block-size + 1.
     const nCycle = nurseProps[n].noDiurni ? 5 : nBlock + 1;
     nurseCycleLen.set(n, nCycle);
     nurseStartOffset.set(n, idx % nCycle);

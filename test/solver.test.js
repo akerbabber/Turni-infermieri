@@ -1200,11 +1200,11 @@ describe('construct', () => {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
       const row = schedule[0];
-      const hasExtraRest = Array.from(
+      const foundForbiddenNSRRPattern = Array.from(
         { length: bctx.numDays - 3 },
         (_, d) => row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R'
       ).some(match => match);
-      assert.equal(hasExtraRest, false, `Unexpected N-S-R-R cluster for no_diurni nurse: ${row.join('-')}`);
+      assert.equal(foundForbiddenNSRRPattern, false, `Unexpected N-S-R-R cluster for no_diurni nurse: ${row.join('-')}`);
     } finally {
       Math.random = origRandom;
     }
