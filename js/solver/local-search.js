@@ -669,14 +669,6 @@ function trySwapMove(schedule, ctx, changes) {
   if (nurseProps[n2].diurniENotturni && s1 !== 'D' && s1 !== 'R') return false;
   if (!canRepairShiftChange(schedule, ctx, n1, d, s2)) return false;
   if (!canRepairShiftChange(schedule, ctx, n2, d, s1)) return false;
-  const prev1 = d > 0 ? schedule[n1][d - 1] : null,
-    next1 = d < numDays - 1 ? schedule[n1][d + 1] : null;
-  const prev2 = d > 0 ? schedule[n2][d - 1] : null,
-    next2 = d < numDays - 1 ? schedule[n2][d + 1] : null;
-  if (!transitionOk(prev1, s2, ctx, schedule, n1, d)) return false;
-  if (!transitionOk(s2, next1, ctx, schedule, n1, d)) return false;
-  if (!transitionOk(prev2, s1, ctx, schedule, n2, d)) return false;
-  if (!transitionOk(s1, next2, ctx, schedule, n2, d)) return false;
   if (s2 === 'D' && nurseProps[n1].noDiurni) return false;
   if (s1 === 'D' && nurseProps[n2].noDiurni) return false;
   setCell(schedule, n1, d, s2, changes);

@@ -1602,6 +1602,7 @@ describe('localSearch split rest repair', () => {
     const repaired = ctx.localSearch(schedule, bctx, 0);
     const violations = ctx.collectViolations(repaired, bctx);
     assert.notEqual(repaired[0][5], 'R');
+    assert.ok(['M', 'P', 'D'].includes(repaired[0][5]));
     assert.equal(
       violations.some(v => v.type === 'night_extra_rest'),
       false,
