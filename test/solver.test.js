@@ -302,6 +302,16 @@ describe('daysInMonth', () => {
   });
 });
 
+describe('monthly contract hours', () => {
+  it('should count 22 weekdays in April 2026', () => {
+    assert.equal(ctx.countWeekdaysInMonth(2026, 3), 22);
+  });
+
+  it('should compute April 2026 target as weekdays × 7.12', () => {
+    assert.equal(ctx.getMonthlyContractHours(2026, 3), 156.64);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 5. gapHours
 // ---------------------------------------------------------------------------
@@ -565,6 +575,12 @@ describe('buildContext', () => {
     const bctx = ctx.buildContext(config);
     assert.equal(bctx.minCovM, 5);
     assert.equal(bctx.maxCovP, 10);
+  });
+
+  it('should store the monthly target hours derived from weekdays', () => {
+    const config = makeMinimalConfig({ year: 2026, month: 3 });
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.monthlyTargetHours, 156.64);
   });
 });
 
@@ -1154,7 +1170,7 @@ describe('construct', () => {
     }
   });
 
-  it('should keep extra rest attached to a night block when no_diurni nurses have slack days', () => {
+  it('should keep only one rest after a night block for no_diurni nurses', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
       nurseOverrides: {
@@ -1184,11 +1200,11 @@ describe('construct', () => {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
       const row = schedule[0];
-      const hasClusteredRest = Array.from(
+      const foundForbiddenNSRRPattern = Array.from(
         { length: bctx.numDays - 3 },
         (_, d) => row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R'
       ).some(match => match);
-      assert.equal(hasClusteredRest, true, `Expected at least one N-S-R-R cluster, got ${row.join('-')}`);
+      assert.equal(foundForbiddenNSRRPattern, false, `Unexpected N-S-R-R cluster for no_diurni nurse: ${row.join('-')}`);
     } finally {
       Math.random = origRandom;
     }
@@ -2110,6 +2126,126 @@ describe('collectViolations D-D boundary (consente2D)', () => {
     const violations = ctx.collectViolations(schedule, bctx);
     const ddViolations = violations.filter(v => v.type === 'DD_no_R' || v.type === 'DDD');
     assert.equal(ddViolations.length, 0, 'Should not have D-D boundary violations when consente2D is disabled');
+  });
+});
+
+describe('collectViolations strict night patterns', () => {
+  it('should report invalid M/P lead-in before night for no_diurni nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: { 0: { tags: ['no_diurni'] } },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 31,
+        minCoverageP: 0,
+        maxCoverageP: 31,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = [new Array(bctx.numDays).fill('R')];
+    schedule[0][0] = 'P';
+    schedule[0][1] = 'R';
+    schedule[0][2] = 'M';
+    schedule[0][3] = 'N';
+    schedule[0][4] = 'S';
+    schedule[0][5] = 'R';
+
+    const violations = ctx.collectViolations(schedule, bctx);
+
+    assert.ok(violations.some(v => v.type === 'mp_night_pattern'));
+  });
+
+  it('should report an extra rest after a no_diurni night block', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: { 0: { tags: ['no_diurni'] } },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 31,
+        minCoverageP: 0,
+        maxCoverageP: 31,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = [new Array(bctx.numDays).fill('M')];
+    schedule[0][0] = 'M';
+    schedule[0][1] = 'P';
+    schedule[0][2] = 'N';
+    schedule[0][3] = 'S';
+    schedule[0][4] = 'R';
+    schedule[0][5] = 'R';
+
+    const violations = ctx.collectViolations(schedule, bctx);
+
+    assert.ok(violations.some(v => v.type === 'night_extra_rest'));
+  });
+
+  it('should report invalid D/N lead-in for diurni_e_notturni nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: { 0: { tags: ['diurni_e_notturni'] } },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 0,
+        minCoverageP: 0,
+        maxCoverageP: 0,
+        minCoverageD: 0,
+        maxCoverageD: 31,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = [new Array(bctx.numDays).fill('R')];
+    schedule[0][1] = 'N';
+    schedule[0][2] = 'S';
+    schedule[0][3] = 'R';
+    schedule[0][4] = 'R';
+
+    const violations = ctx.collectViolations(schedule, bctx);
+
+    assert.ok(violations.some(v => v.type === 'd_night_pattern'));
+  });
+
+  it('should report a third rest after a diurni_e_notturni night block', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: { 0: { tags: ['diurni_e_notturni'] } },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 0,
+        minCoverageP: 0,
+        maxCoverageP: 0,
+        minCoverageD: 0,
+        maxCoverageD: 31,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = [new Array(bctx.numDays).fill('D')];
+    schedule[0][0] = 'D';
+    schedule[0][1] = 'N';
+    schedule[0][2] = 'S';
+    schedule[0][3] = 'R';
+    schedule[0][4] = 'R';
+    schedule[0][5] = 'R';
+
+    const violations = ctx.collectViolations(schedule, bctx);
+
+    assert.ok(violations.some(v => v.type === 'night_extra_rest'));
   });
 });
 

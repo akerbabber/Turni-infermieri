@@ -707,6 +707,7 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
     weekOf,
     consente2D,
     hourDeltas,
+    monthlyTargetHours,
   } = ctx;
   const n = Math.floor(Math.random() * numNurses);
   if (isMPCycleLimitedNurse(nurseProps[n])) return false;
@@ -714,19 +715,8 @@ function tryEquityMove(schedule, ctx, changes, cachedHours, dayIndices) {
 
   // Use cached hours: O(numNurses) instead of O(numNurses × numDays)
   const h = cachedHours ? cachedHours[n] : nurseHours(schedule, n, numDays);
-  let avg;
-  if (cachedHours) {
-    let sum = 0;
-    for (let i = 0; i < numNurses; i++) sum += cachedHours[i];
-    avg = sum / numNurses;
-  } else {
-    const allH = [];
-    for (let i = 0; i < numNurses; i++) allH.push(nurseHours(schedule, i, numDays));
-    avg = allH.reduce((a, b) => a + b, 0) / numNurses;
-  }
-
   // Per-nurse target adjusted by previous month delta
-  const target = avg + (hourDeltas ? hourDeltas[n] || 0 : 0);
+  const target = monthlyTargetHours + (hourDeltas ? hourDeltas[n] || 0 : 0);
 
   const isDiurniOnly = nurseProps[n].soloDiurni || nurseProps[n].diurniENotturni;
 

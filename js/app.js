@@ -46,6 +46,7 @@ const FASCIA_PRESETS = {
   standard: { M: 6.2, P: 6.2, D: 12.2, N: 12.2, S: 0, R: 0, F: 6.12, MA: 6.12, L104: 6.12, PR: 6.12, MT: 6.12 },
   '7-10': { M: 7.2, P: 7.2, D: 12.2, N: 10.2, S: 0, R: 0, F: 7.12, MA: 7.12, L104: 7.12, PR: 7.12, MT: 7.12 },
 };
+const MONTHLY_HOURS_PER_WEEKDAY = 7.12;
 function applyFasciaOraria(fascia) {
   const key = FASCIA_PRESETS[fascia] ? fascia : 'standard';
   Object.assign(SHIFT_HOURS, FASCIA_PRESETS[key]);
@@ -155,6 +156,20 @@ function nextMonthDefault() {
   const now = new Date();
   const m = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   return { month: m.getMonth(), year: m.getFullYear() };
+}
+
+function countWeekdaysInMonth(year, month) {
+  const totalDays = new Date(year, month + 1, 0).getDate();
+  let weekdays = 0;
+  for (let day = 1; day <= totalDays; day++) {
+    const dow = new Date(year, month, day).getDay();
+    if (dow >= 1 && dow <= 5) weekdays++;
+  }
+  return weekdays;
+}
+
+function getMonthlyContractHours(year, month) {
+  return Math.round(countWeekdaysInMonth(year, month) * MONTHLY_HOURS_PER_WEEKDAY * 100) / 100;
 }
 
 function createEmptyAbsencePeriods() {
@@ -1452,6 +1467,7 @@ function renderStep3() {
     'summary-cov',
     `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`
   );
+  setEl('summary-month-hours', `${getMonthlyContractHours(state.year, state.month).toFixed(2)} ore`);
   setEl('summary-nights', `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
   setEl('summary-prev-month', state.previousMonthSchedule ? '✅ Attiva' : '— Non configurata');
 
