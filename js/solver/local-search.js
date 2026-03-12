@@ -6,7 +6,9 @@
 
 'use strict';
 
-/* global computeScore, countWeekRest, dayCoverage, deepCopy, getRestPromotionPriority, isForbiddenExtraNightRestDay, isMPCycleLimitedNurse, isMandatoryNightRestDay, isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
+/* global computeScore, countWeekRest, dayCoverage, deepCopy, getRestPromotionPriority */
+/* global isForbiddenExtraNightRestDay, isMPCycleLimitedNurse, isMandatoryNightRestDay */
+/* global isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing

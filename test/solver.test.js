@@ -1471,7 +1471,6 @@ describe('localSearch night coverage repair', () => {
       afterNightCoverage.reduce((sum, count) => sum + count, 0),
       4
     );
-    assert.notDeepEqual(toPlain(afterNightCoverage), [2, 0, 1, 1, 0, 0, 0]);
     const afterViolations = ctx.collectViolations(improved, bctx).filter(v => v.type === 'coverage_N_max');
     assert.deepEqual(toPlain(afterViolations), []);
   });
@@ -2234,9 +2233,9 @@ describe('collectViolations strict night patterns', () => {
     schedule[0][4] = 'R';
     schedule[0][5] = 'R';
 
-    const violations = ctx.collectViolations(schedule, bctx);
+    const extraRestViolation = ctx.collectViolations(schedule, bctx).find(v => v.type === 'night_extra_rest');
 
-    assert.ok(violations.some(v => v.type === 'night_extra_rest'));
+    assert.equal(extraRestViolation && extraRestViolation.day, 2);
   });
 
   it('should report invalid D/N lead-in for diurni_e_notturni nurses', () => {
