@@ -33,12 +33,13 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
 
   // Adaptive move selection: track acceptance rates per move type
   const moveStats = [
-    { attempts: 0, accepts: 0, weight: 0.25 }, // 0: swap
-    { attempts: 0, accepts: 0, weight: 0.2 }, // 1: change
-    { attempts: 0, accepts: 0, weight: 0.3 }, // 2: equity
-    { attempts: 0, accepts: 0, weight: 0.25 }, // 3: weekly rest
+    { attempts: 0, accepts: 0, weight: 0.15 }, // 0: swap
+    { attempts: 0, accepts: 0, weight: 0.15 }, // 1: change
+    { attempts: 0, accepts: 0, weight: 0.40 }, // 2: equity (aumentato)
+    { attempts: 0, accepts: 0, weight: 0.20 }, // 3: weekly rest
+    { attempts: 0, accepts: 0, weight: 0.10 }, // 4: coppia turni (NUOVO)
   ];
-  const ADAPT_INTERVAL = 500; // recalculate weights every N iterations
+  const ADAPT_INTERVAL = 1000; // recalculate weights every N iterations
   const MIN_WEIGHT = 0.05; // floor to prevent starving any move type
 
   const useTimeLimit = timeLimitSec > 0;
@@ -59,14 +60,31 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
 
     // Temperature: use time fraction when time-limited, else iteration fraction
     const fraction = useTimeLimit ? Math.min(1, (now - startMs) / timeLimitMs) : iter / maxIter;
-    const temp = 2000 * (1 - fraction);
+    const temp = useTimeLimit
+      ? Math.max(0.1, 120 * Math.exp(-5 * fraction))
+      : Math.max(0.1, 120 * Math.pow(0.9945, iter));
 
     changes.length = 0;
 
     // Adaptive move selection with hard-violation priority
     let moveType;
     if (currentScore.hard > 0 && Math.random() < 0.3) {
-      moveType = 3; // weekly rest fix when hard violations exist
+      // Se la coppia è desincronizzata, prioritizza quella mossa
+      if (ctx.coppiaTurni && Array.isArray(ctx.coppiaTurni) && ctx.coppiaTurni.length === 2) {
+        const [n1, n2] = ctx.coppiaTurni;
+        if (n1 < ctx.numNurses && n2 < ctx.numNurses) {
+          let hasDivergence = false;
+          for (let d = 0; d < ctx.numDays; d++) {
+            if (current[n1][d] !== current[n2][d]) { hasDivergence = true; break; }
+          }
+          if (hasDivergence) { moveType = 4; }
+          else { moveType = 3; }
+        } else {
+          moveType = 3;
+        }
+      } else {
+        moveType = 3;
+      }
     } else {
       // Weighted random selection using adaptive weights
       const totalW = moveStats.reduce((s, m) => s + m.weight, 0);
@@ -94,6 +112,9 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
         break;
       case 3:
         moved = tryWeeklyRestMove(current, ctx, changes, _nurseIndices);
+        break;
+      case 4:
+        moved = tryCoppiaTurniMove(current, ctx, changes, cachedHours);
         break;
     }
 
@@ -135,6 +156,15 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
       for (const ms of moveStats) {
         ms.attempts = 0;
         ms.accepts = 0;
+      }
+    }
+  }
+  // Sync finale coppia turni — forza n2 uguale a n1 prima della fase di repair
+  if (ctx.coppiaTurni && Array.isArray(ctx.coppiaTurni) && ctx.coppiaTurni.length === 2) {
+    const [n1, n2] = ctx.coppiaTurni;
+    if (n1 >= 0 && n1 < numNurses && n2 >= 0 && n2 < numNurses) {
+      for (let d = 0; d < numDays; d++) {
+        best[n2][d] = best[n1][d];
       }
     }
   }
@@ -867,6 +897,43 @@ function tryWeeklyRestMove(schedule, ctx, changes, nurseIndices) {
         }
       }
     }
+  }
+  return false;
+}
+
+function tryCoppiaTurniMove(schedule, ctx, changes, cachedHours) {
+  const { numDays, numNurses, pinned, coppiaTurni, minCovM, minCovP } = ctx;
+  if (!coppiaTurni || !Array.isArray(coppiaTurni) || coppiaTurni.length !== 2) return false;
+  const [n1, n2] = coppiaTurni;
+  if (n1 < 0 || n1 >= numNurses || n2 < 0 || n2 >= numNurses) return false;
+
+  // Find a divergent day and bring n2 in sync with n1 (n1 is the master)
+  const days = shuffle(Array.from({ length: numDays }, (_, i) => i));
+  for (const d of days) {
+    if (schedule[n1][d] === schedule[n2][d]) continue;
+    if (pinned[n1][d] || pinned[n2][d]) continue;
+
+    const s1 = schedule[n1][d];
+    const s2 = schedule[n2][d];
+
+    const prevN2 = d > 0 ? schedule[n2][d - 1] : null;
+    const nextN2 = d < numDays - 1 ? schedule[n2][d + 1] : null;
+
+    if (!transitionOk(prevN2, s1, ctx, schedule, n2, d)) continue;
+    if (nextN2 !== null && !transitionOk(s1, nextN2, ctx, schedule, n2, d + 1)) continue;
+
+    // Ensure removing s2 from n2 doesn't drop coverage below minimum
+    const cov = dayCoverage(schedule, d, numNurses);
+    if (s2 === 'M' && cov.M <= minCovM) continue;
+    if (s2 === 'P' && cov.P <= minCovP) continue;
+    if (s2 === 'N' && cov.N <= ctx.minCovN) continue;
+
+    changes.push({ n: n2, d, old: s2 });
+    schedule[n2][d] = s1;
+    if (cachedHours) {
+      cachedHours[n2] += (SHIFT_HOURS[s1] || 0) - (SHIFT_HOURS[s2] || 0);
+    }
+    return true;
   }
   return false;
 }

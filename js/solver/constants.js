@@ -66,8 +66,8 @@ const BASE_FORBIDDEN_NEXT = {
   S: ['M', 'P', 'D', 'N', 'S'],
 };
 
-const NUM_RESTARTS = 10;
-const LOCAL_SEARCH_ITERS = 4000;
+const NUM_RESTARTS = 8;           // meno restart, più iter per restart
+const LOCAL_SEARCH_ITERS = 6000;  // +50% iterazioni per convergenza migliore
 
 const MILP_MIN_TIME_PER_SOLUTION = 5;
 const MILP_DEFAULT_TOTAL_TIME_BUDGET = 60;
