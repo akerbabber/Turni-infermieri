@@ -330,6 +330,7 @@ function computeScore(schedule, ctx) {
     weekDaysList,
     hourDeltas,
     monthlyTargetHours,
+    coppiaTurni,
   } = ctx;
   let hard = 0,
     soft = 0;
@@ -432,7 +433,8 @@ function computeScore(schedule, ctx) {
   for (let n = 0; n < numNurses; n++) hours.push(nurseHours(schedule, n, numDays));
   for (let n = 0; n < numNurses; n++) {
     const target = monthlyTargetHours + (hourDeltas ? hourDeltas[n] || 0 : 0);
-    soft += Math.abs(hours[n] - target) * 3;
+    const hourDiff = hours[n] - target;
+    soft += hourDiff < 0 ? Math.abs(hourDiff) * 5 : Math.abs(hourDiff) * 3;
   }
 
   // Soft: night-count fairness
@@ -500,6 +502,41 @@ function computeScore(schedule, ctx) {
     for (let d = ctx.prevTail ? 0 : 1; d < numDays - 1; d++) {
       if (isSplitRestDay(schedule, ctx, n, d)) soft += 4;
     }
+  }
+
+  // Hard: coppiaTurni must have identical schedules (BUG #1 fix)
+  if (coppiaTurni && Array.isArray(coppiaTurni) && coppiaTurni.length === 2) {
+    const [n1, n2] = coppiaTurni;
+    if (n1 >= 0 && n1 < numNurses && n2 >= 0 && n2 < numNurses) {
+      for (let d = 0; d < numDays; d++) {
+        if (schedule[n1][d] !== schedule[n2][d]) hard++;
+      }
+    }
+  }
+
+  // Hard: nurses with too few hours (BUG #3 fix)
+  const hardMinHours = ctx.rules.minHours || 0;
+  if (hardMinHours > 0) {
+    const absShifts = ['F', 'MA', 'L104', 'PR', 'MT'];
+    for (let n = 0; n < numNurses; n++) {
+      const isPurelyAbsent = schedule[n].every(s => absShifts.includes(s) || s === 'R');
+      if (!isPurelyAbsent && hours[n] < hardMinHours) hard++;
+    }
+  }
+
+  // Soft: penalize excessive rest islands (> 4 consecutive R/S) (Improvement #8)
+  const MAX_REST_ISLAND = 4;
+  for (let n = 0; n < numNurses; n++) {
+    let consRest = 0;
+    for (let d = 0; d < numDays; d++) {
+      if (schedule[n][d] === 'R' || schedule[n][d] === 'S') {
+        consRest++;
+      } else {
+        if (consRest > MAX_REST_ISLAND) soft += (consRest - MAX_REST_ISLAND) * 10;
+        consRest = 0;
+      }
+    }
+    if (consRest > MAX_REST_ISLAND) soft += (consRest - MAX_REST_ISLAND) * 10;
   }
 
   return { hard, soft, total: hard * 1000 + soft };
@@ -744,6 +781,72 @@ function collectViolations(schedule, ctx) {
             msg: `Infermiere ${n + 1}, settimana ${w + 1}: solo ${have} riposi (minimo ${need})`,
           });
       }
+    }
+  }
+
+  // BUG #1 fix: coppia divergente violations
+  if (ctx.coppiaTurni && Array.isArray(ctx.coppiaTurni) && ctx.coppiaTurni.length === 2) {
+    const [n1, n2] = ctx.coppiaTurni;
+    if (n1 >= 0 && n1 < numNurses && n2 >= 0 && n2 < numNurses) {
+      for (let d = 0; d < numDays; d++) {
+        if (schedule[n1][d] !== schedule[n2][d]) {
+          violations.push({
+            type: 'coppia_divergente',
+            nurse: n2,
+            day: d,
+            msg: `Coppia: ${ctx.nurses[n1].name} e ${ctx.nurses[n2].name} hanno turni diversi il giorno ${d + 1}`,
+          });
+        }
+      }
+    }
+  }
+
+  // BUG #3 fix: low_hours violations
+  const hardMinHoursV = ctx.rules.minHours || 0;
+  if (hardMinHoursV > 0) {
+    const absShiftsV = ['F', 'MA', 'L104', 'PR', 'MT'];
+    for (let n = 0; n < numNurses; n++) {
+      const h = nurseHours(schedule, n, numDays);
+      const isPurelyAbsent = schedule[n].every(s => absShiftsV.includes(s) || s === 'R');
+      if (!isPurelyAbsent && h < hardMinHoursV) {
+        violations.push({
+          type: 'low_hours',
+          nurse: n,
+          day: -1,
+          msg: `${ctx.nurses[n].name}: ore totali ${h.toFixed(1)} < minimo ${hardMinHoursV}`,
+        });
+      }
+    }
+  }
+
+  // Improvement #8: isola_di_riposo violations
+  const MAX_REST_ISLAND_V = 4;
+  for (let n = 0; n < numNurses; n++) {
+    let consRest = 0;
+    let islandStart = 0;
+    for (let d = 0; d < numDays; d++) {
+      if (schedule[n][d] === 'R' || schedule[n][d] === 'S') {
+        if (consRest === 0) islandStart = d;
+        consRest++;
+      } else {
+        if (consRest > MAX_REST_ISLAND_V) {
+          violations.push({
+            type: 'isola_di_riposo',
+            nurse: n,
+            day: islandStart,
+            msg: `${ctx.nurses[n].name}: ${consRest} riposi consecutivi dal giorno ${islandStart + 1}`,
+          });
+        }
+        consRest = 0;
+      }
+    }
+    if (consRest > MAX_REST_ISLAND_V) {
+      violations.push({
+        type: 'isola_di_riposo',
+        nurse: n,
+        day: islandStart,
+        msg: `${ctx.nurses[n].name}: ${consRest} riposi consecutivi dal giorno ${islandStart + 1}`,
+      });
     }
   }
 

@@ -523,12 +523,20 @@ function construct(ctx) {
     return true;
   }
 
+  // Pre-compute days still available per nurse for prospective deficit calculation (Improvement #7)
+  const daysAvailable = new Array(numNurses).fill(0);
+  for (let n = 0; n < numNurses; n++) {
+    for (let dd = 0; dd < numDays; dd++) {
+      if (schedule[n][dd] === null) daysAvailable[n]++;
+    }
+  }
+
   for (let d = 0; d < numDays; d++) {
     const cov = dayCoverage(schedule, d, numNurses);
     const avail = () => {
       const nurses = shuffle(Array.from({ length: numNurses }, (_, i) => i).filter(n => schedule[n][d] === null));
       // Primary sort: prefer nurses who still have weekly-rest budget for this day's week
-      // Secondary sort: fewest adjusted hours first (equity + previous month compensation)
+      // Secondary sort: fewest adjusted hours, weighted by prospective deficit to target hours
       const hd = ctx.hourDeltas;
       nurses.sort((a, b) => {
         const aOk = hasWeekBudget(a, d) ? 0 : 1;
@@ -536,6 +544,13 @@ function construct(ctx) {
         if (aOk !== bOk) return aOk - bOk;
         const aH = nurseHours(schedule, a, numDays) - (hd ? hd[a] || 0 : 0);
         const bH = nurseHours(schedule, b, numDays) - (hd ? hd[b] || 0 : 0);
+        // Prospective deficit: how far below target if remaining slots fill at avg rate
+        const avgHoursPerDay = 12.2;
+        const aProspective = aH + daysAvailable[a] * avgHoursPerDay;
+        const bProspective = bH + daysAvailable[b] * avgHoursPerDay;
+        const aDeficit = ctx.monthlyTargetHours - aProspective;
+        const bDeficit = ctx.monthlyTargetHours - bProspective;
+        if (Math.abs(aDeficit - bDeficit) > 5) return bDeficit - aDeficit;
         return aH - bH;
       });
       return nurses;
@@ -700,6 +715,23 @@ function construct(ctx) {
               break;
             }
           }
+          // BUG #5 fix: also try converting D → R if M/P conversion failed
+          if (!converted && !nurseProps[n].noDiurni && !nurseProps[n].mattineEPomeriggi) {
+            for (const d of wDays) {
+              const s = schedule[n][d];
+              if (s !== 'D') continue;
+              const cov = dayCoverage(schedule, d, numNurses);
+              if (cov.M <= minCovM + 1 || cov.P <= minCovP + 1) continue;
+              const prev = d > 0 ? schedule[n][d - 1] : null;
+              const next = d < numDays - 1 ? schedule[n][d + 1] : null;
+              if (transitionOk(prev, 'R', ctx, schedule, n, d) && transitionOk('R', next, ctx, schedule, n, d + 1)) {
+                schedule[n][d] = 'R';
+                rest++;
+                converted = true;
+                break;
+              }
+            }
+          }
           if (!converted) break;
         }
       }
@@ -780,11 +812,25 @@ function construct(ctx) {
     }
   }
 
-  // Phase 4.7 — Nurse pairing
+  // Phase 4.7 — Nurse pairing (with tag compatibility check — Improvement #9)
   if (coppiaTurni && Array.isArray(coppiaTurni) && coppiaTurni.length === 2) {
     const [n1, n2] = coppiaTurni;
-    if (n1 >= 0 && n1 < numNurses && n2 >= 0 && n2 < numNurses && n1 !== n2)
-      for (let d = 0; d < numDays; d++) schedule[n2][d] = schedule[n1][d];
+    if (n1 >= 0 && n1 < numNurses && n2 >= 0 && n2 < numNurses && n1 !== n2) {
+      const p1 = nurseProps[n1];
+      const p2 = nurseProps[n2];
+      const sameType =
+        p1.soloMattine === p2.soloMattine &&
+        p1.soloDiurni === p2.soloDiurni &&
+        p1.soloNotti === p2.soloNotti &&
+        p1.diurniENotturni === p2.diurniENotturni &&
+        p1.noDiurni === p2.noDiurni &&
+        p1.mattineEPomeriggi === p2.mattineEPomeriggi;
+      if (sameType) {
+        for (let d = 0; d < numDays; d++) {
+          if (!pinned[n2][d]) schedule[n2][d] = schedule[n1][d];
+        }
+      }
+    }
   }
 
   // Phase 4.8 — D-D rest enforcement
