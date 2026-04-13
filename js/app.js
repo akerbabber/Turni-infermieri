@@ -124,6 +124,48 @@ const DEFAULT_NURSE_NAMES = [
   'ZANDA SILVIA',
   'MANCA ANDREA',
 ];
+const LEGACY_DEFAULT_NURSE_NAME_SETS = [
+  [
+    'Rossi Marco',
+    'Bianchi Laura',
+    'Ferrari Giovanni',
+    'Esposito Sofia',
+    'Conti Luca',
+    'Ricci Anna',
+    'Colombo Pietro',
+    'Russo Elena',
+    'Marinelli Sara',
+    'Greco Alberto',
+    'Bruno Claudia',
+    'Romano Fabio',
+    'Costa Valentina',
+    'Fontana Roberto',
+    'Ferrara Giulia',
+    'Galli Stefano',
+    'Coppola Marta',
+    'Rizzo Davide',
+    'Lombardi Chiara',
+    'Barbieri Simone',
+    'Moretti Paola',
+    'Caruso Marco',
+    'De Luca Francesca',
+    'Fiore Alessandro',
+    'Pellegrini Ilaria',
+    'Monti Nicola',
+    'Poli Carmen',
+    'Testa Giorgio',
+    'Riva Serena',
+    'Sala Massimo',
+    'Villa Roberta',
+    'Sergi Luigi',
+    'Palumbo Elisa',
+    'Messina Diego',
+    'Cattaneo Nadia',
+    'Rinaldi Lorenzo',
+    'Fabbri Agnese',
+  ],
+  DEFAULT_NURSE_NAMES.map(name => (name === 'PES CLAUDIA' ? 'PES CIUDIA' : name)),
+];
 
 const DEFAULT_RULES = {
   minCoverageM: 6,
@@ -238,6 +280,22 @@ function buildDefaultNurses(count) {
   return Array.from({ length: count }, (_, i) => normalizeNurse({}, i));
 }
 
+function usesLegacyDefaultNurseNames(nurses) {
+  if (!Array.isArray(nurses)) return false;
+  return LEGACY_DEFAULT_NURSE_NAME_SETS.some(nameSet => {
+    if (nurses.length !== nameSet.length) return false;
+    return nameSet.every((expectedName, index) => (nurses[index]?.name || '').trim() === expectedName);
+  });
+}
+
+function migrateLegacyDefaultNurseNames(nurses) {
+  if (!usesLegacyDefaultNurseNames(nurses)) return nurses;
+  return nurses.map((nurse, index) => ({
+    ...nurse,
+    name: DEFAULT_NURSE_NAMES[index] || `Infermiere ${index + 1}`,
+  }));
+}
+
 const { month: defMonth, year: defYear } = nextMonthDefault();
 
 let state = {
@@ -286,7 +344,7 @@ function loadState() {
     // Ensure rules have all keys
     state.rules = { ...DEFAULT_RULES, ...saved.rules };
     // Re-hydrate nurses (ensure tags array and absencePeriods)
-    state.nurses = (saved.nurses || []).map((n, index) => normalizeNurse(n, index));
+    state.nurses = migrateLegacyDefaultNurseNames(saved.nurses || []).map((n, index) => normalizeNurse(n, index));
     // Apply fascia oraria to update SHIFT_HOURS in main thread
     applyFasciaOraria(state.rules.fasciaOraria);
   } catch (_) {}

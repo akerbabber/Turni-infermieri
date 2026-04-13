@@ -108,6 +108,84 @@ before(() => {
 });
 
 describe('config CSV helpers', () => {
+  it('should migrate legacy default nurse names from saved state', () => {
+    const currentState = toPlain(ctx._getAppState());
+    const legacyNames = [
+      'Rossi Marco',
+      'Bianchi Laura',
+      'Ferrari Giovanni',
+      'Esposito Sofia',
+      'Conti Luca',
+      'Ricci Anna',
+      'Colombo Pietro',
+      'Russo Elena',
+      'Marinelli Sara',
+      'Greco Alberto',
+      'Bruno Claudia',
+      'Romano Fabio',
+      'Costa Valentina',
+      'Fontana Roberto',
+      'Ferrara Giulia',
+      'Galli Stefano',
+      'Coppola Marta',
+      'Rizzo Davide',
+      'Lombardi Chiara',
+      'Barbieri Simone',
+      'Moretti Paola',
+      'Caruso Marco',
+      'De Luca Francesca',
+      'Fiore Alessandro',
+      'Pellegrini Ilaria',
+      'Monti Nicola',
+      'Poli Carmen',
+      'Testa Giorgio',
+      'Riva Serena',
+      'Sala Massimo',
+      'Villa Roberta',
+      'Sergi Luigi',
+      'Palumbo Elisa',
+      'Messina Diego',
+      'Cattaneo Nadia',
+      'Rinaldi Lorenzo',
+      'Fabbri Agnese',
+    ];
+    const savedState = {
+      ...currentState,
+      totalNurses: legacyNames.length,
+      nurses: legacyNames.map((name, index) => ({ id: `n${index + 1}`, name, tags: [], absencePeriods: {} })),
+    };
+    ctx.localStorage.getItem = key => (key === 'turni_state' ? JSON.stringify(savedState) : null);
+
+    ctx._setAppState({ ...currentState, nurses: [] });
+    ctx.loadState();
+
+    const nextState = toPlain(ctx._getAppState());
+    assert.equal(nextState.nurses[0].name, 'Giorgi Bruna');
+    assert.equal(nextState.nurses[27].name, 'PES CLAUDIA');
+    assert.equal(nextState.nurses[35].name, 'Infermiere 36');
+    assert.equal(nextState.nurses[36].name, 'Infermiere 37');
+  });
+
+  it('should keep custom nurse names from saved state unchanged', () => {
+    const currentState = toPlain(ctx._getAppState());
+    const savedState = {
+      ...currentState,
+      totalNurses: 2,
+      nurses: [
+        { id: 'n1', name: 'Infermiere Personalizzato 1', tags: [], absencePeriods: {} },
+        { id: 'n2', name: 'Infermiere Personalizzato 2', tags: [], absencePeriods: {} },
+      ],
+    };
+    ctx.localStorage.getItem = key => (key === 'turni_state' ? JSON.stringify(savedState) : null);
+
+    ctx._setAppState({ ...currentState, nurses: [] });
+    ctx.loadState();
+
+    const nextState = toPlain(ctx._getAppState());
+    assert.equal(nextState.nurses[0].name, 'Infermiere Personalizzato 1');
+    assert.equal(nextState.nurses[1].name, 'Infermiere Personalizzato 2');
+  });
+
   it('should roundtrip nurses and rules through CSV', () => {
     const defaultRules = toPlain(ctx._getAppConst('DEFAULT_RULES'));
     const cfg = {
