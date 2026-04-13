@@ -281,10 +281,10 @@ function buildDefaultNurses(count) {
 }
 
 function usesLegacyDefaultNurseNames(nurses) {
-  if (!Array.isArray(nurses)) return false;
+  if (!Array.isArray(nurses) || nurses.length === 0) return false;
   return LEGACY_DEFAULT_NURSE_NAME_SETS.some(nameSet => {
-    if (nurses.length !== nameSet.length) return false;
-    return nameSet.every((expectedName, index) => (nurses[index]?.name || '').trim() === expectedName);
+    if (nurses.length > nameSet.length) return false;
+    return nurses.every((nurse, index) => (nurse?.name || '').trim() === nameSet[index]);
   });
 }
 

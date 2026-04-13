@@ -186,6 +186,26 @@ describe('config CSV helpers', () => {
     assert.equal(nextState.nurses[1].name, 'Infermiere Personalizzato 2');
   });
 
+  it('should migrate partial legacy default rosters from saved state', () => {
+    const currentState = toPlain(ctx._getAppState());
+    const savedState = {
+      ...currentState,
+      totalNurses: 2,
+      nurses: [
+        { id: 'n1', name: 'Rossi Marco', tags: [], absencePeriods: {} },
+        { id: 'n2', name: 'Bianchi Laura', tags: [], absencePeriods: {} },
+      ],
+    };
+    ctx.localStorage.getItem = key => (key === 'turni_state' ? JSON.stringify(savedState) : null);
+
+    ctx._setAppState({ ...currentState, nurses: [] });
+    ctx.loadState();
+
+    const nextState = toPlain(ctx._getAppState());
+    assert.equal(nextState.nurses[0].name, 'Giorgi Bruna');
+    assert.equal(nextState.nurses[1].name, 'Aresu FRANCESCA');
+  });
+
   it('should roundtrip nurses and rules through CSV', () => {
     const defaultRules = toPlain(ctx._getAppConst('DEFAULT_RULES'));
     const cfg = {
