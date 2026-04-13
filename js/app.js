@@ -2147,9 +2147,10 @@ function renderStep4() {
       const shift = state.schedule[n][d] || 'R';
       const wk = isWeekend(state.year, state.month, d + 1);
       const vio = vioMap.has(`${n},${d}`);
+      const lockedShift = getLockedManualShift(n, d);
       bodyHTML += `<td class="${wk ? 'col-weekend' : ''} ${vio ? 'violation-cell' : ''}" data-n="${n}" data-d="${d}">
-                     <span class="shift-cell ${SHIFT_COLORS[shift] || 'shift-empty'}"
-                           data-n="${n}" data-d="${d}">${shift}</span>
+                     <span class="shift-cell ${SHIFT_COLORS[shift] || 'shift-empty'} ${lockedShift ? 'opacity-80' : ''}"
+                            data-n="${n}" data-d="${d}">${shift}</span>
                    </td>`;
     }
 
@@ -2218,13 +2219,26 @@ function renderStep4() {
       e.stopPropagation();
       const n = parseInt(cell.dataset.n);
       const d = parseInt(cell.dataset.d);
+      if (!Number.isInteger(n) || !Number.isInteger(d) || getLockedManualShift(n, d)) return;
       openShiftDropdown(cell, n, d);
     });
   });
 }
 
+function getLockedManualShift(n, d) {
+  const nurse = state.nurses[n];
+  if (!nurse || !Array.isArray(nurse.tags)) return null;
+  if (!nurse.tags.includes('quattro_mattine_venerdi_notte')) return null;
+  const dow = dayOfWeek(state.year, state.month, d + 1);
+  if (dow >= 1 && dow <= 4) return 'M';
+  if (dow === 5) return 'N';
+  if (dow === 6) return 'S';
+  return 'R';
+}
+
 function openShiftDropdown(anchorEl, n, d) {
   closeDropdown();
+  if (getLockedManualShift(n, d)) return;
 
   const dropdown = document.createElement('div');
   dropdown.className = 'shift-dropdown';
@@ -2267,6 +2281,8 @@ function closeDropdown() {
 
 function applyManualShift(n, d, newShift) {
   if (!state.schedule) return;
+  const lockedShift = getLockedManualShift(n, d);
+  if (lockedShift) newShift = lockedShift;
   const old = state.schedule[n][d];
   state.schedule[n][d] = newShift;
 

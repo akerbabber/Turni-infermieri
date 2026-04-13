@@ -6,8 +6,9 @@
 
 'use strict';
 
-/* global computeScore, countWeekRest, dayCoverage, deepCopy, getRestPromotionPriority */
-/* global isForbiddenExtraNightRestDay, isMPCycleLimitedNurse, isMandatoryNightRestDay */
+/* global canAssignRestrictedNoDiurniRest, computeScore, countWeekRest, dayCoverage, deepCopy */
+/* global getRestPromotionPriority, isForbiddenExtraNightRestDay, isForbiddenRestrictedNoDiurniRestDay */
+/* global isMPCycleLimitedNurse, isMandatoryNightRestDay */
 /* global isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,7 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     repaired = repairNightCoverage(repaired, ctx);
     repaired = repairNightRestContinuity(repaired, ctx);
     repaired = repairForbiddenExtraNightRest(repaired, ctx);
+    repaired = repairForbiddenRestrictedNoDiurniRest(repaired, ctx);
     repaired = repairSplitRestDays(repaired, ctx);
     repaired = repairDayCoverage(repaired, ctx);
     repaired = repairWeeklyRestDeficits(repaired, ctx);
@@ -347,6 +349,7 @@ function canRepairShiftChange(schedule, ctx, n, d, nextShift) {
   if (pinned[n][d] || schedule[n][d] === nextShift) return false;
   if (isMPCycleLimitedNurse(nurseProps[n])) return false;
   if (!isRepairShiftAllowed(nurseProps[n], nextShift)) return false;
+  if (nextShift === 'R' && !canAssignRestrictedNoDiurniRest(schedule, ctx, n, d)) return false;
   if (nextShift === 'R' && isForbiddenExtraNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift !== 'R' && schedule[n][d] === 'R' && isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift === 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) return false;
@@ -569,6 +572,47 @@ function repairForbiddenExtraNightRest(schedule, ctx) {
         if (shiftType === 'M' && cov.M >= maxCovM) continue;
         if (shiftType === 'P' && cov.P >= maxCovP) continue;
         if (shiftType === 'D' && (cov.M >= maxCovM || cov.P >= maxCovP || cov.D >= maxCovD)) continue;
+        if (!canRepairShiftChange(repaired, ctx, n, d, shiftType)) continue;
+        const candidate = deepCopy(repaired);
+        candidate[n][d] = shiftType;
+        const score = computeScore(candidate, ctx);
+        if (score.hard < bestScore.hard || (score.hard === bestScore.hard && score.total < bestScore.total)) {
+          bestShift = shiftType;
+          bestScore = score;
+        }
+      }
+      if (bestShift) repaired[n][d] = bestShift;
+    }
+  }
+
+  return repaired;
+}
+
+function repairForbiddenRestrictedNoDiurniRest(schedule, ctx) {
+  const { numDays, numNurses, maxCovM, maxCovP, nurseProps } = ctx;
+  const repaired = deepCopy(schedule);
+
+  function candidateShiftOrder(n, d) {
+    const prev = d > 0 ? repaired[n][d - 1] : null;
+    const next = d < numDays - 1 ? repaired[n][d + 1] : null;
+    const ordered = [];
+    for (const shift of [prev, next, 'M', 'P']) {
+      if ((shift === 'M' || shift === 'P') && !ordered.includes(shift)) ordered.push(shift);
+    }
+    return ordered;
+  }
+
+  for (let n = 0; n < numNurses; n++) {
+    if (!nurseProps[n].noDiurni) continue;
+    for (let d = 0; d < numDays; d++) {
+      if (!isForbiddenRestrictedNoDiurniRestDay(repaired, ctx, n, d)) continue;
+      const cov = dayCoverage(repaired, d, numNurses);
+      const currentScore = computeScore(repaired, ctx);
+      let bestShift = null;
+      let bestScore = currentScore;
+      for (const shiftType of candidateShiftOrder(n, d)) {
+        if (shiftType === 'M' && cov.M >= maxCovM) continue;
+        if (shiftType === 'P' && cov.P >= maxCovP) continue;
         if (!canRepairShiftChange(repaired, ctx, n, d, shiftType)) continue;
         const candidate = deepCopy(repaired);
         candidate[n][d] = shiftType;

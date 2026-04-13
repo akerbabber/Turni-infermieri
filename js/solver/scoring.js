@@ -45,12 +45,26 @@ function getShiftAt(schedule, ctx, nurseIdx, dayIdx) {
   return tailIdx >= 0 ? tail[tailIdx] : null;
 }
 
-const NO_DIURNI_EXTRA_REST_OFFSET = 3;
 const DIURNI_NOTTURNI_EXTRA_REST_OFFSET = 4;
 
+function isRestrictedNoDiurniNightNurse(props) {
+  return !!(
+    props &&
+    props.noDiurni &&
+    !props.noNotti &&
+    !props.diurniNoNotti &&
+    !props.mattineEPomeriggi &&
+    !props.quattroMattineVenerdiNotte &&
+    !props.soloMattine &&
+    !props.soloDiurni &&
+    !props.soloNotti &&
+    !props.diurniENotturni
+  );
+}
+
 function getForbiddenExtraRecoveryOffset(props) {
-  if (!props || props.soloNotti) return null;
-  return props.noDiurni ? NO_DIURNI_EXTRA_REST_OFFSET : DIURNI_NOTTURNI_EXTRA_REST_OFFSET;
+  if (!props || props.soloNotti || props.noDiurni) return null;
+  return DIURNI_NOTTURNI_EXTRA_REST_OFFSET;
 }
 
 function isForbiddenExtraNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
@@ -90,10 +104,35 @@ function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
 }
 
 function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
-  // The historical "optional extra R after N-S-R" rule was removed.
-  // no_diurni nurses now require exactly one R after S, so this hook is kept only
-  // to avoid changing multiple call sites in local-search and split-rest detection.
-  return false;
+  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
+  if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
+  const props = ctx.nurseProps[nurseIdx];
+  if (!isRestrictedNoDiurniNightNurse(props)) return false;
+  return (
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'R' &&
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2) === 'S' &&
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 3) === 'N'
+  );
+}
+
+function canAssignRestrictedNoDiurniRest(schedule, ctx, nurseIdx, dayIdx) {
+  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
+  const props = ctx.nurseProps[nurseIdx];
+  if (!isRestrictedNoDiurniNightNurse(props)) return true;
+  return (
+    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'S' ||
+    (getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'R' &&
+      getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2) === 'S' &&
+      getShiftAt(schedule, ctx, nurseIdx, dayIdx - 3) === 'N')
+  );
+}
+
+function isForbiddenRestrictedNoDiurniRestDay(schedule, ctx, nurseIdx, dayIdx) {
+  if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
+  const props = ctx.nurseProps[nurseIdx];
+  if (!isRestrictedNoDiurniNightNurse(props)) return false;
+  if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
+  return !canAssignRestrictedNoDiurniRest(schedule, ctx, nurseIdx, dayIdx);
 }
 
 function isWorkShift(shift) {
@@ -420,6 +459,9 @@ function computeScore(schedule, ctx) {
       const info = getNightPatternInfo(schedule, ctx, n, d);
       if (info && !info.validLead) hard++;
       if (hasForbiddenExtraNightRest(schedule, ctx, n, d)) hard++;
+    }
+    for (let d = 0; d < numDays; d++) {
+      if (isForbiddenRestrictedNoDiurniRestDay(schedule, ctx, n, d)) hard++;
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
       hard += getMPCyclePlan(schedule, n, numDays, nurseProps[n]).mismatch;
@@ -749,6 +791,15 @@ function collectViolations(schedule, ctx) {
             ? `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un secondo riposo dopo N-S-R`
             : `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un terzo riposo dopo il blocco N-S-R-R`,
         });
+    }
+    for (let d = 0; d < numDays; d++) {
+      if (!isForbiddenRestrictedNoDiurniRestDay(schedule, ctx, n, d)) continue;
+      violations.push({
+        nurse: n,
+        day: d,
+        type: 'restricted_no_diurni_rest',
+        msg: `Infermiere ${n + 1}, giorno ${d + 1}: riposo consentito solo dopo lo smonto notte (massimo un R extra dopo N-S-R)`,
+      });
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
       const plan = getMPCyclePlan(schedule, n, numDays, nurseProps[n]);

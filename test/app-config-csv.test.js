@@ -387,6 +387,37 @@ describe('config CSV helpers', () => {
   });
 });
 
+describe('manual fixed-pattern protections', () => {
+  it('should keep the fixed 4 mattine + notte ven. pattern during manual edits', () => {
+    const currentState = toPlain(ctx._getAppState());
+    ctx._setAppState({
+      ...currentState,
+      year: 2025,
+      month: 0,
+      totalNurses: 1,
+      absentNurses: 0,
+      nurses: [
+        {
+          id: 'n1',
+          name: 'Infermiere 1',
+          tags: ['quattro_mattine_venerdi_notte'],
+          absencePeriods: {},
+        },
+      ],
+      schedule: [new Array(31).fill('R')],
+      stats: [{ totalHours: 0, nights: 0, diurni: 0, weekends: 0 }],
+      violations: [],
+    });
+
+    ctx.applyManualShift(0, 0, 'P');
+    ctx.applyManualShift(0, 2, 'M');
+
+    const nextState = toPlain(ctx._getAppState());
+    assert.equal(nextState.schedule[0][0], 'M');
+    assert.equal(nextState.schedule[0][2], 'N');
+  });
+});
+
 describe('previous month hour compensation', () => {
   it('should compute previous-month deltas relative to the imported roster average', () => {
     const currentState = toPlain(ctx._getAppState());

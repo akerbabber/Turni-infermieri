@@ -1170,7 +1170,7 @@ describe('construct', () => {
     }
   });
 
-  it('should keep only one rest after a night block for no_diurni nurses', () => {
+  it('should keep no_diurni rests attached to the post-night recovery block only', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
       nurseOverrides: {
@@ -1200,14 +1200,25 @@ describe('construct', () => {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
       const row = schedule[0];
-      const foundForbiddenNSRRPattern = Array.from(
-        { length: bctx.numDays - 3 },
-        (_, d) => row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R'
-      ).some(match => match);
+      const forbiddenRestDay = row.findIndex(
+        (shift, d) =>
+          shift === 'R' &&
+          !(d > 0 && row[d - 1] === 'S') &&
+          !(d > 2 && row[d - 1] === 'R' && row[d - 2] === 'S' && row[d - 3] === 'N')
+      );
+      const foundForbiddenNSRRRPattern = Array.from(
+        { length: bctx.numDays - 4 },
+        (_, d) => row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R' && row[d + 4] === 'R'
+      ).some(Boolean);
       assert.equal(
-        foundForbiddenNSRRPattern,
+        forbiddenRestDay,
+        -1,
+        `Unexpected no_diurni rest outside post-night recovery: ${row.join('-')}`
+      );
+      assert.equal(
+        foundForbiddenNSRRRPattern,
         false,
-        `Unexpected N-S-R-R cluster for no_diurni nurse: ${row.join('-')}`
+        `Unexpected third extra rest for no_diurni nurse: ${row.join('-')}`
       );
     } finally {
       Math.random = origRandom;
@@ -1605,6 +1616,37 @@ describe('localSearch split rest repair', () => {
     assert.ok(['M', 'P', 'D'].includes(repaired[0][5]));
     assert.equal(
       violations.some(v => v.type === 'night_extra_rest'),
+      false,
+      JSON.stringify(violations)
+    );
+  });
+
+  it('should convert a no_diurni rest day that is not attached to a night block back into work', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['no_diurni'] },
+      },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 3,
+        minCoverageP: 0,
+        maxCoverageP: 3,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 7;
+    const schedule = [['M', 'R', 'P', 'N', 'S', 'R', 'R']];
+    const repaired = ctx.localSearch(schedule, bctx, 0);
+    const violations = ctx.collectViolations(repaired, bctx);
+    assert.notEqual(repaired[0][1], 'R');
+    assert.equal(
+      violations.some(v => v.type === 'restricted_no_diurni_rest'),
       false,
       JSON.stringify(violations)
     );
@@ -2242,7 +2284,7 @@ describe('collectViolations strict night patterns', () => {
     assert.ok(violations.some(v => v.type === 'mp_night_pattern'));
   });
 
-  it('should report an extra rest after a no_diurni night block', () => {
+  it('should allow a second rest after a no_diurni night block', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
       nurseOverrides: { 0: { tags: ['no_diurni'] } },
@@ -2269,7 +2311,37 @@ describe('collectViolations strict night patterns', () => {
 
     const extraRestViolation = ctx.collectViolations(schedule, bctx).find(v => v.type === 'night_extra_rest');
 
-    assert.equal(extraRestViolation && extraRestViolation.day, 2);
+    assert.equal(extraRestViolation, undefined);
+  });
+
+  it('should report a no_diurni rest day that is not attached to post-night recovery', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: { 0: { tags: ['no_diurni'] } },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 31,
+        minCoverageP: 0,
+        maxCoverageP: 31,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 1,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = [new Array(bctx.numDays).fill('M')];
+    schedule[0][0] = 'M';
+    schedule[0][1] = 'R';
+    schedule[0][2] = 'P';
+    schedule[0][3] = 'N';
+    schedule[0][4] = 'S';
+    schedule[0][5] = 'R';
+
+    const violation = ctx.collectViolations(schedule, bctx).find(v => v.type === 'restricted_no_diurni_rest');
+
+    assert.equal(violation && violation.day, 1);
   });
 
   it('should report invalid D/N lead-in for diurni_e_notturni nurses', () => {
