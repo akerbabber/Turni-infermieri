@@ -2148,9 +2148,12 @@ function renderStep4() {
       const wk = isWeekend(state.year, state.month, d + 1);
       const vio = vioMap.has(`${n},${d}`);
       const lockedShift = getLockedManualShift(n, d);
+      const lockAttrs = lockedShift
+        ? ` aria-readonly="true" title="Turno fisso non modificabile" aria-label="Turno ${SHIFT_LABELS[shift]} fisso non modificabile"`
+        : '';
       bodyHTML += `<td class="${wk ? 'col-weekend' : ''} ${vio ? 'violation-cell' : ''}" data-n="${n}" data-d="${d}">
                      <span class="shift-cell ${SHIFT_COLORS[shift] || 'shift-empty'} ${lockedShift ? 'opacity-80' : ''}"
-                            data-n="${n}" data-d="${d}">${shift}</span>
+                            data-n="${n}" data-d="${d}"${lockAttrs}>${shift}</span>
                    </td>`;
     }
 
@@ -2229,6 +2232,7 @@ function getLockedManualShift(n, d) {
   const nurse = state.nurses[n];
   if (!nurse || !Array.isArray(nurse.tags)) return null;
   if (!nurse.tags.includes('quattro_mattine_venerdi_notte')) return null;
+  // Fixed weekly pattern: Mon-Thu M, Fri N, Sat S, Sun R.
   const dow = dayOfWeek(state.year, state.month, d + 1);
   if (dow >= 1 && dow <= 4) return 'M';
   if (dow === 5) return 'N';

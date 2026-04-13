@@ -740,7 +740,7 @@ function construct(ctx) {
   }
 
   // Phase 4.55 — Convert discretionary no_diurni rest days into work unless they
-  // extend the post-night recovery block (N-S-R or N-S-R-R).
+  // are part of the post-night recovery block (N-S-R or N-S-R-R).
   for (let n = 0; n < numNurses; n++) {
     if (!nurseProps[n].noDiurni) continue;
     for (let d = 0; d < numDays; d++) {

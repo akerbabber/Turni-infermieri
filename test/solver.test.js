@@ -1200,6 +1200,9 @@ describe('construct', () => {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
       const row = schedule[0];
+      // Valid rest slots for these nurses are only:
+      // 1) the mandatory R immediately after S, or
+      // 2) the optional second R after N-S-R.
       const forbiddenRestDay = row.findIndex(
         (shift, d) =>
           shift === 'R' &&

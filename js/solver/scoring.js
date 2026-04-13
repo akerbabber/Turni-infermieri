@@ -48,18 +48,18 @@ function getShiftAt(schedule, ctx, nurseIdx, dayIdx) {
 const DIURNI_NOTTURNI_EXTRA_REST_OFFSET = 4;
 
 function isRestrictedNoDiurniNightNurse(props) {
-  return !!(
-    props &&
-    props.noDiurni &&
-    !props.noNotti &&
-    !props.diurniNoNotti &&
-    !props.mattineEPomeriggi &&
-    !props.quattroMattineVenerdiNotte &&
-    !props.soloMattine &&
-    !props.soloDiurni &&
-    !props.soloNotti &&
-    !props.diurniENotturni
-  );
+  if (!props || !props.noDiurni) return false;
+  const excludedFlags = [
+    'noNotti',
+    'diurniNoNotti',
+    'mattineEPomeriggi',
+    'quattroMattineVenerdiNotte',
+    'soloMattine',
+    'soloDiurni',
+    'soloNotti',
+    'diurniENotturni',
+  ];
+  return !excludedFlags.some(flag => props[flag]);
 }
 
 function getForbiddenExtraRecoveryOffset(props) {
