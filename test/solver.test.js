@@ -1210,11 +1210,7 @@ describe('construct', () => {
         { length: bctx.numDays - 4 },
         (_, d) => row[d] === 'N' && row[d + 1] === 'S' && row[d + 2] === 'R' && row[d + 3] === 'R' && row[d + 4] === 'R'
       ).some(Boolean);
-      assert.equal(
-        forbiddenRestDay,
-        -1,
-        `Unexpected no_diurni rest outside post-night recovery: ${row.join('-')}`
-      );
+      assert.equal(forbiddenRestDay, -1, `Unexpected no_diurni rest outside post-night recovery: ${row.join('-')}`);
       assert.equal(
         foundForbiddenNSRRRPattern,
         false,
@@ -2314,7 +2310,7 @@ describe('collectViolations strict night patterns', () => {
     assert.equal(extraRestViolation, undefined);
   });
 
-  it('should report a no_diurni rest day that is not attached to post-night recovery', () => {
+  it('should not treat a no_diurni discretionary rest as a hard violation', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
       nurseOverrides: { 0: { tags: ['no_diurni'] } },
@@ -2341,7 +2337,7 @@ describe('collectViolations strict night patterns', () => {
 
     const violation = ctx.collectViolations(schedule, bctx).find(v => v.type === 'restricted_no_diurni_rest');
 
-    assert.equal(violation && violation.day, 1);
+    assert.equal(violation, undefined);
   });
 
   it('should report invalid D/N lead-in for diurni_e_notturni nurses', () => {

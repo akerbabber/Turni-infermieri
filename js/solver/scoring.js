@@ -460,9 +460,6 @@ function computeScore(schedule, ctx) {
       if (info && !info.validLead) hard++;
       if (hasForbiddenExtraNightRest(schedule, ctx, n, d)) hard++;
     }
-    for (let d = 0; d < numDays; d++) {
-      if (isForbiddenRestrictedNoDiurniRestDay(schedule, ctx, n, d)) hard++;
-    }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
       hard += getMPCyclePlan(schedule, n, numDays, nurseProps[n]).mismatch;
     }
@@ -543,6 +540,14 @@ function computeScore(schedule, ctx) {
   for (let n = 0; n < numNurses; n++) {
     for (let d = ctx.prevTail ? 0 : 1; d < numDays - 1; d++) {
       if (isSplitRestDay(schedule, ctx, n, d)) soft += 4;
+    }
+  }
+
+  // Soft: for M/P/N-only nurses, keep discretionary rests attached to the
+  // post-night recovery block instead of scattering them across the month.
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (isForbiddenRestrictedNoDiurniRestDay(schedule, ctx, n, d)) soft += 6;
     }
   }
 
@@ -791,15 +796,6 @@ function collectViolations(schedule, ctx) {
             ? `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un secondo riposo dopo N-S-R`
             : `Infermiere ${n + 1}, giorno ${d + 1}: non è consentito un terzo riposo dopo il blocco N-S-R-R`,
         });
-    }
-    for (let d = 0; d < numDays; d++) {
-      if (!isForbiddenRestrictedNoDiurniRestDay(schedule, ctx, n, d)) continue;
-      violations.push({
-        nurse: n,
-        day: d,
-        type: 'restricted_no_diurni_rest',
-        msg: `Infermiere ${n + 1}, giorno ${d + 1}: riposo consentito solo dopo lo smonto notte (massimo un R extra dopo N-S-R)`,
-      });
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
       const plan = getMPCyclePlan(schedule, n, numDays, nurseProps[n]);

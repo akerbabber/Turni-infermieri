@@ -15,8 +15,9 @@
 
 'use strict';
 
-/* global MP_NIGHT_PATTERNS, dayCoverage, getAllowedMPCyclePatterns, isForbiddenRestrictedNoDiurniRestDay */
-/* global getRestPromotionPriority, isMPCycleLimitedNurse, isMandatoryNightRestDay, matchesPatternEndingAt */
+/* global MP_NIGHT_PATTERNS, dayCoverage, getAllowedMPCyclePatterns */
+/* global getRestPromotionPriority, isForbiddenRestrictedNoDiurniRestDay */
+/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, matchesPatternEndingAt */
 
 // ---------------------------------------------------------------------------
 // Construction heuristic (one attempt)

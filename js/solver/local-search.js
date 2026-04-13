@@ -36,9 +36,9 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
   const moveStats = [
     { attempts: 0, accepts: 0, weight: 0.15 }, // 0: swap
     { attempts: 0, accepts: 0, weight: 0.15 }, // 1: change
-    { attempts: 0, accepts: 0, weight: 0.40 }, // 2: equity (aumentato)
-    { attempts: 0, accepts: 0, weight: 0.20 }, // 3: weekly rest
-    { attempts: 0, accepts: 0, weight: 0.10 }, // 4: coppia turni (NUOVO)
+    { attempts: 0, accepts: 0, weight: 0.4 }, // 2: equity (aumentato)
+    { attempts: 0, accepts: 0, weight: 0.2 }, // 3: weekly rest
+    { attempts: 0, accepts: 0, weight: 0.1 }, // 4: coppia turni (NUOVO)
   ];
   const ADAPT_INTERVAL = 1000; // recalculate weights every N iterations
   const MIN_WEIGHT = 0.05; // floor to prevent starving any move type
@@ -76,10 +76,16 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
         if (n1 < ctx.numNurses && n2 < ctx.numNurses) {
           let hasDivergence = false;
           for (let d = 0; d < ctx.numDays; d++) {
-            if (current[n1][d] !== current[n2][d]) { hasDivergence = true; break; }
+            if (current[n1][d] !== current[n2][d]) {
+              hasDivergence = true;
+              break;
+            }
           }
-          if (hasDivergence) { moveType = 4; }
-          else { moveType = 3; }
+          if (hasDivergence) {
+            moveType = 4;
+          } else {
+            moveType = 3;
+          }
         } else {
           moveType = 3;
         }
@@ -349,7 +355,6 @@ function canRepairShiftChange(schedule, ctx, n, d, nextShift) {
   if (pinned[n][d] || schedule[n][d] === nextShift) return false;
   if (isMPCycleLimitedNurse(nurseProps[n])) return false;
   if (!isRepairShiftAllowed(nurseProps[n], nextShift)) return false;
-  if (nextShift === 'R' && !canAssignRestrictedNoDiurniRest(schedule, ctx, n, d)) return false;
   if (nextShift === 'R' && isForbiddenExtraNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift !== 'R' && schedule[n][d] === 'R' && isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift === 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) return false;
@@ -589,7 +594,7 @@ function repairForbiddenExtraNightRest(schedule, ctx) {
 }
 
 function repairForbiddenRestrictedNoDiurniRest(schedule, ctx) {
-  const { numDays, numNurses, maxCovM, maxCovP, nurseProps } = ctx;
+  const { numDays, numNurses, nurseProps } = ctx;
   const repaired = deepCopy(schedule);
 
   function candidateShiftOrder(n, d) {
@@ -606,13 +611,10 @@ function repairForbiddenRestrictedNoDiurniRest(schedule, ctx) {
     if (!nurseProps[n].noDiurni) continue;
     for (let d = 0; d < numDays; d++) {
       if (!isForbiddenRestrictedNoDiurniRestDay(repaired, ctx, n, d)) continue;
-      const cov = dayCoverage(repaired, d, numNurses);
       const currentScore = computeScore(repaired, ctx);
       let bestShift = null;
       let bestScore = currentScore;
       for (const shiftType of candidateShiftOrder(n, d)) {
-        if (shiftType === 'M' && cov.M >= maxCovM) continue;
-        if (shiftType === 'P' && cov.P >= maxCovP) continue;
         if (!canRepairShiftChange(repaired, ctx, n, d, shiftType)) continue;
         const candidate = deepCopy(repaired);
         candidate[n][d] = shiftType;
@@ -640,7 +642,8 @@ function repairWeeklyRestDeficits(schedule, ctx) {
   }
 
   function canRestOnDay(n, d) {
-    if (pinned[n][d] || isMPCycleLimitedNurse(nurseProps[n]) || nurseProps[n].noDiurni) return false;
+    if (pinned[n][d] || isMPCycleLimitedNurse(nurseProps[n])) return false;
+    if (nurseProps[n].noDiurni && !canAssignRestrictedNoDiurniRest(repaired, ctx, n, d)) return false;
     const currentShift = repaired[n][d];
     if (currentShift !== 'M' && currentShift !== 'P' && currentShift !== 'D') return false;
     if (currentShift === 'D') {
@@ -683,7 +686,8 @@ function repairWeeklyRestDeficits(schedule, ctx) {
           for (let other = 0; other < numNurses; other++) {
             if (other === n || repaired[other][d] !== 'R' || pinned[other][d]) continue;
             if (!hasSpareWeeklyRest(other, weekDays)) continue;
-            if (isMPCycleLimitedNurse(nurseProps[other]) || nurseProps[other].noDiurni) continue;
+            if (isMPCycleLimitedNurse(nurseProps[other])) continue;
+            if (nurseProps[other].noDiurni && !canAssignRestrictedNoDiurniRest(repaired, ctx, other, d)) continue;
             if (
               !canRepairShiftChange(repaired, ctx, n, d, 'R') ||
               !canRepairShiftChange(repaired, ctx, other, d, shift)
