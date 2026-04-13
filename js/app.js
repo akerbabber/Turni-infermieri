@@ -79,7 +79,11 @@ const CONFIG_CSV_PREVIOUS_TAIL_FIELDS = [
   { key: 'dayMinus1', header: 'Mese prec. -1' },
 ];
 const ALL_SHIFT_CODES = ['M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT'];
+const CONTINUITY_SHIFT_OPTIONS = [''].concat(ALL_SHIFT_CODES);
 const VALID_SHIFTS = new Set(ALL_SHIFT_CODES);
+const PREVIOUS_MONTH_TAIL_LENGTH = CONFIG_CSV_PREVIOUS_TAIL_FIELDS.length;
+const IMPORTED_PREVIOUS_MONTH_TAIL_DAYS = 5;
+const TOTAL_WIZARD_STEPS = 5;
 
 const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('debug') === 'true';
 
@@ -111,7 +115,7 @@ const DEFAULT_NURSE_NAMES = [
   'PAITA DARIO',
   'PANENA NOEMI',
   'PERRA MARCO',
-  'PES CIUDIA',
+  'PES CLAUDIA',
   'PUTZOLU MARIA ANTONIA',
   'SERRA ALESSANDRO',
   'SERRA ELISA',
@@ -188,7 +192,7 @@ function createEmptyAbsencePeriods() {
 }
 
 function createEmptyPreviousMonthTail() {
-  return [null, null, null];
+  return new Array(PREVIOUS_MONTH_TAIL_LENGTH).fill(null);
 }
 
 function normalizeNullableDate(value) {
@@ -213,7 +217,9 @@ function normalizeNurse(nurse, index) {
   });
 
   const previousMonthTail = createEmptyPreviousMonthTail();
-  const sourceTail = Array.isArray(nurse?.previousMonthTail) ? nurse.previousMonthTail.slice(-3) : [];
+  const sourceTail = Array.isArray(nurse?.previousMonthTail)
+    ? nurse.previousMonthTail.slice(-PREVIOUS_MONTH_TAIL_LENGTH)
+    : [];
   sourceTail.forEach((shift, tailIndex) => {
     previousMonthTail[previousMonthTail.length - sourceTail.length + tailIndex] = normalizeShiftCode(shift);
   });
@@ -338,7 +344,7 @@ function renderAll() {
 }
 
 function showOnlyStep(step) {
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= TOTAL_WIZARD_STEPS; i++) {
     const el = document.getElementById(`step-${i}`);
     if (el) el.classList.toggle('hidden', i !== step);
   }
@@ -350,7 +356,7 @@ function showOnlyStep(step) {
 
 function renderStepNav() {
   showOnlyStep(state.step);
-  const steps = [1, 2, 3, 4, 5];
+  const steps = Array.from({ length: TOTAL_WIZARD_STEPS }, (_, idx) => idx + 1);
   steps.forEach(i => {
     const ind = document.getElementById(`btn-nav-${i}`);
     if (!ind) return;
@@ -363,7 +369,7 @@ function renderStepNav() {
   });
 
   // Nav buttons
-  ['btn-nav-1', 'btn-nav-2', 'btn-nav-3', 'btn-nav-4', 'btn-nav-5'].forEach((id, idx) => {
+  Array.from({ length: TOTAL_WIZARD_STEPS }, (_, idx) => `btn-nav-${idx + 1}`).forEach((id, idx) => {
     const btn = document.getElementById(id);
     if (btn) {
       btn.classList.toggle('font-bold', idx + 1 === state.step);
@@ -966,7 +972,7 @@ function renderPrevMonthStatus() {
   deltasEl.innerHTML = html;
 }
 
-function getImportedPrevMonthTailForNurse(nurseIdx, tailDays = 5) {
+function getImportedPrevMonthTailForNurse(nurseIdx, tailDays = IMPORTED_PREVIOUS_MONTH_TAIL_DAYS) {
   const row = state.previousMonthSchedule?.[nurseIdx];
   if (!Array.isArray(row) || row.length === 0) return null;
   const tail = row.slice(-tailDays).map(shift => normalizeShiftCode(shift));
@@ -975,7 +981,9 @@ function getImportedPrevMonthTailForNurse(nurseIdx, tailDays = 5) {
 
 function getManualPreviousMonthTailForNurse(nurse) {
   const tail = createEmptyPreviousMonthTail();
-  const sourceTail = Array.isArray(nurse?.previousMonthTail) ? nurse.previousMonthTail.slice(-3) : [];
+  const sourceTail = Array.isArray(nurse?.previousMonthTail)
+    ? nurse.previousMonthTail.slice(-PREVIOUS_MONTH_TAIL_LENGTH)
+    : [];
   sourceTail.forEach((shift, tailIndex) => {
     tail[tail.length - sourceTail.length + tailIndex] = normalizeShiftCode(shift);
   });
@@ -1193,9 +1201,9 @@ function buildConfigCsvRows(cfg) {
       ...CONFIG_CSV_PREVIOUS_TAIL_FIELDS.map(field => field.header),
     ],
   ];
-  const emptyNurseCells = new Array(CONFIG_CSV_ABSENCE_FIELDS.length * 2 + CONFIG_CSV_PREVIOUS_TAIL_FIELDS.length).fill(
-    ''
-  );
+  const emptyExtraColumns = new Array(
+    CONFIG_CSV_ABSENCE_FIELDS.length * 2 + CONFIG_CSV_PREVIOUS_TAIL_FIELDS.length
+  ).fill('');
 
   [
     ['month', cfg.month],
@@ -1203,11 +1211,11 @@ function buildConfigCsvRows(cfg) {
     ['totalNurses', cfg.totalNurses],
     ['absentNurses', cfg.absentNurses],
   ].forEach(([key, value]) => {
-    rows.push(['meta', key, value, '', '', '', ...emptyNurseCells]);
+    rows.push(['meta', key, value, '', '', '', ...emptyExtraColumns]);
   });
 
   Object.keys(DEFAULT_RULES).forEach(key => {
-    rows.push(['vincolo', key, serializeConfigRuleValue(key, cfg.rules[key]), '', '', '', ...emptyNurseCells]);
+    rows.push(['vincolo', key, serializeConfigRuleValue(key, cfg.rules[key]), '', '', '', ...emptyExtraColumns]);
   });
 
   cfg.nurses.forEach((nurse, index) => {
@@ -1471,7 +1479,7 @@ function buildHourDeltas() {
 function buildPrevMonthTail() {
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
   const tail = activeNurses.map((nurse, nurseIdx) => {
-    const importedTail = getImportedPrevMonthTailForNurse(nurseIdx)?.slice() || [];
+    const importedTail = getImportedPrevMonthTailForNurse(nurseIdx) || [];
     const manualTail = getManualPreviousMonthTailForNurse(nurse);
     const hasManual = manualTail.some(Boolean);
     if (!importedTail.length && !hasManual) return null;
@@ -1494,7 +1502,6 @@ function renderContinuityList() {
   if (!container) return;
 
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
-  const shiftOptions = [''].concat(ALL_SHIFT_CODES);
   container.innerHTML = activeNurses
     .map((nurse, nurseIdx) => {
       const manualTail = getManualPreviousMonthTailForNurse(nurse);
@@ -1515,14 +1522,12 @@ function renderContinuityList() {
                   data-nurse="${nurseIdx}"
                   data-tail-index="${tailIdx}"
                 >
-                  ${shiftOptions
-                    .map(
-                      value =>
-                        `<option value="${value}" ${manualTail[tailIdx] === value ? 'selected' : ''}>${
-                          value || '—'
-                        }</option>`
-                    )
-                    .join('')}
+                  ${CONTINUITY_SHIFT_OPTIONS.map(
+                    value =>
+                      `<option value="${value}" ${manualTail[tailIdx] === value ? 'selected' : ''}>${
+                        value || '—'
+                      }</option>`
+                  ).join('')}
                 </select>
               </label>`
             ).join('')}
@@ -2477,7 +2482,7 @@ function init() {
   document.addEventListener('click', closeDropdown);
 
   // ---- Step nav buttons ----
-  ['btn-nav-1', 'btn-nav-2', 'btn-nav-3', 'btn-nav-4', 'btn-nav-5'].forEach((id, idx) => {
+  Array.from({ length: TOTAL_WIZARD_STEPS }, (_, idx) => `btn-nav-${idx + 1}`).forEach((id, idx) => {
     document.getElementById(id)?.addEventListener('click', () => goToStep(idx + 1));
   });
 

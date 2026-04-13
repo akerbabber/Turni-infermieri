@@ -186,6 +186,18 @@ describe('config CSV helpers', () => {
     });
   });
 
+  it('should convert invalid previous-month tail shift codes to null', () => {
+    const csv = [
+      '"Sezione";"Chiave";"Valore";"Ordine";"Nome";"Tag";"Mese prec. -3";"Mese prec. -2";"Mese prec. -1"',
+      '"infermiere";"";"";"1";"Rossi Marco";"";"XYZ";"M";"BAD"',
+    ].join('\r\n');
+
+    const result = ctx.parseConfigCSV(csv);
+
+    assert.equal(result.error, undefined);
+    assert.deepEqual(toPlain(result.config.nurses[0].previousMonthTail), [null, 'M', null]);
+  });
+
   it('should clear generated results when applying an imported config', () => {
     const currentState = toPlain(ctx._getAppState());
     ctx.renderAll = () => {};
