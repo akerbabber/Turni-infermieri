@@ -73,47 +73,56 @@ const CONFIG_CSV_ABSENCE_FIELDS = [
   { key: 'permesso_retribuito', startHeader: 'Permesso retr. dal', endHeader: 'Permesso retr. al' },
   { key: 'maternita', startHeader: 'Maternità dal', endHeader: 'Maternità al' },
 ];
+const CONFIG_CSV_PREVIOUS_TAIL_FIELDS = [
+  { key: 'dayMinus3', header: 'Mese prec. -3' },
+  { key: 'dayMinus2', header: 'Mese prec. -2' },
+  { key: 'dayMinus1', header: 'Mese prec. -1' },
+];
+const ALL_SHIFT_CODES = ['M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT'];
+const CONTINUITY_SHIFT_OPTIONS = [''].concat(ALL_SHIFT_CODES);
+const VALID_SHIFTS = new Set(ALL_SHIFT_CODES);
+const PREVIOUS_MONTH_TAIL_LENGTH = CONFIG_CSV_PREVIOUS_TAIL_FIELDS.length;
+const IMPORTED_PREVIOUS_MONTH_TAIL_DAYS = 5;
+const TOTAL_WIZARD_STEPS = 5;
 
 const DEBUG = typeof localStorage !== 'undefined' && localStorage.getItem('debug') === 'true';
 
 const DEFAULT_NURSE_NAMES = [
-  'Rossi Marco',
-  'Bianchi Laura',
-  'Ferrari Giovanni',
-  'Esposito Sofia',
-  'Conti Luca',
-  'Ricci Anna',
-  'Colombo Pietro',
-  'Russo Elena',
-  'Marinelli Sara',
-  'Greco Alberto',
-  'Bruno Claudia',
-  'Romano Fabio',
-  'Costa Valentina',
-  'Fontana Roberto',
-  'Ferrara Giulia',
-  'Galli Stefano',
-  'Coppola Marta',
-  'Rizzo Davide',
-  'Lombardi Chiara',
-  'Barbieri Simone',
-  'Moretti Paola',
-  'Caruso Marco',
-  'De Luca Francesca',
-  'Fiore Alessandro',
-  'Pellegrini Ilaria',
-  'Monti Nicola',
-  'Poli Carmen',
-  'Testa Giorgio',
-  'Riva Serena',
-  'Sala Massimo',
-  'Villa Roberta',
-  'Sergi Luigi',
-  'Palumbo Elisa',
-  'Messina Diego',
-  'Cattaneo Nadia',
-  'Rinaldi Lorenzo',
-  'Fabbri Agnese',
+  'Giorgi Bruna',
+  'Aresu FRANCESCA',
+  'ATZENI ELISA',
+  'CABONI ILARIA',
+  'CALLEDDA CARLA',
+  'CAMBA LORENZA',
+  'CAMBONI CINZIA',
+  'CARDIA SILVIA',
+  'CASU VALENTINA',
+  'CARTA LUISIANA',
+  'COGONI MARIA',
+  'CORONGIU GIUSEPPE',
+  'DEIAS DANIELA',
+  'DEMARA MATTEO',
+  'DETTORINO MICHELA',
+  'DIANA CHIARA',
+  'FENZA MARIA GRAZIA',
+  'FRAU FEDERICA',
+  'LOVICU MARCO',
+  'MAMELI ESTER',
+  'MATTANA DENISE',
+  'MELIS CRISTINA',
+  'MELIS FRANCESCA',
+  'MILIA NICOLA',
+  'PAITA DARIO',
+  'PANENA NOEMI',
+  'PERRA MARCO',
+  'PES CLAUDIA',
+  'PUTZOLU MARIA ANTONIA',
+  'SERRA ALESSANDRO',
+  'SERRA ELISA',
+  'SPANU SERGIO',
+  'TUVERI FILIPPO',
+  'ZANDA SILVIA',
+  'MANCA ANDREA',
 ];
 
 const DEFAULT_RULES = {
@@ -182,9 +191,18 @@ function createEmptyAbsencePeriods() {
   };
 }
 
+function createEmptyPreviousMonthTail() {
+  return new Array(PREVIOUS_MONTH_TAIL_LENGTH).fill(null);
+}
+
 function normalizeNullableDate(value) {
   const normalized = typeof value === 'string' ? value.trim() : '';
   return normalized || null;
+}
+
+function normalizeShiftCode(value) {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  return VALID_SHIFTS.has(normalized) ? normalized : null;
 }
 
 function normalizeNurse(nurse, index) {
@@ -198,12 +216,21 @@ function normalizeNurse(nurse, index) {
     };
   });
 
+  const previousMonthTail = createEmptyPreviousMonthTail();
+  const sourceTail = Array.isArray(nurse?.previousMonthTail)
+    ? nurse.previousMonthTail.slice(-PREVIOUS_MONTH_TAIL_LENGTH)
+    : [];
+  sourceTail.forEach((shift, tailIndex) => {
+    previousMonthTail[previousMonthTail.length - sourceTail.length + tailIndex] = normalizeShiftCode(shift);
+  });
+
   return {
     ...nurse,
     id: nurse?.id || genId(index),
     name: nurse?.name?.trim() || DEFAULT_NURSE_NAMES[index] || `Infermiere ${index + 1}`,
     tags: Array.isArray(nurse?.tags) ? nurse.tags.filter(Boolean) : [],
     absencePeriods,
+    previousMonthTail,
   };
 }
 
@@ -311,12 +338,13 @@ function renderAll() {
   renderStep1();
   renderStep2();
   renderStep3();
+  renderGenerateStep();
   renderStep4();
   applyDarkMode(state.darkMode);
 }
 
 function showOnlyStep(step) {
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= TOTAL_WIZARD_STEPS; i++) {
     const el = document.getElementById(`step-${i}`);
     if (el) el.classList.toggle('hidden', i !== step);
   }
@@ -328,7 +356,7 @@ function showOnlyStep(step) {
 
 function renderStepNav() {
   showOnlyStep(state.step);
-  const steps = [1, 2, 3, 4];
+  const steps = Array.from({ length: TOTAL_WIZARD_STEPS }, (_, idx) => idx + 1);
   steps.forEach(i => {
     const ind = document.getElementById(`btn-nav-${i}`);
     if (!ind) return;
@@ -341,7 +369,7 @@ function renderStepNav() {
   });
 
   // Nav buttons
-  ['btn-nav-1', 'btn-nav-2', 'btn-nav-3', 'btn-nav-4'].forEach((id, idx) => {
+  Array.from({ length: TOTAL_WIZARD_STEPS }, (_, idx) => `btn-nav-${idx + 1}`).forEach((id, idx) => {
     const btn = document.getElementById(id);
     if (btn) {
       btn.classList.toggle('font-bold', idx + 1 === state.step);
@@ -399,6 +427,12 @@ function renderNurseList() {
 
     const tagDefs = [
       { key: 'solo_mattine', label: 'Solo mattine feriali', cls: 'tag-solo_mattine', isAbsence: false },
+      {
+        key: 'quattro_mattine_venerdi_notte',
+        label: '4 mattine + notte ven.',
+        cls: 'tag-quattro_mattine_venerdi_notte',
+        isAbsence: false,
+      },
       { key: 'mattine_e_pomeriggi', label: 'Mattine e Pomeriggi', cls: 'tag-mattine_e_pomeriggi', isAbsence: false },
       { key: 'solo_diurni', label: 'Solo diurni 12h', cls: 'tag-solo_diurni', isAbsence: false },
       { key: 'solo_notti', label: 'Solo notti', cls: 'tag-solo_notti', isAbsence: false },
@@ -888,8 +922,6 @@ function renderNursePairingDropdown() {
 // Previous month schedule import
 // ---------------------------------------------------------------------------
 
-const VALID_SHIFTS = new Set(['M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT']);
-
 /**
  * Render the status of previous month import in Step 2.
  */
@@ -938,6 +970,44 @@ function renderPrevMonthStatus() {
   }
   html += '</div></div>';
   deltasEl.innerHTML = html;
+}
+
+function getImportedPrevMonthTailForNurse(nurseIdx, tailDays = IMPORTED_PREVIOUS_MONTH_TAIL_DAYS) {
+  const row = state.previousMonthSchedule?.[nurseIdx];
+  if (!Array.isArray(row) || row.length === 0) return null;
+  const tail = row.slice(-tailDays).map(shift => normalizeShiftCode(shift));
+  return tail.some(Boolean) ? tail : null;
+}
+
+function getManualPreviousMonthTailForNurse(nurse) {
+  const tail = createEmptyPreviousMonthTail();
+  const sourceTail = Array.isArray(nurse?.previousMonthTail)
+    ? nurse.previousMonthTail.slice(-PREVIOUS_MONTH_TAIL_LENGTH)
+    : [];
+  sourceTail.forEach((shift, tailIndex) => {
+    tail[tail.length - sourceTail.length + tailIndex] = normalizeShiftCode(shift);
+  });
+  return tail;
+}
+
+function getContinuitySummary() {
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  const manualCount = activeNurses.filter(nurse => getManualPreviousMonthTailForNurse(nurse).some(Boolean)).length;
+  const importedCount = activeNurses.filter((_, nurseIdx) => getImportedPrevMonthTailForNurse(nurseIdx)).length;
+  return {
+    manualCount,
+    importedCount,
+    hasAny: manualCount > 0 || importedCount > 0,
+  };
+}
+
+function continuitySummaryLabel() {
+  const summary = getContinuitySummary();
+  if (!summary.hasAny) return '— Non configurata';
+  const parts = [];
+  if (summary.manualCount > 0) parts.push(`${summary.manualCount} manuali`);
+  if (summary.importedCount > 0) parts.push(`${summary.importedCount} da CSV mese prec.`);
+  return `✅ ${parts.join(' · ')}`;
 }
 
 /**
@@ -1128,9 +1198,12 @@ function buildConfigCsvRows(cfg) {
       'Nome',
       'Tag',
       ...CONFIG_CSV_ABSENCE_FIELDS.flatMap(field => [field.startHeader, field.endHeader]),
+      ...CONFIG_CSV_PREVIOUS_TAIL_FIELDS.map(field => field.header),
     ],
   ];
-  const emptyAbsenceCells = new Array(CONFIG_CSV_ABSENCE_FIELDS.length * 2).fill('');
+  const emptyExtraColumns = new Array(
+    CONFIG_CSV_ABSENCE_FIELDS.length * 2 + CONFIG_CSV_PREVIOUS_TAIL_FIELDS.length
+  ).fill('');
 
   [
     ['month', cfg.month],
@@ -1138,25 +1211,27 @@ function buildConfigCsvRows(cfg) {
     ['totalNurses', cfg.totalNurses],
     ['absentNurses', cfg.absentNurses],
   ].forEach(([key, value]) => {
-    rows.push(['meta', key, value, '', '', '', ...emptyAbsenceCells]);
+    rows.push(['meta', key, value, '', '', '', ...emptyExtraColumns]);
   });
 
   Object.keys(DEFAULT_RULES).forEach(key => {
-    rows.push(['vincolo', key, serializeConfigRuleValue(key, cfg.rules[key]), '', '', '', ...emptyAbsenceCells]);
+    rows.push(['vincolo', key, serializeConfigRuleValue(key, cfg.rules[key]), '', '', '', ...emptyExtraColumns]);
   });
 
   cfg.nurses.forEach((nurse, index) => {
+    const normalizedNurse = normalizeNurse(nurse, index);
     rows.push([
       'infermiere',
       '',
       '',
       index + 1,
-      nurse.name,
-      nurse.tags.join(','),
+      normalizedNurse.name,
+      normalizedNurse.tags.join(','),
       ...CONFIG_CSV_ABSENCE_FIELDS.flatMap(field => [
-        nurse.absencePeriods[field.key]?.start || '',
-        nurse.absencePeriods[field.key]?.end || '',
+        normalizedNurse.absencePeriods[field.key]?.start || '',
+        normalizedNurse.absencePeriods[field.key]?.end || '',
       ]),
+      ...normalizedNurse.previousMonthTail.map(shift => shift || ''),
     ]);
   });
 
@@ -1222,6 +1297,7 @@ function parseConfigCSV(text) {
         .map(tag => tag.trim())
         .filter(Boolean);
       const absencePeriods = createEmptyAbsencePeriods();
+      const previousMonthTail = createEmptyPreviousMonthTail();
       CONFIG_CSV_ABSENCE_FIELDS.forEach(field => {
         const startIdx = headerMap.get(normalizeCsvHeader(field.startHeader));
         const endIdx = headerMap.get(normalizeCsvHeader(field.endHeader));
@@ -1233,10 +1309,14 @@ function parseConfigCSV(text) {
           tags.push(field.key);
         }
       });
+      CONFIG_CSV_PREVIOUS_TAIL_FIELDS.forEach((field, tailIdx) => {
+        const cellIdx = headerMap.get(normalizeCsvHeader(field.header));
+        previousMonthTail[tailIdx] = normalizeShiftCode(getCell(row, cellIdx));
+      });
       const rawOrder = parseInt(getCell(row, orderIdx), 10);
       nurseRows.push({
         order: Number.isInteger(rawOrder) ? rawOrder : fallbackIndex + 1,
-        nurse: normalizeNurse({ name, tags, absencePeriods }, fallbackIndex),
+        nurse: normalizeNurse({ name, tags, absencePeriods, previousMonthTail }, fallbackIndex),
       });
       hasData = true;
     }
@@ -1393,35 +1473,97 @@ function buildHourDeltas() {
 }
 
 /**
- * Build previousMonthTail array: last 5 shifts per nurse from previous month.
- * Used by the solver to enforce shift continuity at the month boundary
- * (N-S-R-R continuation, D-D-R continuation, forbidden transitions, 11h gap).
+ * Build previousMonthTail array mixing manual continuity input (-3/-2/-1)
+ * with any imported previous-month roster.
  */
 function buildPrevMonthTail() {
-  if (!state.previousMonthSchedule) return null;
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
-  const TAIL_DAYS = 5;
-  const tail = [];
-  for (let n = 0; n < activeNurses.length; n++) {
-    const row = state.previousMonthSchedule[n];
-    if (!row || row.length === 0) {
-      tail.push(null);
-      continue;
-    }
-    const len = row.length;
-    const lastN = [];
-    for (let i = Math.max(0, len - TAIL_DAYS); i < len; i++) {
-      lastN.push(row[i] || null);
-    }
-    tail.push(lastN);
+  const tail = activeNurses.map((nurse, nurseIdx) => {
+    const importedTail = getImportedPrevMonthTailForNurse(nurseIdx) || [];
+    const manualTail = getManualPreviousMonthTailForNurse(nurse);
+    const hasManual = manualTail.some(Boolean);
+    if (!importedTail.length && !hasManual) return null;
+    if (!importedTail.length) return manualTail;
+
+    const mergedTail = importedTail.slice();
+    if (!hasManual) return mergedTail;
+
+    const manualStartIdx = Math.max(0, mergedTail.length - manualTail.length);
+    manualTail.forEach((shift, tailIdx) => {
+      if (shift) mergedTail[manualStartIdx + tailIdx] = shift;
+    });
+    return mergedTail;
+  });
+  return tail.some(entry => entry && entry.some(Boolean)) ? tail : null;
+}
+
+function renderContinuityList() {
+  const container = document.getElementById('continuity-list');
+  if (!container) return;
+
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+  container.innerHTML = activeNurses
+    .map((nurse, nurseIdx) => {
+      const manualTail = getManualPreviousMonthTailForNurse(nurse);
+      const importedTail = getImportedPrevMonthTailForNurse(nurseIdx);
+      const importedLabel = importedTail ? importedTail.map(shift => shift || '—').join(' · ') : '—';
+      return `<div class="rule-card">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p class="font-semibold text-sm">${escHtml(nurse.name)}</p>
+            <p class="text-xs text-gray-500 dark:text-slate-400">Ultimi 5 turni importati: ${escHtml(importedLabel)}</p>
+          </div>
+          <div class="grid grid-cols-3 gap-2 w-full lg:w-auto">
+            ${CONFIG_CSV_PREVIOUS_TAIL_FIELDS.map(
+              (field, tailIdx) => `<label class="text-xs text-gray-600 dark:text-slate-300">
+                <span class="block mb-1 font-medium">${escHtml(field.header)}</span>
+                <select
+                  class="continuity-tail-select btn w-full border border-gray-300 dark:border-slate-600 rounded-lg px-2 py-2 bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100"
+                  data-nurse="${nurseIdx}"
+                  data-tail-index="${tailIdx}"
+                >
+                  ${CONTINUITY_SHIFT_OPTIONS.map(
+                    value =>
+                      `<option value="${value}" ${manualTail[tailIdx] === value ? 'selected' : ''}>${
+                        value || '—'
+                      }</option>`
+                  ).join('')}
+                </select>
+              </label>`
+            ).join('')}
+          </div>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  container.querySelectorAll('.continuity-tail-select').forEach(select => {
+    select.addEventListener('change', () => {
+      const nurseIdx = parseInt(select.dataset.nurse, 10);
+      const tailIdx = parseInt(select.dataset.tailIndex, 10);
+      state.nurses[nurseIdx].previousMonthTail[tailIdx] = normalizeShiftCode(select.value);
+      saveState();
+      renderStep3();
+    });
+  });
+}
+
+function renderStep3() {
+  const summary = getContinuitySummary();
+  const statusEl = document.getElementById('continuity-status');
+  const hintEl = document.getElementById('continuity-hint');
+  if (statusEl) statusEl.textContent = continuitySummaryLabel();
+  if (hintEl) {
+    hintEl.textContent =
+      summary.importedCount > 0
+        ? 'I valori manuali sovrascrivono gli ultimi 3 giorni del CSV importato.'
+        : 'Lascia vuoto un giorno se non vuoi forzare la continuità per quel turno.';
   }
-  // Only return if at least one nurse has tail data
-  if (tail.every(t => !t || !t.length)) return null;
-  return tail;
+  renderContinuityList();
 }
 
 // ---------------------------------------------------------------------------
-// Step 3 — Genera
+// Step 4 — Genera
 // ---------------------------------------------------------------------------
 
 /**
@@ -1452,7 +1594,7 @@ function timeBudgetLabel(value) {
   return `${value / 60} ${value / 60 === 1 ? 'minuto' : 'minuti'}`;
 }
 
-function renderStep3() {
+function renderGenerateStep() {
   updateSolverProgress(state.solverProgress?.percent || 0, state.solverProgress?.message || '');
   renderDiagnosticsPanel('solver-run-feedback', state.solverDiagnostics);
 
@@ -1469,7 +1611,7 @@ function renderStep3() {
   );
   setEl('summary-month-hours', `${getMonthlyContractHours(state.year, state.month).toFixed(2)} ore`);
   setEl('summary-nights', `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
-  setEl('summary-prev-month', state.previousMonthSchedule ? '✅ Attiva' : '— Non configurata');
+  setEl('summary-prev-month', continuitySummaryLabel());
 
   // Bind num solutions slider
   bindRange('inp-num-solutions', 'val-num-solutions', state.numSolutions, v => {
@@ -1561,7 +1703,7 @@ function startSolver() {
         btnG.disabled = false;
         btnG.textContent = 'GENERA TURNI';
       }
-      goToStep(4);
+      goToStep(5);
     } else if (data.type === 'error') {
       console.error('[App] Solver error:', data.message, data.error);
       updateSolverProgress(state.solverProgress?.percent || 0, data.message || 'Errore nel solver');
@@ -2340,7 +2482,7 @@ function init() {
   document.addEventListener('click', closeDropdown);
 
   // ---- Step nav buttons ----
-  ['btn-nav-1', 'btn-nav-2', 'btn-nav-3', 'btn-nav-4'].forEach((id, idx) => {
+  Array.from({ length: TOTAL_WIZARD_STEPS }, (_, idx) => `btn-nav-${idx + 1}`).forEach((id, idx) => {
     document.getElementById(id)?.addEventListener('click', () => goToStep(idx + 1));
   });
 
@@ -2452,10 +2594,14 @@ function init() {
 
   // ---- Step 3 ----
   document.getElementById('btn-step3-back')?.addEventListener('click', () => goToStep(2));
-  document.getElementById('btn-generate')?.addEventListener('click', startSolver);
+  document.getElementById('btn-step3-next')?.addEventListener('click', () => goToStep(4));
 
   // ---- Step 4 ----
   document.getElementById('btn-step4-back')?.addEventListener('click', () => goToStep(3));
+  document.getElementById('btn-generate')?.addEventListener('click', startSolver);
+
+  // ---- Step 5 ----
+  document.getElementById('btn-step5-back')?.addEventListener('click', () => goToStep(4));
   document.getElementById('btn-regenerate')?.addEventListener('click', regenerateTurni);
   document.getElementById('btn-rebalance')?.addEventListener('click', rebalanceTurni);
   document.getElementById('btn-export-csv')?.addEventListener('click', exportCSV);

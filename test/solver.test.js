@@ -1891,6 +1891,39 @@ describe('buildContext with previousMonthTail', () => {
   });
 });
 
+describe('buildContext with 4 mattine + notte venerdì tag', () => {
+  it('should pin the fixed weekly pattern by weekday', () => {
+    const config = makeMinimalConfig({
+      year: 2025,
+      month: 0,
+      numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['quattro_mattine_venerdi_notte'] },
+      },
+    });
+    const bctx = ctx.buildContext(config);
+
+    assert.equal(bctx.pinned[0][0], 'M'); // Wed 1 Jan 2025
+    assert.equal(bctx.pinned[0][1], 'M'); // Thu
+    assert.equal(bctx.pinned[0][2], 'N'); // Fri
+    assert.equal(bctx.pinned[0][3], 'S'); // Sat
+    assert.equal(bctx.pinned[0][4], 'R'); // Sun
+    assert.equal(bctx.pinned[0][5], 'M'); // Mon
+  });
+
+  it('should treat the tag like no_diurni for post-night recovery rules', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['quattro_mattine_venerdi_notte'] },
+      },
+    });
+    const bctx = ctx.buildContext(config);
+
+    assert.equal(bctx.nurseProps[0].noDiurni, true);
+  });
+});
+
 describe('transitionOk with previousMonthTail', () => {
   it('should reject P→M transition at month boundary', () => {
     const config = makeMinimalConfig({ numNurses: 2 });

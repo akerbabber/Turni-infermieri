@@ -34,12 +34,13 @@ function buildContext(config) {
   // Per-nurse properties
   const nurseProps = nurses.map(n => ({
     soloMattine: n.tags.includes('solo_mattine'),
+    quattroMattineVenerdiNotte: n.tags.includes('quattro_mattine_venerdi_notte'),
     soloDiurni: n.tags.includes('solo_diurni'),
     soloNotti: n.tags.includes('solo_notti'),
     diurniENotturni: n.tags.includes('diurni_e_notturni'),
     noNotti: n.tags.includes('no_notti'),
     diurniNoNotti: n.tags.includes('diurni_no_notti'),
-    noDiurni: n.tags.includes('no_diurni'),
+    noDiurni: n.tags.includes('no_diurni') || n.tags.includes('quattro_mattine_venerdi_notte'),
     mattineEPomeriggi: n.tags.includes('mattine_e_pomeriggi'),
   }));
 
@@ -79,7 +80,12 @@ function buildContext(config) {
         pinned[n][d] = abs;
         continue;
       }
-      if (nurseProps[n].soloMattine) {
+      if (nurseProps[n].quattroMattineVenerdiNotte) {
+        if (dows[d] >= 1 && dows[d] <= 4) pinned[n][d] = 'M';
+        else if (dows[d] === 5) pinned[n][d] = 'N';
+        else if (dows[d] === 6) pinned[n][d] = 'S';
+        else pinned[n][d] = 'R';
+      } else if (nurseProps[n].soloMattine) {
         pinned[n][d] = dows[d] === 0 || dows[d] === 6 ? 'R' : 'M';
       }
     }

@@ -123,12 +123,14 @@ describe('config CSV helpers', () => {
           absencePeriods: {
             ferie: { start: '2027-05-01', end: '2027-05-03' },
           },
+          previousMonthTail: ['M', 'N', 'S'],
         },
         {
           id: 'n2',
           name: 'Bianchi Laura',
           tags: ['no_notti'],
           absencePeriods: {},
+          previousMonthTail: ['', 'R', 'M'],
         },
         {
           id: 'n3',
@@ -164,6 +166,8 @@ describe('config CSV helpers', () => {
       start: '2027-05-01',
       end: '2027-05-03',
     });
+    assert.deepEqual(toPlain(result.config.nurses[0].previousMonthTail), ['M', 'N', 'S']);
+    assert.deepEqual(toPlain(result.config.nurses[1].previousMonthTail), [null, 'R', 'M']);
   });
 
   it('should activate absence tags when CSV dates are present', () => {
@@ -180,6 +184,18 @@ describe('config CSV helpers', () => {
       start: '2027-05-10',
       end: '2027-05-12',
     });
+  });
+
+  it('should convert invalid previous-month tail shift codes to null', () => {
+    const csv = [
+      '"Sezione";"Chiave";"Valore";"Ordine";"Nome";"Tag";"Mese prec. -3";"Mese prec. -2";"Mese prec. -1"',
+      '"infermiere";"";"";"1";"Rossi Marco";"";"XYZ";"M";"BAD"',
+    ].join('\r\n');
+
+    const result = ctx.parseConfigCSV(csv);
+
+    assert.equal(result.error, undefined);
+    assert.deepEqual(toPlain(result.config.nurses[0].previousMonthTail), [null, 'M', null]);
   });
 
   it('should clear generated results when applying an imported config', () => {
@@ -220,6 +236,20 @@ describe('config CSV helpers', () => {
     assert.deepEqual(nextState.solutions, []);
     assert.equal(nextState.selectedSolution, 0);
     assert.equal(nextState.solverMethod, null);
+  });
+
+  it('should prefer manual previous-month tail values over imported CSV tail values', () => {
+    const currentState = toPlain(ctx._getAppState());
+    ctx._setAppState({
+      ...currentState,
+      totalNurses: 1,
+      absentNurses: 0,
+      nurses: [{ id: 'n1', name: 'A', tags: [], absencePeriods: {}, previousMonthTail: ['P', 'N', 'S'] }],
+      previousMonthSchedule: [['M', 'P', 'R', 'M', 'R']],
+      previousMonthHours: [31],
+    });
+
+    assert.deepEqual(toPlain(ctx.buildPrevMonthTail()), [['M', 'P', 'P', 'N', 'S']]);
   });
 
   it('should respect totalNurses from imported config and ignore extra nurse rows', () => {
