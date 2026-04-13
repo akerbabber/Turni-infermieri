@@ -6,8 +6,9 @@
 
 'use strict';
 
-/* global computeScore, countWeekRest, dayCoverage, deepCopy, getRestPromotionPriority */
-/* global isForbiddenExtraNightRestDay, isMPCycleLimitedNurse, isMandatoryNightRestDay */
+/* global canAssignRestrictedNoDiurniRest, computeScore, countWeekRest, dayCoverage, deepCopy */
+/* global getRestPromotionPriority, isForbiddenExtraNightRestDay, isForbiddenRestrictedNoDiurniRestDay */
+/* global isMPCycleLimitedNurse, isMandatoryNightRestDay */
 /* global isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
 
 // ---------------------------------------------------------------------------
@@ -35,9 +36,9 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
   const moveStats = [
     { attempts: 0, accepts: 0, weight: 0.15 }, // 0: swap
     { attempts: 0, accepts: 0, weight: 0.15 }, // 1: change
-    { attempts: 0, accepts: 0, weight: 0.40 }, // 2: equity (aumentato)
-    { attempts: 0, accepts: 0, weight: 0.20 }, // 3: weekly rest
-    { attempts: 0, accepts: 0, weight: 0.10 }, // 4: coppia turni (NUOVO)
+    { attempts: 0, accepts: 0, weight: 0.4 }, // 2: equity (aumentato)
+    { attempts: 0, accepts: 0, weight: 0.2 }, // 3: weekly rest
+    { attempts: 0, accepts: 0, weight: 0.1 }, // 4: coppia turni (NUOVO)
   ];
   const ADAPT_INTERVAL = 1000; // recalculate weights every N iterations
   const MIN_WEIGHT = 0.05; // floor to prevent starving any move type
@@ -75,10 +76,16 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
         if (n1 < ctx.numNurses && n2 < ctx.numNurses) {
           let hasDivergence = false;
           for (let d = 0; d < ctx.numDays; d++) {
-            if (current[n1][d] !== current[n2][d]) { hasDivergence = true; break; }
+            if (current[n1][d] !== current[n2][d]) {
+              hasDivergence = true;
+              break;
+            }
           }
-          if (hasDivergence) { moveType = 4; }
-          else { moveType = 3; }
+          if (hasDivergence) {
+            moveType = 4;
+          } else {
+            moveType = 3;
+          }
         } else {
           moveType = 3;
         }
@@ -174,6 +181,7 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     repaired = repairNightCoverage(repaired, ctx);
     repaired = repairNightRestContinuity(repaired, ctx);
     repaired = repairForbiddenExtraNightRest(repaired, ctx);
+    repaired = repairForbiddenRestrictedNoDiurniRest(repaired, ctx);
     repaired = repairSplitRestDays(repaired, ctx);
     repaired = repairDayCoverage(repaired, ctx);
     repaired = repairWeeklyRestDeficits(repaired, ctx);
@@ -585,6 +593,44 @@ function repairForbiddenExtraNightRest(schedule, ctx) {
   return repaired;
 }
 
+function repairForbiddenRestrictedNoDiurniRest(schedule, ctx) {
+  const { numDays, numNurses, nurseProps } = ctx;
+  const repaired = deepCopy(schedule);
+
+  function candidateShiftOrder(n, d) {
+    const prev = d > 0 ? repaired[n][d - 1] : null;
+    const next = d < numDays - 1 ? repaired[n][d + 1] : null;
+    const ordered = [];
+    for (const shift of [prev, next, 'M', 'P']) {
+      if ((shift === 'M' || shift === 'P') && !ordered.includes(shift)) ordered.push(shift);
+    }
+    return ordered;
+  }
+
+  for (let n = 0; n < numNurses; n++) {
+    if (!nurseProps[n].noDiurni) continue;
+    for (let d = 0; d < numDays; d++) {
+      if (!isForbiddenRestrictedNoDiurniRestDay(repaired, ctx, n, d)) continue;
+      const currentScore = computeScore(repaired, ctx);
+      let bestShift = null;
+      let bestScore = currentScore;
+      for (const shiftType of candidateShiftOrder(n, d)) {
+        if (!canRepairShiftChange(repaired, ctx, n, d, shiftType)) continue;
+        const candidate = deepCopy(repaired);
+        candidate[n][d] = shiftType;
+        const score = computeScore(candidate, ctx);
+        if (score.hard < bestScore.hard || (score.hard === bestScore.hard && score.total < bestScore.total)) {
+          bestShift = shiftType;
+          bestScore = score;
+        }
+      }
+      if (bestShift) repaired[n][d] = bestShift;
+    }
+  }
+
+  return repaired;
+}
+
 function repairWeeklyRestDeficits(schedule, ctx) {
   const { numNurses, minRPerWeek, weekDaysList, pinned, nurseProps } = ctx;
   if (minRPerWeek <= 0) return schedule;
@@ -596,7 +642,8 @@ function repairWeeklyRestDeficits(schedule, ctx) {
   }
 
   function canRestOnDay(n, d) {
-    if (pinned[n][d] || isMPCycleLimitedNurse(nurseProps[n]) || nurseProps[n].noDiurni) return false;
+    if (pinned[n][d] || isMPCycleLimitedNurse(nurseProps[n])) return false;
+    if (nurseProps[n].noDiurni && !canAssignRestrictedNoDiurniRest(repaired, ctx, n, d)) return false;
     const currentShift = repaired[n][d];
     if (currentShift !== 'M' && currentShift !== 'P' && currentShift !== 'D') return false;
     if (currentShift === 'D') {
@@ -639,7 +686,8 @@ function repairWeeklyRestDeficits(schedule, ctx) {
           for (let other = 0; other < numNurses; other++) {
             if (other === n || repaired[other][d] !== 'R' || pinned[other][d]) continue;
             if (!hasSpareWeeklyRest(other, weekDays)) continue;
-            if (isMPCycleLimitedNurse(nurseProps[other]) || nurseProps[other].noDiurni) continue;
+            if (isMPCycleLimitedNurse(nurseProps[other])) continue;
+            if (nurseProps[other].noDiurni && !canAssignRestrictedNoDiurniRest(repaired, ctx, other, d)) continue;
             if (
               !canRepairShiftChange(repaired, ctx, n, d, 'R') ||
               !canRepairShiftChange(repaired, ctx, other, d, shift)

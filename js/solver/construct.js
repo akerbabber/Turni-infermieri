@@ -15,7 +15,9 @@
 
 'use strict';
 
-/* global MP_NIGHT_PATTERNS, dayCoverage, getAllowedMPCyclePatterns, isMPCycleLimitedNurse, isMandatoryNightRestDay, getRestPromotionPriority, matchesPatternEndingAt */
+/* global MP_NIGHT_PATTERNS, dayCoverage, getAllowedMPCyclePatterns */
+/* global getRestPromotionPriority, isForbiddenRestrictedNoDiurniRestDay */
+/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, matchesPatternEndingAt */
 
 // ---------------------------------------------------------------------------
 // Construction heuristic (one attempt)
@@ -681,7 +683,6 @@ function construct(ctx) {
       if (schedule[n][d] !== 'N') continue;
       if (nurseProps[n].noDiurni) {
         fillNoDiurniNightPattern(n, d);
-        fillPostNightWork(n, d + 3, chooseBestMPShift(n, d + 3) || 'M');
       } else if (nurseProps[n].diurniENotturni) {
         fillPostNightWork(n, d - 1, 'D');
         fillPostNightWork(n, d + 4, 'D');
@@ -735,6 +736,17 @@ function construct(ctx) {
           if (!converted) break;
         }
       }
+    }
+  }
+
+  // Phase 4.55 — Convert discretionary no_diurni rest days into work unless they
+  // are part of the post-night recovery block (N-S-R or N-S-R-R).
+  for (let n = 0; n < numNurses; n++) {
+    if (!nurseProps[n].noDiurni) continue;
+    for (let d = 0; d < numDays; d++) {
+      if (!isForbiddenRestrictedNoDiurniRestDay(schedule, ctx, n, d)) continue;
+      const bestShift = chooseBestMPShift(n, d);
+      if (bestShift) schedule[n][d] = bestShift;
     }
   }
 
