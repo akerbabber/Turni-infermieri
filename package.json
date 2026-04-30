@@ -11,7 +11,8 @@
     "format": "prettier --write 'js/**/*.js' 'css/**/*.css' '*.html'",
     "format:check": "prettier --check 'js/**/*.js' 'css/**/*.css' '*.html'",
     "validate": "npm run lint && npm run format:check && npm test",
-    "serve": "npx http-server -p 8080 -c-1"
+    "serve": "npx http-server -p 8080 -c-1",
+    "benchmark:accuracy": "node benchmark/accuracy-benchmark.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

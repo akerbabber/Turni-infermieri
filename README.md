@@ -11,7 +11,7 @@ Nessun server, nessuna installazione: basta aprire `index.html` nel browser.
 ## Funzionalita
 
 - **Wizard a 4 step** — Organico → Regole → Genera → Risultati
-- **Motore di scheduling ibrido** — MILP (HiGHS via WASM) come solver primario, con fallback a euristica greedy + simulated annealing
+- **Motore di scheduling ibrido** — MILP (HiGHS via WASM) come solver primario, euristica greedy + simulated annealing, e nuovo Pattern Beam a cicli profilo
 - **Modifica interattiva** — click su una cella per cambiare turno manualmente
 - **Soluzioni multiple** — genera e confronta diverse proposte, ordinate per qualita
 - **Export** — CSV, JSON configurazione, stampa ottimizzata per A4 landscape
@@ -46,6 +46,7 @@ npm run lint          # ESLint check
 npm run lint:fix      # ESLint auto-fix
 npm run format        # Prettier format
 npm run format:check  # Prettier check
+npm run benchmark:accuracy # Compare heuristic vs Pattern Beam accuracy
 npm run serve         # Local dev server on port 8080
 ```
 
@@ -62,6 +63,7 @@ js/
     scoring.js              Constraints, scoring, violations, stats
     construct.js            Greedy construction heuristic (8 phases)
     local-search.js         Simulated annealing + move functions
+    pattern-planner.js       Pattern Beam cyclic profile planner
     lp-model.js             MILP LP formulation, solution parsers
     solvers.js              HiGHS/GLPK loaders, solve orchestration
 css/
@@ -103,7 +105,9 @@ The solver runs in a **Web Worker** and uses a triple-strategy approach:
 
 2. **GLPK.js** (secondary) — Alternative MILP solver. Same LP formulation, JavaScript implementation.
 
-3. **Greedy + Simulated Annealing** (fallback) — Multi-restart construction heuristic with local search. Always available, works offline.
+3. **Pattern Beam** (optional) — Profile-aware cyclic planner that selects whole-month nurse rows with beam search and shared repair passes.
+
+4. **Greedy + Simulated Annealing** (fallback) — Multi-restart construction heuristic with local search. Always available, works offline.
 
 ### Hard Constraints
 - Daily coverage min/max per shift type (M, P, D, N)

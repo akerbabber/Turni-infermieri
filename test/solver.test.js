@@ -30,6 +30,7 @@ function loadSolver() {
     'solver/scoring.js',
     'solver/construct.js',
     'solver/local-search.js',
+    'solver/pattern-planner.js',
     'solver/lp-model.js',
     'solver/solvers.js',
   ];
@@ -1385,6 +1386,54 @@ describe('construct', () => {
 
     const mpViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'mp_cycle_4_2');
     assert.deepEqual(toPlain(mpViolations), []);
+  });
+});
+
+describe('constructPatternSchedule', () => {
+  it('should build a complete schedule and keep compatible paired nurses synchronized', () => {
+    const config = makeMinimalConfig({
+      numNurses: 12,
+      year: 2026,
+      month: 3,
+      nurseOverrides: {
+        0: { tags: ['no_diurni'] },
+        1: { tags: ['mattine_e_pomeriggi'] },
+        2: { tags: ['diurni_e_notturni'] },
+        3: { tags: ['diurni_e_notturni'] },
+        4: { tags: ['diurni_e_notturni'] },
+        5: { tags: ['diurni_e_notturni'] },
+        6: { tags: ['diurni_e_notturni'] },
+        7: { tags: ['diurni_e_notturni'] },
+        8: { tags: ['diurni_e_notturni'] },
+        9: { tags: ['diurni_e_notturni'] },
+        10: { tags: ['diurni_no_notti'] },
+        11: { tags: ['diurni_no_notti'] },
+      },
+      rules: {
+        minCoverageM: 2,
+        maxCoverageM: 4,
+        minCoverageP: 2,
+        maxCoverageP: 4,
+        minCoverageN: 2,
+        maxCoverageN: 3,
+        targetNights: 4,
+        maxNights: 5,
+        minRPerWeek: 2,
+        coppiaTurni: [2, 3],
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const schedule = ctx.constructPatternSchedule(bctx, { beamWidth: 12, candidateLimit: 12 });
+
+    assert.equal(schedule.length, bctx.numNurses);
+    for (const row of schedule) {
+      assert.equal(row.length, bctx.numDays);
+      assert.ok(row.every(Boolean));
+    }
+    assert.deepEqual(schedule[2], schedule[3]);
+
+    const allRest = Array.from({ length: bctx.numNurses }, () => new Array(bctx.numDays).fill('R'));
+    assert.ok(ctx.computeScore(schedule, bctx).total < ctx.computeScore(allRest, bctx).total);
   });
 });
 
