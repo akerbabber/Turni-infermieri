@@ -59,6 +59,9 @@ const solverSharedGlobals = {
   tryChangeMove: 'writable',
   tryEquityMove: 'writable',
   tryWeeklyRestMove: 'writable',
+  // pattern-planner.js
+  solvePattern: 'writable',
+  constructPatternSchedule: 'writable',
   // lp-model.js
   seededRandom: 'writable',
   buildLP: 'writable',

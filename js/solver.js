@@ -12,8 +12,9 @@
  *   3. scoring.js    — transitionOk, dayCoverage, computeScore, collectViolations, computeStats
  *   4. construct.js  — construct (greedy heuristic), trySwapMP
  *   5. local-search.js — localSearch, move functions (setCell, trySwap/Change/Equity/WeeklyRest)
- *   6. lp-model.js   — buildLP, parseSolution, lpToGLPKModel, parseGLPKSolution
- *   7. solvers.js    — loadHiGHS, loadGLPK, solveOneMILP, solveOneGLPK, solveFallback, solve
+ *   6. pattern-planner.js — cyclic pattern beam planner
+ *   7. lp-model.js   — buildLP, parseSolution, lpToGLPKModel, parseGLPKSolution
+ *   8. solvers.js    — loadHiGHS, loadGLPK, solveOneMILP, solveOneGLPK, solveFallback, solve
  *
  * Communication with main thread via postMessage/onmessage:
  *   IN:  {type: 'solve', config, numSolutions, timeBudget, solverMethod}
@@ -62,6 +63,7 @@ importScripts(
   'solver/scoring.js',
   'solver/construct.js',
   'solver/local-search.js',
+  'solver/pattern-planner.js',
   'solver/lp-model.js',
   'solver/solvers.js'
 );

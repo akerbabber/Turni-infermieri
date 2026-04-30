@@ -593,12 +593,12 @@ function solveFallback(config) {
 // ---------------------------------------------------------------------------
 
 /**
- * Multi-solution solver with configurable algorithm: HiGHS MILP / GLPK.js / heuristic.
+ * Multi-solution solver with configurable algorithm: HiGHS MILP / GLPK.js / Pattern Beam / heuristic.
  * @param {object} config
  * @param {number} numSolutions
  * @param {number} timeBudget  – total seconds allocated; 0 or undefined = default 30s
  * @param {boolean} untilZeroViolations – keep generating until a 0-violation solution is found
- * @param {string} solverChoice – 'auto'|'milp'|'glpk'|'fallback'
+ * @param {string} solverChoice – 'auto'|'milp'|'glpk'|'pattern'|'fallback'
  */
 async function solve(config, numSolutions, timeBudget, untilZeroViolations, solverChoice) {
   solverChoice = solverChoice || 'auto';
@@ -740,6 +740,19 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       let glpkFailure = null;
 
       console.log(`[Solver] === Solution ${i + 1}/${numSolutions} (seed=${seed}) ===`);
+
+      // Pattern Beam planner
+      if (solverChoice === 'pattern' && !solved) {
+        progress(pctBase, `${batchLabel}Pattern Beam: soluzione ${i + 1}/${numSolutions}…`);
+        const patternStart = Date.now();
+        const result = solvePattern(config, perSolutionBudgetSec);
+        const patternElapsed = (Date.now() - patternStart) / 1000;
+        console.log(
+          `[Solver] Pattern Beam solution: score=${result.score}, violations=${result.violations.length}, elapsed=${patternElapsed.toFixed(2)}s`
+        );
+        batchSolutions.push({ ...result, solverMethod: 'pattern' });
+        solved = true;
+      }
 
       // Try HiGHS MILP
       if (useHiGHS && !solved) {
@@ -923,6 +936,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     const milpTime = Math.max(MILP_MIN_TIME_PER_SOLUTION, Math.floor(totalBudget / numSolutions));
     const strictLabel = strictMode ? ' [STRICT — nessun fallback]' : '';
     progress(5, `Solver: ${availSolvers.join(', ')}${strictLabel}. ${numSolutions} soluzioni, ${milpTime}s ciascuna…`);
+  } else if (solverChoice === 'pattern') {
+    progress(5, 'Pattern Beam selezionato manualmente…');
   } else if (solverChoice === 'fallback') {
     progress(5, 'Euristica selezionata manualmente…');
   } else {

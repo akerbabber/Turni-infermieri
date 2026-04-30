@@ -844,7 +844,7 @@
             <h3 class="font-semibold mb-2 text-sm">🔧 Algoritmo di risoluzione</h3>
             <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
               Scegli quale solver utilizzare. «Auto» tenta HiGHS, poi GLPK, infine euristica. Puoi forzare un algoritmo
-              specifico per confrontare i risultati.
+              specifico, incluso Pattern Beam, per confrontare i risultati.
             </p>
             <select
               id="sel-solver-method"
@@ -854,6 +854,7 @@
               <option value="milp">HiGHS MILP (ottimizzazione matematica)</option>
               <option value="milp_strict">HiGHS MILP Strict (nessun fallback)</option>
               <option value="glpk">GLPK.js (ottimizzazione matematica alternativa)</option>
+              <option value="pattern">Pattern Beam (cicli profilo + ricerca a fascio)</option>
               <option value="fallback">Euristica (greedy + simulated annealing)</option>
             </select>
           </div>
