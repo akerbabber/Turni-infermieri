@@ -1533,6 +1533,52 @@ describe('localSearch night coverage repair', () => {
     const afterViolations = ctx.collectViolations(improved, bctx).filter(v => v.type === 'coverage_N_max');
     assert.deepEqual(toPlain(afterViolations), []);
   });
+
+  it('should fill night deficits with no_diurni nurses who can work M, P, and N', () => {
+    const config = makeMinimalConfig({
+      numNurses: 7,
+      nurseOverrides: Object.fromEntries(Array.from({ length: 7 }, (_, n) => [n, { tags: ['no_diurni'] }])),
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 7,
+        minCoverageP: 0,
+        maxCoverageP: 7,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 1,
+        maxCoverageN: 1,
+        targetNights: 1,
+        maxNights: 2,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 7;
+    bctx.weekDaysList = [[0, 1, 2, 3, 4, 5, 6]];
+    bctx.weekOf = () => 0;
+
+    const schedule = Array.from({ length: 7 }, () => ['M', 'P', 'M', 'P', 'M', 'P', 'M']);
+
+    const beforeViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'coverage_N');
+    assert.equal(beforeViolations.length, 7);
+
+    const improved = ctx.localSearch(schedule, bctx, 0);
+    const nightCoverage = Array.from(
+      { length: bctx.numDays },
+      (_, d) => ctx.dayCoverage(improved, d, bctx.numNurses).N
+    );
+    assert.deepEqual(nightCoverage, [1, 1, 1, 1, 1, 1, 1]);
+
+    for (const row of improved) {
+      assert.ok(row.includes('N'), `no_diurni row should include night work: ${row.join('-')}`);
+      assert.ok(row.includes('M'), `no_diurni row should keep morning work: ${row.join('-')}`);
+      assert.ok(row.includes('P'), `no_diurni row should keep afternoon work: ${row.join('-')}`);
+      assert.equal(row.includes('D'), false, `no_diurni row must not include 12h D shifts: ${row.join('-')}`);
+    }
+
+    const afterViolations = ctx.collectViolations(improved, bctx).filter(v => v.type === 'coverage_N');
+    assert.deepEqual(toPlain(afterViolations), []);
+  });
 });
 
 describe('solveFallback', () => {
