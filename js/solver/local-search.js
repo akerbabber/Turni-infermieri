@@ -6,9 +6,9 @@
 
 'use strict';
 
-/* global canAssignRestrictedNoDiurniRest, computeScore, countWeekRest, dayCoverage, deepCopy */
+/* global D_NIGHT_PATTERNS, MP_NIGHT_PATTERNS, canAssignRestrictedNoDiurniRest, computeScore, countWeekRest, dayCoverage, deepCopy */
 /* global getRestPromotionPriority, isForbiddenExtraNightRestDay, isForbiddenRestrictedNoDiurniRestDay */
-/* global isMPCycleLimitedNurse, isMandatoryNightRestDay */
+/* global getNightPatternInfo, isMPCycleLimitedNurse, isMandatoryNightRestDay, nightCount */
 /* global isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk */
 
 // ---------------------------------------------------------------------------
@@ -215,41 +215,45 @@ function repairNightCoverage(schedule, ctx, maxPasses) {
       if (covN < minCovN) deficits.push(d);
       if (covN > maxCovN) excesses.push(d);
     }
-    if (!excesses.length) break;
-
-    const targetDays = deficits.length
-      ? deficits
-      : Array.from({ length: numDays }, (_, d) => d).filter(
-          d => !excesses.includes(d) && dayCoverage(current, d, numNurses).N < maxCovN
-        );
-    if (!targetDays.length) break;
-
     let bestCandidate = null;
-    for (const targetDay of targetDays) {
-      const orderedExcesses = [...excesses].sort((a, b) => Math.abs(a - targetDay) - Math.abs(b - targetDay));
-      for (const excessDay of orderedExcesses) {
-        for (let n = 0; n < numNurses; n++) {
-          if (current[n][excessDay] !== 'N') continue;
-          const candidateSchedule = relocateNightBlock(current, ctx, n, excessDay, targetDay);
-          if (!candidateSchedule) continue;
 
-          const candidatePenalty = nightCoveragePenalty(candidateSchedule, ctx);
-          if (candidatePenalty >= currentPenalty) continue;
+    if (excesses.length > 0) {
+      const targetDays = deficits.length
+        ? deficits
+        : Array.from({ length: numDays }, (_, d) => d).filter(
+            d => !excesses.includes(d) && dayCoverage(current, d, numNurses).N < maxCovN
+          );
 
-          const candidateScore = computeScore(candidateSchedule, ctx);
-          if (
-            !bestCandidate ||
-            candidateScore.total < bestCandidate.score.total ||
-            (candidateScore.total === bestCandidate.score.total && candidatePenalty < bestCandidate.penalty)
-          ) {
-            bestCandidate = {
-              schedule: candidateSchedule,
-              score: candidateScore,
-              penalty: candidatePenalty,
-            };
+      for (const targetDay of targetDays) {
+        const orderedExcesses = [...excesses].sort((a, b) => Math.abs(a - targetDay) - Math.abs(b - targetDay));
+        for (const excessDay of orderedExcesses) {
+          for (let n = 0; n < numNurses; n++) {
+            if (current[n][excessDay] !== 'N') continue;
+            const candidateSchedule = relocateNightBlock(current, ctx, n, excessDay, targetDay);
+            if (!candidateSchedule) continue;
+
+            const candidatePenalty = nightCoveragePenalty(candidateSchedule, ctx);
+            if (candidatePenalty >= currentPenalty) continue;
+
+            const candidateScore = computeScore(candidateSchedule, ctx);
+            if (
+              !bestCandidate ||
+              candidateScore.total < bestCandidate.score.total ||
+              (candidateScore.total === bestCandidate.score.total && candidatePenalty < bestCandidate.penalty)
+            ) {
+              bestCandidate = {
+                schedule: candidateSchedule,
+                score: candidateScore,
+                penalty: candidatePenalty,
+              };
+            }
           }
         }
       }
+    }
+
+    if (!bestCandidate && deficits.length > 0) {
+      bestCandidate = buildAdditionalNightCoverageCandidate(current, ctx, deficits, currentPenalty);
     }
 
     if (
@@ -262,6 +266,124 @@ function repairNightCoverage(schedule, ctx, maxPasses) {
   }
 
   return current;
+}
+
+function buildAdditionalNightCoverageCandidate(schedule, ctx, deficits, currentPenalty) {
+  const { numDays, numNurses } = ctx;
+  let bestCandidate = null;
+  const targetDays = [...deficits].sort(
+    (a, b) => dayCoverage(schedule, a, numNurses).N - dayCoverage(schedule, b, numNurses).N
+  );
+
+  for (const targetDay of targetDays) {
+    const nurses = Array.from({ length: numNurses }, (_, i) => i)
+      .filter(n => canAddNightBlockForNurse(schedule, ctx, n, targetDay))
+      .sort((a, b) => {
+        const aProps = ctx.nurseProps[a];
+        const bProps = ctx.nurseProps[b];
+        const aPriority = aProps.noDiurni ? 0 : aProps.soloNotti ? 1 : 2;
+        const bPriority = bProps.noDiurni ? 0 : bProps.soloNotti ? 1 : 2;
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        return nightCount(schedule, a, numDays) - nightCount(schedule, b, numDays);
+      });
+
+    for (const n of nurses) {
+      const candidateSchedule = addNightBlockCandidate(schedule, ctx, n, targetDay);
+      if (!candidateSchedule) continue;
+      const candidatePenalty = nightCoveragePenalty(candidateSchedule, ctx);
+      if (candidatePenalty >= currentPenalty) continue;
+      const candidateScore = computeScore(candidateSchedule, ctx);
+      if (
+        !bestCandidate ||
+        candidateScore.hard < bestCandidate.score.hard ||
+        (candidateScore.hard === bestCandidate.score.hard && candidateScore.total < bestCandidate.score.total) ||
+        (candidateScore.total === bestCandidate.score.total && candidatePenalty < bestCandidate.penalty)
+      ) {
+        bestCandidate = {
+          schedule: candidateSchedule,
+          score: candidateScore,
+          penalty: candidatePenalty,
+        };
+      }
+    }
+  }
+
+  return bestCandidate;
+}
+
+function canAddNightBlockForNurse(schedule, ctx, nurseIdx, start) {
+  const props = ctx.nurseProps[nurseIdx];
+  if (
+    props.soloMattine ||
+    props.soloDiurni ||
+    props.noNotti ||
+    props.diurniNoNotti ||
+    props.mattineEPomeriggi ||
+    nightCount(schedule, nurseIdx, ctx.numDays) >= ctx.maxNights
+  )
+    return false;
+  return !!addNightBlockCandidate(schedule, ctx, nurseIdx, start);
+}
+
+function addNightBlockCandidate(schedule, ctx, nurseIdx, start) {
+  const { numDays, pinned, nurseProps } = ctx;
+  const props = nurseProps[nurseIdx];
+  if (start < 0 || start >= numDays || schedule[nurseIdx][start] === 'N') return null;
+
+  const candidate = deepCopy(schedule);
+  const blockDays = getNightBlockDays(start, props.noDiurni, numDays);
+  for (const d of blockDays) {
+    if (!canOverwriteForNightRepair(candidate, ctx, nurseIdx, d)) return null;
+  }
+
+  placeNightBlock(candidate, nurseIdx, start, props.noDiurni, numDays);
+
+  if (props.noDiurni && !ensureNightLeadIn(candidate, ctx, nurseIdx, start, MP_NIGHT_PATTERNS)) return null;
+  if (props.diurniENotturni && !ensureNightLeadIn(candidate, ctx, nurseIdx, start, D_NIGHT_PATTERNS)) return null;
+
+  if (pinned[nurseIdx][start] && pinned[nurseIdx][start] !== 'N') return null;
+  return candidate;
+}
+
+function ensureNightLeadIn(schedule, ctx, nurseIdx, nightDay, patterns) {
+  const info = getNightPatternInfo(schedule, ctx, nurseIdx, nightDay);
+  if (!info || info.validLead) return true;
+
+  for (const pattern of patterns) {
+    const startDay = nightDay - pattern.length;
+    if (startDay < 0) continue;
+
+    const candidate = deepCopy(schedule);
+    let compatible = true;
+    for (let offset = 0; offset < pattern.length; offset++) {
+      const d = startDay + offset;
+      const shift = pattern[offset];
+      if (!canOverwriteForNightRepair(candidate, ctx, nurseIdx, d, shift)) {
+        compatible = false;
+        break;
+      }
+      candidate[nurseIdx][d] = shift;
+    }
+    if (!compatible) continue;
+    const updatedInfo = getNightPatternInfo(candidate, ctx, nurseIdx, nightDay);
+    if (updatedInfo && updatedInfo.validLead) {
+      for (let d = startDay; d < nightDay; d++) schedule[nurseIdx][d] = candidate[nurseIdx][d];
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function canOverwriteForNightRepair(schedule, ctx, nurseIdx, dayIdx, shiftType) {
+  const { numDays, pinned, nurseProps } = ctx;
+  if (dayIdx < 0 || dayIdx >= numDays || pinned[nurseIdx][dayIdx]) return false;
+  const current = schedule[nurseIdx][dayIdx];
+  if (current === 'N' || current === 'S') return false;
+  if (current === 'R' && isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx)) return false;
+  if (current === 'R' && isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx)) return false;
+  if (shiftType && !isRepairShiftAllowed(nurseProps[nurseIdx], shiftType)) return false;
+  return true;
 }
 
 function nightCoveragePenalty(schedule, ctx) {
