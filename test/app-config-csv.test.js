@@ -160,8 +160,8 @@ describe('config CSV helpers', () => {
     ctx.loadState();
 
     const nextState = toPlain(ctx._getAppState());
-    assert.equal(nextState.nurses[0].name, 'Giorgi Bruna');
-    assert.equal(nextState.nurses[27].name, 'PES CLAUDIA');
+    assert.equal(nextState.nurses[0].name, 'Bianchi Anna');
+    assert.equal(nextState.nurses[27].name, 'SILVESTRI ALICE');
     assert.equal(nextState.nurses[35].name, 'Infermiere 36');
     assert.equal(nextState.nurses[36].name, 'Infermiere 37');
   });
@@ -202,8 +202,8 @@ describe('config CSV helpers', () => {
     ctx.loadState();
 
     const nextState = toPlain(ctx._getAppState());
-    assert.equal(nextState.nurses[0].name, 'Giorgi Bruna');
-    assert.equal(nextState.nurses[1].name, 'Aresu FRANCESCA');
+    assert.equal(nextState.nurses[0].name, 'Bianchi Anna');
+    assert.equal(nextState.nurses[1].name, 'ROSSI MARTINA');
   });
 
   it('should roundtrip nurses and rules through CSV', () => {
