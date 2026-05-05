@@ -593,12 +593,12 @@ function solveFallback(config) {
 // ---------------------------------------------------------------------------
 
 /**
- * Multi-solution solver with configurable algorithm: HiGHS MILP / GLPK.js / Pattern Beam / heuristic.
+ * Multi-solution solver with configurable algorithm: HiGHS MILP / GLPK.js / Pattern Beam / night-first Pattern Beam / heuristic.
  * @param {object} config
  * @param {number} numSolutions
  * @param {number} timeBudget  – total seconds allocated; 0 or undefined = default 30s
  * @param {boolean} untilZeroViolations – keep generating until a 0-violation solution is found
- * @param {string} solverChoice – 'auto'|'milp'|'glpk'|'pattern'|'fallback'
+ * @param {string} solverChoice – 'auto'|'milp'|'glpk'|'pattern'|'night_first_pattern'|'fallback'
  */
 async function solve(config, numSolutions, timeBudget, untilZeroViolations, solverChoice) {
   solverChoice = solverChoice || 'auto';
@@ -740,6 +740,19 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       let glpkFailure = null;
 
       console.log(`[Solver] === Solution ${i + 1}/${numSolutions} (seed=${seed}) ===`);
+
+      // Night-first Pattern Beam planner
+      if (solverChoice === 'night_first_pattern' && !solved) {
+        progress(pctBase, `${batchLabel}Night-first Pattern Beam: soluzione ${i + 1}/${numSolutions}…`);
+        const nightFirstStart = Date.now();
+        const result = solveNightFirstPattern(config, perSolutionBudgetSec);
+        const nightFirstElapsed = (Date.now() - nightFirstStart) / 1000;
+        console.log(
+          `[Solver] Night-first Pattern Beam solution: score=${result.score}, violations=${result.violations.length}, elapsed=${nightFirstElapsed.toFixed(2)}s`
+        );
+        batchSolutions.push({ ...result, solverMethod: 'night_first_pattern' });
+        solved = true;
+      }
 
       // Pattern Beam planner
       if (solverChoice === 'pattern' && !solved) {
@@ -938,6 +951,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     progress(5, `Solver: ${availSolvers.join(', ')}${strictLabel}. ${numSolutions} soluzioni, ${milpTime}s ciascuna…`);
   } else if (solverChoice === 'pattern') {
     progress(5, 'Pattern Beam selezionato manualmente…');
+  } else if (solverChoice === 'night_first_pattern') {
+    progress(5, 'Night-first Pattern Beam selezionato manualmente…');
   } else if (solverChoice === 'fallback') {
     progress(5, 'Euristica selezionata manualmente…');
   } else {

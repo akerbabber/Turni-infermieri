@@ -1437,12 +1437,70 @@ describe('constructPatternSchedule', () => {
   });
 });
 
+describe('constructNightFirstPatternSchedule', () => {
+  it('should keep the same pattern guarantees while prioritizing night coverage in narrow beams', () => {
+    const config = makeMinimalConfig({
+      numNurses: 12,
+      year: 2026,
+      month: 3,
+      nurseOverrides: {
+        0: { tags: ['no_diurni'] },
+        1: { tags: ['mattine_e_pomeriggi'] },
+        2: { tags: ['diurni_e_notturni'] },
+        3: { tags: ['diurni_e_notturni'] },
+        4: { tags: ['diurni_e_notturni'] },
+        5: { tags: ['diurni_e_notturni'] },
+        6: { tags: ['diurni_e_notturni'] },
+        7: { tags: ['diurni_e_notturni'] },
+        8: { tags: ['diurni_e_notturni'] },
+        9: { tags: ['diurni_e_notturni'] },
+        10: { tags: ['diurni_no_notti'] },
+        11: { tags: ['diurni_no_notti'] },
+      },
+      rules: {
+        minCoverageM: 2,
+        maxCoverageM: 4,
+        minCoverageP: 2,
+        maxCoverageP: 4,
+        minCoverageN: 2,
+        maxCoverageN: 3,
+        targetNights: 4,
+        maxNights: 5,
+        minRPerWeek: 2,
+        coppiaTurni: [2, 3],
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    const options = { beamWidth: 1, candidateLimit: 8 };
+    const regular = ctx.constructPatternSchedule(bctx, options);
+    const nightFirst = ctx.constructNightFirstPatternSchedule(bctx, options);
+
+    assert.equal(nightFirst.length, bctx.numNurses);
+    for (const row of nightFirst) {
+      assert.equal(row.length, bctx.numDays);
+      assert.ok(row.every(Boolean));
+    }
+    assert.deepEqual(nightFirst[2], nightFirst[3]);
+
+    const nightCoverageViolations = schedule =>
+      ctx.collectViolations(schedule, bctx).filter(v => v.type === 'coverage_N' || v.type === 'coverage_N_max').length;
+
+    assert.ok(nightCoverageViolations(nightFirst) <= nightCoverageViolations(regular));
+  });
+});
+
 describe('localSearch night coverage repair', () => {
   function placeNightBlock(row, start, numDays) {
     row[start] = 'N';
     if (start + 1 < numDays) row[start + 1] = 'S';
     if (start + 2 < numDays) row[start + 2] = 'R';
     if (start + 3 < numDays) row[start + 3] = 'R';
+  }
+
+  function placeNoDiurniNightBlock(row, start, numDays) {
+    row[start] = 'N';
+    if (start + 1 < numDays) row[start + 1] = 'S';
+    if (start + 2 < numDays) row[start + 2] = 'R';
   }
 
   it('should post-process alternating night excess/deficit days even when annealing iterations are skipped', () => {
@@ -1532,6 +1590,54 @@ describe('localSearch night coverage repair', () => {
     );
     const afterViolations = ctx.collectViolations(improved, bctx).filter(v => v.type === 'coverage_N_max');
     assert.deepEqual(toPlain(afterViolations), []);
+  });
+
+  it('should relocate an excess night block onto overwriteable work cells when filling a deficit', () => {
+    const config = makeMinimalConfig({
+      numNurses: 7,
+      nurseOverrides: Object.fromEntries(Array.from({ length: 7 }, (_, n) => [n, { tags: ['no_diurni'] }])),
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 7,
+        minCoverageP: 0,
+        maxCoverageP: 7,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 1,
+        maxCoverageN: 1,
+        targetNights: 1,
+        maxNights: 4,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    bctx.numDays = 7;
+    bctx.weekDaysList = [[0, 1, 2, 3, 4, 5, 6]];
+    bctx.weekOf = () => 0;
+
+    const schedule = Array.from({ length: 7 }, () => new Array(7).fill('R'));
+    [0, 0, 1, 2, 4, 5, 6].forEach((start, nurseIdx) =>
+      placeNoDiurniNightBlock(schedule[nurseIdx], start, bctx.numDays)
+    );
+    for (const nurseIdx of [0, 1]) {
+      schedule[nurseIdx][3] = 'M';
+      schedule[nurseIdx][4] = 'P';
+      schedule[nurseIdx][5] = 'M';
+    }
+
+    const beforeNightCoverage = Array.from(
+      { length: bctx.numDays },
+      (_, d) => ctx.dayCoverage(schedule, d, bctx.numNurses).N
+    );
+    assert.deepEqual(beforeNightCoverage, [2, 1, 1, 0, 1, 1, 1]);
+
+    const improved = ctx.localSearch(schedule, bctx, 0);
+    const afterNightCoverage = Array.from(
+      { length: bctx.numDays },
+      (_, d) => ctx.dayCoverage(improved, d, bctx.numNurses).N
+    );
+
+    assert.deepEqual(afterNightCoverage, [1, 1, 1, 1, 1, 1, 1]);
   });
 
   it('should fill night deficits with no_diurni nurses who can work M, P, and N', () => {

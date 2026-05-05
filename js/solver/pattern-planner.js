@@ -29,13 +29,23 @@ function solvePattern(config, timeBudgetSec) {
   return { schedule: improved, violations, stats, score: score.total };
 }
 
+function solveNightFirstPattern(config, timeBudgetSec) {
+  const ctx = buildContext(config);
+  const initial = constructNightFirstPatternSchedule(ctx);
+  const improved = localSearch(initial, ctx, LOCAL_SEARCH_ITERS, timeBudgetSec || 0);
+  const violations = collectViolations(improved, ctx);
+  const stats = computeStats(improved, ctx);
+  const score = computeScore(improved, ctx);
+  return { schedule: improved, violations, stats, score: score.total };
+}
+
 function constructPatternSchedule(ctx, options) {
   const beamWidth = Math.max(1, options?.beamWidth || PATTERN_BEAM_WIDTH);
   const candidateLimit = Math.max(1, options?.candidateLimit || PATTERN_CANDIDATE_LIMIT);
   const individualCandidates = Array.from({ length: ctx.numNurses }, (_, n) =>
     getPatternCandidateRows(ctx, n, candidateLimit)
   );
-  const groups = buildPatternGroups(ctx, individualCandidates);
+  const groups = buildPatternGroups(ctx, individualCandidates, { nightFirst: !!options?.nightFirst });
 
   const greedySchedule = constructGreedyPatternSchedule(ctx, groups, individualCandidates);
   if (options?.greedyOnly) return greedySchedule;
@@ -66,6 +76,10 @@ function constructPatternSchedule(ctx, options) {
   return computeScore(greedySchedule, ctx).total < computeScore(bestSchedule, ctx).total
     ? greedySchedule
     : bestSchedule;
+}
+
+function constructNightFirstPatternSchedule(ctx, options) {
+  return constructPatternSchedule(ctx, { ...(options || {}), nightFirst: true });
 }
 
 function constructGreedyPatternSchedule(ctx, groups, individualCandidates) {
@@ -111,7 +125,7 @@ function patternCandidateLoadCost(before, candidate, after, ctx) {
   return score;
 }
 
-function buildPatternGroups(ctx, individualCandidates) {
+function buildPatternGroups(ctx, individualCandidates, options) {
   const groups = [];
   const used = new Set();
   const pair = ctx.coppiaTurni;
@@ -149,6 +163,7 @@ function buildPatternGroups(ctx, individualCandidates) {
   groups.sort((a, b) => {
     const aNight = a.nurses.some(n => patternNightEligible(ctx.nurseProps[n])) ? 0 : 1;
     const bNight = b.nurses.some(n => patternNightEligible(ctx.nurseProps[n])) ? 0 : 1;
+    if (options?.nightFirst && aNight !== bNight) return aNight - bNight;
     if (a.candidates.length !== b.candidates.length) return a.candidates.length - b.candidates.length;
     if (aNight !== bNight) return aNight - bNight;
     return a.nurses[0] - b.nurses[0];

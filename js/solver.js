@@ -12,7 +12,7 @@
  *   3. scoring.js    — transitionOk, dayCoverage, computeScore, collectViolations, computeStats
  *   4. construct.js  — construct (greedy heuristic), trySwapMP
  *   5. local-search.js — localSearch, move functions (setCell, trySwap/Change/Equity/WeeklyRest)
- *   6. pattern-planner.js — cyclic pattern beam planner
+ *   6. pattern-planner.js — cyclic pattern beam and night-first planners
  *   7. lp-model.js   — buildLP, parseSolution, lpToGLPKModel, parseGLPKSolution
  *   8. solvers.js    — loadHiGHS, loadGLPK, solveOneMILP, solveOneGLPK, solveFallback, solve
  *

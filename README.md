@@ -63,7 +63,7 @@ js/
     scoring.js              Constraints, scoring, violations, stats
     construct.js            Greedy construction heuristic (8 phases)
     local-search.js         Simulated annealing + move functions
-    pattern-planner.js       Pattern Beam cyclic profile planner
+    pattern-planner.js       Pattern Beam and night-first cyclic profile planners
     lp-model.js             MILP LP formulation, solution parsers
     solvers.js              HiGHS/GLPK loaders, solve orchestration
 css/
@@ -105,9 +105,11 @@ The solver runs in a **Web Worker** and uses a triple-strategy approach:
 
 2. **GLPK.js** (secondary) — Alternative MILP solver. Same LP formulation, JavaScript implementation.
 
-3. **Pattern Beam** (optional) — Profile-aware cyclic planner that selects whole-month nurse rows with beam search and shared repair passes.
+3. **Night-first Pattern Beam** (optional) — Pattern Beam variant that commits night-capable rows before non-night rows so N coverage has priority.
 
-4. **Greedy + Simulated Annealing** (fallback) — Multi-restart construction heuristic with local search. Always available, works offline.
+4. **Pattern Beam** (optional) — Profile-aware cyclic planner that selects whole-month nurse rows with beam search and shared repair passes.
+
+5. **Greedy + Simulated Annealing** (fallback) — Multi-restart construction heuristic with local search. Always available, works offline.
 
 ### Hard Constraints
 - Daily coverage min/max per shift type (M, P, D, N)
