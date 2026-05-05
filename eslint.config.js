@@ -61,7 +61,9 @@ const solverSharedGlobals = {
   tryWeeklyRestMove: 'writable',
   // pattern-planner.js
   solvePattern: 'writable',
+  solveNightFirstPattern: 'writable',
   constructPatternSchedule: 'writable',
+  constructNightFirstPatternSchedule: 'writable',
   // lp-model.js
   seededRandom: 'writable',
   buildLP: 'writable',
@@ -125,10 +127,10 @@ module.exports = [
     rules: {
       'no-unused-vars': 'warn',
       'no-console': 'off',
-      'semi': 'error',
+      semi: 'error',
       'no-var': 'error',
       'prefer-const': 'error',
-      'eqeqeq': 'error',
+      eqeqeq: 'error',
     },
   },
 ];

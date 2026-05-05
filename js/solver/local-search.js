@@ -401,7 +401,8 @@ function relocateNightBlock(schedule, ctx, nurseIdx, oldStart, newStart) {
   const { numDays, pinned, nurseProps } = ctx;
   if (oldStart === newStart || schedule[nurseIdx][oldStart] !== 'N' || newStart < 0 || newStart >= numDays) return null;
 
-  const noDiurni = nurseProps[nurseIdx].noDiurni;
+  const props = nurseProps[nurseIdx];
+  const noDiurni = props.noDiurni;
   const oldDays = getNightBlockDays(oldStart, noDiurni, numDays);
   const oldDaySet = new Set(oldDays);
   const newDays = getNightBlockDays(newStart, noDiurni, numDays);
@@ -413,14 +414,14 @@ function relocateNightBlock(schedule, ctx, nurseIdx, oldStart, newStart) {
   for (const d of oldDays) candidate[nurseIdx][d] = 'R';
 
   for (const d of newDays) {
-    if (pinned[nurseIdx][d] && !oldDaySet.has(d)) return null;
     if (!oldDaySet.has(d)) {
-      const existing = candidate[nurseIdx][d];
-      if (existing !== null && existing !== 'R') return null;
+      if (!canOverwriteForNightRepair(candidate, ctx, nurseIdx, d)) return null;
     }
   }
 
   placeNightBlock(candidate, nurseIdx, newStart, noDiurni, numDays);
+  if (props.noDiurni && !ensureNightLeadIn(candidate, ctx, nurseIdx, newStart, MP_NIGHT_PATTERNS)) return null;
+  if (props.diurniENotturni && !ensureNightLeadIn(candidate, ctx, nurseIdx, newStart, D_NIGHT_PATTERNS)) return null;
   return candidate;
 }
 

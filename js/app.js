@@ -316,7 +316,7 @@ let state = {
   solverProgress: { percent: 0, message: '' },
   numSolutions: 3,
   timeBudget: 0, // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
-  solverChoice: 'auto', // 'auto'|'milp'|'glpk'|'pattern'|'fallback'
+  solverChoice: 'auto', // 'auto'|'milp'|'glpk'|'pattern'|'night_first_pattern'|'fallback'
   worker: null,
   darkMode: false,
   previousMonthSchedule: null, // 2D array [nurse][day] of shift codes from prev month
@@ -2076,6 +2076,10 @@ function renderSolverMethodBanner() {
   } else if (method === 'pattern') {
     banner.innerHTML = `<div class="p-3 bg-cyan-50 dark:bg-cyan-950 border border-cyan-300 dark:border-cyan-700 rounded-lg">
       <p class="font-semibold text-cyan-700 dark:text-cyan-400 text-sm">✅ Algoritmo utilizzato: <strong>Pattern Beam</strong> (pianificazione ciclica per profili e copertura)</p>
+    </div>`;
+  } else if (method === 'night_first_pattern') {
+    banner.innerHTML = `<div class="p-3 bg-cyan-50 dark:bg-cyan-950 border border-cyan-300 dark:border-cyan-700 rounded-lg">
+      <p class="font-semibold text-cyan-700 dark:text-cyan-400 text-sm">✅ Algoritmo utilizzato: <strong>Night-first Pattern Beam</strong> (prima copertura notti, poi cicli profilo)</p>
     </div>`;
   } else {
     banner.innerHTML = `<div class="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 rounded-lg">

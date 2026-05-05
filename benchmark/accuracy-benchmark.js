@@ -196,7 +196,10 @@ function runAlgorithm(ctx, bctx, name, iters, raw) {
     if (raw) return initial;
     return ctx.localSearch(initial, bctx, iters);
   }
-  const initial = ctx.constructPatternSchedule(bctx, { beamWidth: 64, candidateLimit: 24 });
+  const initial =
+    name === 'night_first_pattern'
+      ? ctx.constructNightFirstPatternSchedule(bctx, { beamWidth: 64, candidateLimit: 24 })
+      : ctx.constructPatternSchedule(bctx, { beamWidth: 64, candidateLimit: 24 });
   if (raw) return initial;
   return ctx.localSearch(initial, bctx, iters);
 }
@@ -208,6 +211,14 @@ function summarize(ctx, bctx, schedule, elapsedMs) {
   const hours = stats.map(row => row.totalHours);
   const nights = stats.map(row => row.nights);
   const coverage = violations.filter(v => String(v.type || '').startsWith('coverage_')).length;
+  const nightCoverage = violations.filter(v => v.type === 'coverage_N' || v.type === 'coverage_N_max').length;
+  const nightPattern = violations.filter(
+    v =>
+      v.type === 'N_no_S' ||
+      v.type === 'need_2R_after_night' ||
+      v.type === 'mp_night_pattern' ||
+      v.type === 'd_night_pattern'
+  ).length;
   let pairDivergence = 0;
   const pair = bctx.coppiaTurni;
   if (pair && Array.isArray(pair) && pair.length === 2) {
@@ -222,6 +233,8 @@ function summarize(ctx, bctx, schedule, elapsedMs) {
     total: score.total,
     violations: violations.length,
     coverage,
+    nightCoverage,
+    nightPattern,
     hourRange: Math.max(...hours) - Math.min(...hours),
     hourStd: stddev(hours),
     nightRange: Math.max(...nights) - Math.min(...nights),
@@ -269,6 +282,7 @@ function main() {
   const rows = [];
   const algorithms = [
     ['legacy', 'Legacy greedy+SA'],
+    ['night_first_pattern', 'Night-first Pattern Beam'],
     ['pattern', 'Pattern Beam'],
   ];
 
@@ -276,7 +290,11 @@ function main() {
     for (const [algorithm, label] of algorithms) {
       const samples = [];
       for (let trial = 0; trial < args.trials; trial++) {
-        const seed = 1009 + trial * 7919 + scenario.name.length * 17 + (algorithm === 'pattern' ? 53 : 0);
+        const seed =
+          1009 +
+          trial * 7919 +
+          scenario.name.length * 17 +
+          (algorithm === 'pattern' ? 53 : algorithm === 'night_first_pattern' ? 97 : 0);
         const ctx = loadSolver(seed);
         const bctx = ctx.buildContext(scenario.config);
         const start = performance.now();
@@ -292,16 +310,19 @@ function main() {
   );
   console.log('');
   console.log(
-    '| Scenario | Algorithm | Median violations | Median hard | Median score | Coverage violations | Hour range avg | Hour std avg | Night range avg | Pair div avg | Runtime avg |'
+    '| Scenario | Algorithm | Median violations | Median hard | Median score | Coverage violations | Night coverage | Night pattern | Hour range avg | Hour std avg | Night range avg | Pair div avg | Runtime avg |'
   );
-  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
+  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
   for (const row of rows) {
     const s = row.samples;
     console.log(
       `| ${row.scenario} | ${row.label} | ${median(s.map(x => x.violations))} | ${median(s.map(x => x.hard))} | ${fmt(
         median(s.map(x => x.total)),
         1
-      )} | ${fmt(average(s.map(x => x.coverage)), 1)} | ${fmt(average(s.map(x => x.hourRange)), 1)} | ${fmt(
+      )} | ${fmt(average(s.map(x => x.coverage)), 1)} | ${fmt(average(s.map(x => x.nightCoverage)), 1)} | ${fmt(
+        average(s.map(x => x.nightPattern)),
+        1
+      )} | ${fmt(average(s.map(x => x.hourRange)), 1)} | ${fmt(
         average(s.map(x => x.hourStd)),
         1
       )} | ${fmt(average(s.map(x => x.nightRange)), 1)} | ${fmt(average(s.map(x => x.pairDivergence)), 1)} | ${fmt(
