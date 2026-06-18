@@ -2822,3 +2822,65 @@ describe('solveNightOnly', () => {
     assert.equal(result.schedule[0][2], 'F');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fill mattine/pomeriggi (night-only completion)
+// ---------------------------------------------------------------------------
+describe('solveFillMP', () => {
+  it('fills free cells to reach minimum M/P coverage', () => {
+    const config = makeMinimalConfig({ numNurses: 12, rules: { minCoverageN: 1, maxCoverageN: 2 } });
+    const nightOnly = ctx.solveNightOnly(config);
+    const result = ctx.solveFillMP(config, nightOnly.schedule);
+    const bctx = ctx.buildContext(config);
+    for (let d = 0; d < bctx.numDays; d++) {
+      const cov = ctx.dayCoverage(result.schedule, d, bctx.numNurses);
+      assert.ok(cov.M >= bctx.minCovM, `day ${d} M=${cov.M} expected >= ${bctx.minCovM}`);
+      assert.ok(cov.P >= bctx.minCovP, `day ${d} P=${cov.P} expected >= ${bctx.minCovP}`);
+    }
+  });
+
+  it('leaves no blank cells after filling', () => {
+    const config = makeMinimalConfig({ numNurses: 12 });
+    const nightOnly = ctx.solveNightOnly(config);
+    const result = ctx.solveFillMP(config, nightOnly.schedule);
+    for (const row of result.schedule) {
+      for (const cell of row) assert.notEqual(cell, '', 'no cell should remain blank');
+    }
+  });
+
+  it('never adds, moves or removes nights', () => {
+    const config = makeMinimalConfig({ numNurses: 12, rules: { minCoverageN: 1, maxCoverageN: 2 } });
+    const nightOnly = ctx.solveNightOnly(config);
+    const result = ctx.solveFillMP(config, nightOnly.schedule);
+    for (let n = 0; n < nightOnly.schedule.length; n++) {
+      for (let d = 0; d < nightOnly.schedule[n].length; d++) {
+        const before = nightOnly.schedule[n][d];
+        if (before === 'N' || before === 'S') {
+          assert.equal(result.schedule[n][d], before, `night block at ${n},${d} must be preserved`);
+        }
+        if (result.schedule[n][d] === 'N') {
+          assert.equal(before, 'N', `no new night may appear at ${n},${d}`);
+        }
+      }
+    }
+  });
+
+  it('preserves every already-assigned (non-empty) cell', () => {
+    const config = makeMinimalConfig({
+      numNurses: 12,
+      year: 2025,
+      month: 0,
+      nurseOverrides: { 0: { tags: ['solo_mattine'] } },
+    });
+    const nightOnly = ctx.solveNightOnly(config);
+    const result = ctx.solveFillMP(config, nightOnly.schedule);
+    for (let n = 0; n < nightOnly.schedule.length; n++) {
+      for (let d = 0; d < nightOnly.schedule[n].length; d++) {
+        const before = nightOnly.schedule[n][d];
+        if (before !== '') {
+          assert.equal(result.schedule[n][d], before, `fixed cell at ${n},${d} must not change`);
+        }
+      }
+    }
+  });
+});

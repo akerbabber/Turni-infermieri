@@ -1998,8 +1998,103 @@ function rebalanceTurni() {
 }
 
 // ---------------------------------------------------------------------------
-// Step 4 — Risultati
+// Fill mattine/pomeriggi — night-only mode: distribute M/P over the free cells
+// of the current schedule without touching the already-assigned nights.
 // ---------------------------------------------------------------------------
+
+function fillMattinePomeriggi() {
+  if (!state.schedule) {
+    alert('Nessun turno da completare. Genera prima i turni in modalità "Solo notti".');
+    return;
+  }
+
+  // Terminate existing worker
+  if (state.worker) {
+    state.worker.terminate();
+    state.worker = null;
+  }
+
+  resetSolverFeedback();
+
+  const btn = document.getElementById('btn-fill-mp');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Distribuendo...';
+  }
+
+  const restoreBtn = () => {
+    const b = document.getElementById('btn-fill-mp');
+    if (b) {
+      b.disabled = false;
+      b.textContent = '☀️ Distribuisci mattine/pomeriggi';
+    }
+  };
+
+  const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
+
+  const config = {
+    year: state.year,
+    month: state.month,
+    nurses: activeNurses,
+    rules: state.rules,
+    hourDeltas: buildHourDeltas(),
+    previousMonthTail: buildPrevMonthTail(),
+  };
+
+  const worker = new Worker('js/solver.js');
+  state.worker = worker;
+
+  worker.onmessage = e => {
+    const data = e.data;
+    if (data.type === 'progress') {
+      updateSolverProgress(data.percent, data.message);
+    } else if (data.type === 'result') {
+      state.solutions = data.solutions || [];
+      state.selectedSolution = 0;
+      state.solverMethod = data.solverMethod || 'night_only';
+      setSolverDiagnostics(data.diagnostics || []);
+      if (state.solutions.length > 0) {
+        const best = state.solutions[0];
+        state.schedule = best.schedule;
+        state.violations = best.violations || [];
+        state.stats = best.stats || [];
+      } else {
+        state.schedule = data.schedule;
+        state.violations = data.violations || [];
+        state.stats = data.stats || [];
+      }
+      state.worker = null;
+      worker.terminate();
+      saveState();
+      restoreBtn();
+      renderStep4();
+    } else if (data.type === 'error') {
+      console.error('[App FillMP] Solver error:', data.message, data.error);
+      updateSolverProgress(state.solverProgress?.percent || 0, data.message || 'Errore nella distribuzione');
+      setSolverDiagnostics(data.diagnostics || []);
+      state.worker = null;
+      worker.terminate();
+      restoreBtn();
+      renderStep4();
+    }
+  };
+
+  worker.onerror = err => {
+    console.error('[App FillMP] Worker error:', err.message, err);
+    updateSolverProgress(state.solverProgress?.percent || 0, 'Worker error durante la distribuzione');
+    setSolverDiagnostics(buildWorkerRuntimeDiagnostic(err, 'la distribuzione di mattine e pomeriggi'));
+    state.worker = null;
+    worker.terminate();
+    restoreBtn();
+    renderStep4();
+  };
+
+  worker.postMessage({
+    type: 'fill_mp',
+    config,
+    schedule: state.schedule,
+  });
+}
 
 let openDropdown = null;
 
@@ -2061,10 +2156,13 @@ function renderSolverMethodBanner() {
 
   if (!method || !state.schedule) {
     banner.classList.add('hidden');
+    document.getElementById('btn-fill-mp')?.classList.add('hidden');
     return;
   }
 
   banner.classList.remove('hidden');
+  const fillBtn = document.getElementById('btn-fill-mp');
+  if (fillBtn) fillBtn.classList.toggle('hidden', method !== 'night_only');
   if (method === 'milp') {
     banner.innerHTML = `<div class="p-3 bg-green-50 dark:bg-green-950 border border-green-300 dark:border-green-700 rounded-lg">
       <p class="font-semibold text-green-700 dark:text-green-400 text-sm">✅ Algoritmo utilizzato: <strong>HiGHS MILP</strong> (ottimizzazione matematica)</p>
@@ -2240,16 +2338,12 @@ function renderStep4() {
   });
 }
 
-function getLockedManualShift(n, d) {
-  const nurse = state.nurses[n];
-  if (!nurse || !Array.isArray(nurse.tags)) return null;
-  if (!nurse.tags.includes('quattro_mattine_venerdi_notte')) return null;
-  // Fixed weekly pattern: Mon-Thu M, Fri N, Sat S, Sun R.
-  const dow = dayOfWeek(state.year, state.month, d + 1);
-  if (dow >= 1 && dow <= 4) return 'M';
-  if (dow === 5) return 'N';
-  if (dow === 6) return 'S';
-  return 'R';
+function getLockedManualShift() {
+  // No shifts are locked in the results grid: every cell (including the
+  // "4 mattine + notte venerdì" fixed pattern) can be overridden by hand.
+  // The solver still pins these patterns during generation (see context.js);
+  // this only governs manual editing of the already-generated schedule.
+  return null;
 }
 
 function openShiftDropdown(anchorEl, n, d) {
@@ -2694,6 +2788,7 @@ function init() {
   document.getElementById('btn-step5-back')?.addEventListener('click', () => goToStep(4));
   document.getElementById('btn-regenerate')?.addEventListener('click', regenerateTurni);
   document.getElementById('btn-rebalance')?.addEventListener('click', rebalanceTurni);
+  document.getElementById('btn-fill-mp')?.addEventListener('click', fillMattinePomeriggi);
   document.getElementById('btn-export-csv')?.addEventListener('click', exportCSV);
   document.getElementById('btn-save-config')?.addEventListener('click', saveConfig);
   document.getElementById('btn-print')?.addEventListener('click', () => window.print());
