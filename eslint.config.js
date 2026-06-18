@@ -19,6 +19,7 @@ const solverSharedGlobals = {
   NIGHT_EQUITY_MILP_WEIGHT: 'writable',
   DIURNI_EQUITY_MILP_WEIGHT: 'writable',
   MP_BALANCE_MILP_WEIGHT: 'writable',
+  UNDER_COVERAGE_WEIGHT: 'writable',
   ABSENCE_TAG_TO_SHIFT: 'writable',
   SHIFT_END: 'writable',
   SHIFT_START: 'writable',
