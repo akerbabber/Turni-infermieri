@@ -94,10 +94,11 @@ function solveNightOnly(config) {
 }
 
 /**
- * True when the nurse takes both morning (M) and afternoon (P) shifts, so the
- * user must place those manually in night-only mode. Nurses with a deterministic
- * shift type (only mornings, only day-long, only nights, day+night, fixed weekly
- * pattern, …) are excluded — their cells are filled automatically.
+ * True when the nurse is flexible on mornings/afternoons and therefore must be
+ * filled in by hand in night-only mode. These nurses can take both M and P, so
+ * the planner leaves their non-night working cells blank. Nurses with a
+ * deterministic shift type (only mornings, only day-long, only nights, day+night,
+ * fixed weekly pattern, …) return false and are assigned automatically.
  */
 function nightOnlyManualNurse(props) {
   return !(
