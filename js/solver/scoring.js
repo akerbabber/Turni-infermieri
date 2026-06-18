@@ -374,15 +374,17 @@ function computeScore(schedule, ctx) {
   let hard = 0,
     soft = 0;
 
-  // Coverage — night overcoverage is penalized 3× harder so the solver
+  // Coverage — under-minimum coverage is penalized UNDER_COVERAGE_WEIGHT× harder so
+  // the solver guarantees the required daily minimums first and only then assigns extra
+  // staff toward the maximum. Night overcoverage is penalized 3× harder so the solver
   // prefers to exceed on M/P/D positions rather than on night shifts.
   for (let d = 0; d < numDays; d++) {
     const cov = dayCoverage(schedule, d, numNurses);
-    if (cov.M < minCovM) hard += minCovM - cov.M;
+    if (cov.M < minCovM) hard += (minCovM - cov.M) * UNDER_COVERAGE_WEIGHT;
     if (cov.M > maxCovM) hard += cov.M - maxCovM;
-    if (cov.P < minCovP) hard += minCovP - cov.P;
+    if (cov.P < minCovP) hard += (minCovP - cov.P) * UNDER_COVERAGE_WEIGHT;
     if (cov.P > maxCovP) hard += cov.P - maxCovP;
-    if (cov.N < minCovN) hard += minCovN - cov.N;
+    if (cov.N < minCovN) hard += (minCovN - cov.N) * UNDER_COVERAGE_WEIGHT;
     if (cov.N > maxCovN) hard += (cov.N - maxCovN) * 3;
   }
 

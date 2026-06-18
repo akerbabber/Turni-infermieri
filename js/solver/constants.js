@@ -35,6 +35,13 @@ const DIURNI_EQUITY_MILP_WEIGHT = 0.15; // weight for minimax D-shift equity in 
 const MP_BALANCE_MILP_WEIGHT = 0.1; // weight for M/P balance penalty in MILP objective
 const MONTHLY_HOURS_PER_WEEKDAY = 7.12;
 
+// Weight applied to under-minimum coverage (below the required minimum staffing).
+// Set higher than over-coverage so the solver treats meeting the daily minimums as
+// the top priority: it will guarantee minimum staffing on every day before allowing
+// any day to climb toward the maximum. This avoids schedules that pile staff onto
+// some days (up to the max) while leaving other days below the required minimum.
+const UNDER_COVERAGE_WEIGHT = 4;
+
 const ABSENCE_TAG_TO_SHIFT = {
   ferie: 'F',
   malattia: 'MA',
