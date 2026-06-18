@@ -7,7 +7,7 @@
 'use strict';
 
 /* global LOCAL_SEARCH_ITERS, MP_CYCLE_PATTERNS, SHORT_MP_CYCLE_PATTERNS, SHIFT_HOURS */
-/* global buildContext, collectViolations, computeScore */
+/* global buildContext, collectViolations, computeScore, construct */
 /* global computeStats, getAllowedMPCyclePatterns, getMPCyclePlan */
 /* global getNightPatternInfo, getShiftAt, hasForbiddenExtraNightRest, isForbiddenRestrictedNoDiurniRestDay */
 /* global isMPCycleLimitedNurse, isSplitRestDay, localSearch, requiredRest, transitionOk */
@@ -31,8 +31,11 @@ function solvePattern(config, timeBudgetSec) {
 
 function solveNightFirstPattern(config, timeBudgetSec) {
   const ctx = buildContext(config);
-  const initial = constructNightFirstPatternSchedule(ctx);
-  const improved = localSearch(initial, ctx, LOCAL_SEARCH_ITERS, timeBudgetSec || 0);
+  // Night-first mode pins a balanced night skeleton before filling day shifts, so
+  // localSearch must run against the same pinned context to preserve those nights.
+  const nightCtx = withNightSkeletonPins(ctx);
+  const initial = constructNightFirstPatternSchedule(nightCtx);
+  const improved = localSearch(initial, nightCtx, LOCAL_SEARCH_ITERS, timeBudgetSec || 0);
   const violations = collectViolations(improved, ctx);
   const stats = computeStats(improved, ctx);
   const score = computeScore(improved, ctx);
@@ -80,6 +83,54 @@ function constructPatternSchedule(ctx, options) {
 
 function constructNightFirstPatternSchedule(ctx, options) {
   return constructPatternSchedule(ctx, { ...(options || {}), nightFirst: true });
+}
+
+/**
+ * Build a context whose `pinned` matrix additionally fixes a balanced night
+ * skeleton (N and S cells, plus the mandatory post-night rest days).
+ *
+ * The cyclic pattern beam cannot, on its own, coordinate per-nurse night offsets
+ * to evenly meet the daily minimum night coverage — rigid month-long cycles tend
+ * to cluster nights, leaving some days short even when enough staff is available.
+ * The greedy construction heuristic (`construct`) already places nights day-by-day
+ * to satisfy the minimum coverage, so we reuse its night placement as a fixed
+ * skeleton and let the pattern beam fill the remaining day shifts (M/P/D) around it.
+ *
+ * Returns the original context unchanged when there is no night demand.
+ */
+function withNightSkeletonPins(ctx) {
+  if (ctx.minCovN <= 0) return ctx;
+  const { numDays, numNurses, pinned } = ctx;
+  const skeleton = construct(ctx);
+  const newPinned = Array.from({ length: numNurses }, (_, n) => pinned[n].slice());
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      if (newPinned[n][d]) continue;
+      const shift = skeleton[n][d];
+      // Pin the night block (N, S) and its mandatory rest tail so the day-shift
+      // fill and localSearch cannot displace the balanced night coverage.
+      if (shift === 'N' || shift === 'S') {
+        newPinned[n][d] = shift;
+      } else if (shift === 'R' && isSkeletonNightRest(skeleton, ctx, n, d)) {
+        newPinned[n][d] = 'R';
+      }
+    }
+  }
+  return { ...ctx, pinned: newPinned, nightSkeletonPinned: true };
+}
+
+/**
+ * True when `R` at (n, d) is part of a night block's mandatory rest tail
+ * (the R days immediately following an N-S sequence).
+ */
+function isSkeletonNightRest(skeleton, ctx, n, d) {
+  const noDiurni = ctx.nurseProps[n].noDiurni;
+  // First R after N-S: day d-1 is S and day d-2 is N.
+  if (d >= 2 && skeleton[n][d - 1] === 'S' && skeleton[n][d - 2] === 'N') return true;
+  // Second R after N-S-R (only for nurses requiring the full N-S-R-R block).
+  if (!noDiurni && d >= 3 && skeleton[n][d - 1] === 'R' && skeleton[n][d - 2] === 'S' && skeleton[n][d - 3] === 'N')
+    return true;
+  return false;
 }
 
 function constructGreedyPatternSchedule(ctx, groups, individualCandidates) {
@@ -296,6 +347,13 @@ function getPatternFamilies(ctx, n) {
     families.push({ label, pattern });
   }
 
+  // When the night skeleton is already pinned, the daily night demand is fully
+  // satisfied by the pinned N/S cells. Fill the remaining free cells with
+  // day-only patterns so the beam never adds surplus nights (which would breach
+  // the maximum night coverage). Each nurse's pinned nights still appear in the
+  // materialized row because pinned cells override the pattern.
+  if (ctx.nightSkeletonPinned) return getDayOnlyPatternFamilies(ctx, n);
+
   if (props.soloMattine || props.quattroMattineVenerdiNotte) {
     add('fixed-pinned', ['R']);
     return families;
@@ -336,6 +394,45 @@ function getPatternFamilies(ctx, n) {
   add('dn-5', ['D', 'N', 'S', 'R', 'R']);
   add('dn-5-rest-first', ['R', 'D', 'N', 'S', 'R']);
   add('drdn-7', ['D', 'R', 'D', 'N', 'S', 'R', 'R']);
+  return families;
+}
+
+/**
+ * Day-only pattern families used when a night skeleton is already pinned.
+ * Returns rest/morning/afternoon/day-long cycles (never N or S) tailored to what
+ * each nurse is allowed to work, so free cells are filled with day shifts only.
+ */
+function getDayOnlyPatternFamilies(ctx, n) {
+  const props = ctx.nurseProps[n];
+  const families = [];
+
+  function add(label, pattern) {
+    families.push({ label, pattern });
+  }
+
+  // Fully pinned profiles (their whole month is fixed) just need a rest filler.
+  if (props.soloMattine || props.quattroMattineVenerdiNotte || props.soloNotti) {
+    add('night-skeleton-rest', ['R']);
+    return families;
+  }
+
+  if (isMPCycleLimitedNurse(props)) {
+    for (const pattern of getAllowedMPCyclePatterns(props)) add('mp-cycle', pattern);
+    return families;
+  }
+
+  const canDayLong = !props.noDiurni && !props.mattineEPomeriggi;
+  const canMorningAfternoon = !props.soloDiurni && !props.diurniENotturni;
+
+  if (canDayLong) {
+    add('diurni-balanced', ['D', 'R', 'D', 'R', 'R']);
+    add('diurni-light', ['D', 'R', 'R']);
+    if (ctx.consente2D) add('diurni-double', ['D', 'D', 'R', 'R', 'R']);
+  }
+  if (canMorningAfternoon) {
+    for (const pattern of MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)) add('mp-cycle', pattern);
+  }
+  if (families.length === 0) add('night-skeleton-rest', ['R']);
   return families;
 }
 

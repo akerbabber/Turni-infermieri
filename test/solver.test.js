@@ -1487,6 +1487,44 @@ describe('constructNightFirstPatternSchedule', () => {
 
     assert.ok(nightCoverageViolations(nightFirst) <= nightCoverageViolations(regular));
   });
+
+  it('solveNightFirstPattern should meet the daily minimum night coverage when staff is sufficient', () => {
+    // Regression test: the cyclic pattern beam alone could not coordinate per-nurse
+    // night offsets and left many days short of the minimum night coverage even with
+    // enough night-eligible nurses. The night-first solver now pins a balanced night
+    // skeleton first, so every day must reach minCoverageN without exceeding maxCoverageN.
+    const config = makeMinimalConfig({
+      numNurses: 20,
+      year: 2026,
+      month: 0,
+      rules: {
+        minCoverageM: 4,
+        maxCoverageM: 6,
+        minCoverageP: 4,
+        maxCoverageP: 6,
+        minCoverageD: 0,
+        maxCoverageD: 4,
+        minCoverageN: 3,
+        maxCoverageN: 3,
+        targetNights: 4,
+        maxNights: 7,
+        minRPerWeek: 2,
+      },
+    });
+    const origRandom = Math.random;
+    Math.random = () => 0.4242;
+    try {
+      const bctx = ctx.buildContext(config);
+      const result = ctx.solveNightFirstPattern(config, 0);
+      for (let d = 0; d < bctx.numDays; d++) {
+        const covN = ctx.dayCoverage(result.schedule, d, bctx.numNurses).N;
+        assert.ok(covN >= bctx.minCovN, `Day ${d} night coverage ${covN} below minimum ${bctx.minCovN}`);
+        assert.ok(covN <= bctx.maxCovN, `Day ${d} night coverage ${covN} above maximum ${bctx.maxCovN}`);
+      }
+    } finally {
+      Math.random = origRandom;
+    }
+  });
 });
 
 describe('localSearch night coverage repair', () => {
