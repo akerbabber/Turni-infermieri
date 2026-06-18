@@ -750,7 +750,15 @@
                 <h3 class="font-semibold text-base">📌 Stato continuità</h3>
                 <p id="continuity-hint" class="text-xs text-gray-500 dark:text-slate-400 mt-1"></p>
               </div>
-              <span id="continuity-status" class="font-medium text-sm">—</span>
+              <div class="flex items-center gap-3">
+                <span id="continuity-status" class="font-medium text-sm">—</span>
+                <button
+                  id="btn-clear-continuity"
+                  class="btn px-4 py-2 text-sm border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 font-semibold rounded-lg transition-colors"
+                >
+                  🗑️ Svuota tutte le caselle
+                </button>
+              </div>
             </div>
           </div>
 
@@ -808,8 +816,8 @@
           <div class="rule-card mb-6 text-left">
             <h3 class="font-semibold mb-2 text-sm">🎯 Numero di soluzioni da generare</h3>
             <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
-              Genera più soluzioni alternative e scegli la migliore. Usa il solver MILP (HiGHS) per risultati veloci e
-              ottimali.
+              Genera più soluzioni alternative e scegli la migliore. Il motore euristico cerca soluzioni di buona
+              qualità rispettando i vincoli configurati.
             </p>
             <div class="flex items-center gap-3">
               <input id="inp-num-solutions" type="range" min="1" max="10" step="1" value="3" class="flex-1" />
@@ -843,17 +851,14 @@
           <div class="rule-card mb-6 text-left">
             <h3 class="font-semibold mb-2 text-sm">🔧 Algoritmo di risoluzione</h3>
             <p class="text-xs text-gray-500 dark:text-slate-400 mb-3">
-              Scegli quale solver utilizzare. «Auto» tenta HiGHS, poi GLPK, infine euristica. Puoi forzare un algoritmo
-              specifico, incluso Pattern Beam, per confrontare i risultati.
+              Scegli quale algoritmo utilizzare. «Auto» usa l'euristica (greedy + simulated annealing). Puoi forzare un
+              algoritmo specifico, incluso Pattern Beam, per confrontare i risultati.
             </p>
             <select
               id="sel-solver-method"
               class="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="auto">Auto (HiGHS → GLPK → Euristica)</option>
-              <option value="milp">HiGHS MILP (ottimizzazione matematica)</option>
-              <option value="milp_strict">HiGHS MILP Strict (nessun fallback)</option>
-              <option value="glpk">GLPK.js (ottimizzazione matematica alternativa)</option>
+              <option value="auto">Auto (Euristica)</option>
               <option value="night_first_pattern">Night-first Pattern Beam (prima notti, poi cicli)</option>
               <option value="night_only">Solo notti (mattine/pomeriggi a mano)</option>
               <option value="pattern">Pattern Beam (cicli profilo + ricerca a fascio)</option>
