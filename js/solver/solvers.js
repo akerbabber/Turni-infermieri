@@ -11,41 +11,6 @@
 'use strict';
 
 // ---------------------------------------------------------------------------
-// Diagnostics helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Build a structured diagnostic entry that can be propagated from the worker
- * to the main thread and rendered in the UI.
- * @param {string} source - Diagnostic origin ('solver', 'worker').
- * @param {string} phase - Pipeline stage ('solve', 'fallback', etc.).
- * @param {string} code - Stable machine-readable code for the failure/warning type.
- * @param {string} severity - 'info' | 'warning' | 'error'.
- * @param {string} userMessage - User-facing message shown in the UI.
- * @param {string} detail - Debug-oriented detail for logs and diagnostic panels.
- * @param {object} extra - Optional extra metadata merged into the diagnostic object.
- * @returns {object}
- */
-function makeDiagnostic(source, phase, code, severity, userMessage, detail, extra) {
-  return {
-    source,
-    phase,
-    code,
-    severity,
-    userMessage,
-    detail: detail || '',
-    ...(extra || {}),
-  };
-}
-
-function makeSolverError(message, diagnostics, code) {
-  const err = new Error(message);
-  err.code = code || 'solver_error';
-  err.diagnostics = Array.isArray(diagnostics) ? diagnostics : [];
-  return err;
-}
-
-// ---------------------------------------------------------------------------
 // Standalone heuristic (greedy + simulated annealing)
 // ---------------------------------------------------------------------------
 
@@ -235,11 +200,6 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       `[Solver]   #${idx + 1}: method=${sol.solverMethod}, score=${sol.score}, violations=${sol.violations.length}`
     );
   });
-
-  // Reference makeDiagnostic/makeSolverError so they remain part of the module's
-  // public surface for the worker even though the heuristic path rarely fails.
-  void makeDiagnostic;
-  void makeSolverError;
 
   progress(95, 'Validazione…');
   progress(100, 'Fatto!');

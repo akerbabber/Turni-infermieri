@@ -63,8 +63,6 @@ const solverSharedGlobals = {
   constructPatternSchedule: 'writable',
   constructNightFirstPatternSchedule: 'writable',
   // solvers.js
-  makeDiagnostic: 'writable',
-  makeSolverError: 'writable',
   solveFallback: 'writable',
   solve: 'writable',
   // solver.js (entry point defines progress before importScripts)
