@@ -2747,3 +2747,78 @@ describe('solver diagnostics', () => {
     assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Night-only manual mode
+// ---------------------------------------------------------------------------
+describe('solveNightOnly', () => {
+  it('covers the daily minimum night requirement', () => {
+    const config = makeMinimalConfig({ numNurses: 12, rules: { minCoverageN: 1, maxCoverageN: 2 } });
+    const result = ctx.solveNightOnly(config);
+    const bctx = ctx.buildContext(config);
+    for (let d = 0; d < bctx.numDays; d++) {
+      let nights = 0;
+      for (let n = 0; n < bctx.numNurses; n++) if (result.schedule[n][d] === 'N') nights++;
+      assert.ok(nights >= bctx.minCovN, `day ${d} has ${nights} nights, expected >= ${bctx.minCovN}`);
+    }
+  });
+
+  it('leaves at least some morning/afternoon cells blank for manual filling', () => {
+    const config = makeMinimalConfig({ numNurses: 12 });
+    const result = ctx.solveNightOnly(config);
+    let blanks = 0;
+    let mp = 0;
+    for (const row of result.schedule) {
+      for (const cell of row) {
+        if (cell === '') blanks++;
+        if (cell === 'M' || cell === 'P') mp++;
+      }
+    }
+    assert.ok(blanks > 0, 'expected blank cells for manual M/P entry');
+    assert.equal(mp, 0, 'flexible nurses should have no auto-assigned M/P shifts');
+  });
+
+  it('auto-fills deterministic nurses (solo_mattine, solo_diurni, solo_notti)', () => {
+    const config = makeMinimalConfig({
+      numNurses: 12,
+      year: 2025,
+      month: 0,
+      nurseOverrides: {
+        0: { tags: ['solo_mattine'] },
+        1: { tags: ['solo_diurni'] },
+        2: { tags: ['solo_notti'] },
+      },
+    });
+    const result = ctx.solveNightOnly(config);
+    // solo_mattine: Jan 1 2025 is Wednesday => M, Jan 4 (Sat) => R, never blank
+    assert.equal(result.schedule[0][0], 'M');
+    assert.equal(result.schedule[0][3], 'R');
+    assert.ok(
+      result.schedule[0].every(c => c !== ''),
+      'solo_mattine nurse should have no blank cells'
+    );
+    assert.ok(
+      result.schedule[1].every(c => c !== ''),
+      'solo_diurni nurse should have no blank cells'
+    );
+    assert.ok(
+      result.schedule[2].every(c => c !== ''),
+      'solo_notti nurse should have no blank cells'
+    );
+  });
+
+  it('preserves absences on flexible nurses', () => {
+    const config = makeMinimalConfig({
+      numNurses: 12,
+      year: 2025,
+      month: 0,
+      nurseOverrides: {
+        0: { tags: ['ferie'], absencePeriods: { ferie: { start: '2025-01-01', end: '2025-01-03' } } },
+      },
+    });
+    const result = ctx.solveNightOnly(config);
+    assert.equal(result.schedule[0][0], 'F');
+    assert.equal(result.schedule[0][1], 'F');
+    assert.equal(result.schedule[0][2], 'F');
+  });
+});

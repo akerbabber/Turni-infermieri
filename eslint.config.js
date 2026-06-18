@@ -63,6 +63,7 @@ const solverSharedGlobals = {
   // pattern-planner.js
   solvePattern: 'writable',
   solveNightFirstPattern: 'writable',
+  solveNightOnly: 'writable',
   constructPatternSchedule: 'writable',
   constructNightFirstPatternSchedule: 'writable',
   // lp-model.js

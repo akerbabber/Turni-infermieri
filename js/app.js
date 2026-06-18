@@ -316,7 +316,7 @@ let state = {
   solverProgress: { percent: 0, message: '' },
   numSolutions: 3,
   timeBudget: 0, // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
-  solverChoice: 'auto', // 'auto'|'milp'|'glpk'|'pattern'|'night_first_pattern'|'fallback'
+  solverChoice: 'auto', // 'auto'|'milp'|'glpk'|'pattern'|'night_first_pattern'|'night_only'|'fallback'
   worker: null,
   darkMode: false,
   previousMonthSchedule: null, // 2D array [nurse][day] of shift codes from prev month
@@ -2081,6 +2081,10 @@ function renderSolverMethodBanner() {
     banner.innerHTML = `<div class="p-3 bg-cyan-50 dark:bg-cyan-950 border border-cyan-300 dark:border-cyan-700 rounded-lg">
       <p class="font-semibold text-cyan-700 dark:text-cyan-400 text-sm">✅ Algoritmo utilizzato: <strong>Night-first Pattern Beam</strong> (prima copertura notti, poi cicli profilo)</p>
     </div>`;
+  } else if (method === 'night_only') {
+    banner.innerHTML = `<div class="p-3 bg-indigo-50 dark:bg-indigo-950 border border-indigo-300 dark:border-indigo-700 rounded-lg">
+      <p class="font-semibold text-indigo-700 dark:text-indigo-400 text-sm">🌙 Modalità <strong>Solo notti</strong>: sono coperte solo le notti (con i riposi obbligatori) e gli infermieri con turni fissi. Le celle vuote di mattina/pomeriggio vanno compilate a mano cliccandole.</p>
+    </div>`;
   } else {
     banner.innerHTML = `<div class="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 rounded-lg">
       <p class="font-semibold text-amber-700 dark:text-amber-400 text-sm">⚠️ Algoritmo utilizzato: <strong>Euristica</strong> (greedy + simulated annealing) — i solver matematici non erano disponibili oppure non hanno trovato una soluzione utilizzabile.</p>
@@ -2152,7 +2156,7 @@ function renderStep4() {
     bodyHTML += `<td class="text-xs font-medium truncate" title="${escHtml(activeNurses[n].name)}">${escHtml(activeNurses[n].name)}</td>`;
 
     for (let d = 0; d < numDays; d++) {
-      const shift = state.schedule[n][d] || 'R';
+      const shift = state.schedule[n][d] || '';
       const wk = isWeekend(state.year, state.month, d + 1);
       const vio = vioMap.has(`${n},${d}`);
       const lockedShift = getLockedManualShift(n, d);
@@ -2256,14 +2260,14 @@ function openShiftDropdown(anchorEl, n, d) {
   dropdown.className = 'shift-dropdown';
   dropdown.id = 'active-dropdown';
 
-  // Include all shift types including absence shifts
-  ['M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT'].forEach(shift => {
+  // Include all shift types including absence shifts, plus an empty (manual) cell
+  ['', 'M', 'P', 'D', 'N', 'S', 'R', 'F', 'MA', 'L104', 'PR', 'MT'].forEach(shift => {
     const btn = document.createElement('button');
-    btn.className = `shift-cell ${SHIFT_COLORS[shift]}`;
+    btn.className = `shift-cell ${SHIFT_COLORS[shift] || 'shift-empty'}`;
     btn.style.width = '36px';
     btn.style.height = '36px';
-    btn.title = SHIFT_LABELS[shift];
-    btn.textContent = shift;
+    btn.title = SHIFT_LABELS[shift] || 'Vuoto (da assegnare a mano)';
+    btn.textContent = shift || '—';
     btn.addEventListener('click', e => {
       e.stopPropagation();
       applyManualShift(n, d, shift);
@@ -2473,7 +2477,7 @@ function exportCSV() {
     const st = state.stats[n] || { totalHours: 0, nights: 0, diurni: 0, weekends: 0 };
     const row = [
       nurse.name,
-      ...Array.from({ length: numDays }, (_, d) => state.schedule[n][d] || 'R'),
+      ...Array.from({ length: numDays }, (_, d) => state.schedule[n][d] || ''),
       st.totalHours,
       st.diurni || 0,
       st.nights,
