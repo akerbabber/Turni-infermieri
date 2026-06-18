@@ -151,5 +151,36 @@ self.onmessage = async function (e) {
       const error = serializeError(err, diagnostics);
       self.postMessage({ type: 'error', message: error.message, error, diagnostics: error.diagnostics });
     }
+  } else if (e.data.type === 'fill_mp') {
+    // Fill-only: distribute mornings/afternoons over the free cells of an existing
+    // (night-only) schedule, leaving every already-assigned cell untouched.
+    console.log('[Worker] Received fill_mp message');
+    try {
+      progress(5, 'Distribuzione mattine e pomeriggi in corso…');
+      const result = solveFillMP(e.data.config, e.data.schedule);
+      progress(100, 'Fatto!');
+      self.postMessage({
+        type: 'result',
+        schedule: result.schedule,
+        violations: result.violations,
+        stats: result.stats,
+        solutions: [{ ...result, solverMethod: 'night_only' }],
+        solverMethod: 'night_only',
+      });
+    } catch (err) {
+      console.error('[Worker] Fill M/P failed:', err.message, err.stack);
+      const diagnostics = [
+        {
+          source: 'worker',
+          phase: 'fill_mp',
+          code: 'worker_error',
+          severity: 'error',
+          userMessage: 'Worker error durante la distribuzione di mattine e pomeriggi',
+          detail: err.message || String(err),
+        },
+      ];
+      const error = serializeError(err, diagnostics);
+      self.postMessage({ type: 'error', message: error.message, error, diagnostics: error.diagnostics });
+    }
   }
 };

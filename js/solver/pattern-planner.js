@@ -7,7 +7,8 @@
 'use strict';
 
 /* global LOCAL_SEARCH_ITERS, MP_CYCLE_PATTERNS, SHORT_MP_CYCLE_PATTERNS, SHIFT_HOURS */
-/* global buildContext, collectViolations, computeScore, construct */
+/* global buildContext, collectViolations, computeScore, construct, countWeekRest */
+/* global dayCoverage, nurseHours, requiredRest */
 /* global computeStats, getAllowedMPCyclePatterns, getMPCyclePlan */
 /* global getNightPatternInfo, getShiftAt, hasForbiddenExtraNightRest, isForbiddenRestrictedNoDiurniRestDay */
 /* global isMPCycleLimitedNurse, isSplitRestDay, localSearch, requiredRest, transitionOk */
@@ -83,6 +84,92 @@ function solveNightOnly(config) {
         schedule[n][d] = 'R';
       } else {
         schedule[n][d] = '';
+      }
+    }
+  }
+
+  const violations = collectViolations(schedule, ctx);
+  const stats = computeStats(schedule, ctx);
+  const score = computeScore(schedule, ctx);
+  return { schedule, violations, stats, score: score.total };
+}
+
+/**
+ * Fill-only mode for the night-only workflow: take a schedule whose nights and
+ * fixed-type nurses are already assigned (typically produced by solveNightOnly and
+ * then manually corrected by the user) and distribute mornings/afternoons over the
+ * remaining empty cells only. Every non-empty cell of `fixedSchedule` is treated as
+ * locked, so the algorithm works exclusively on the genuinely free slots and never
+ * adds, moves or removes nights.
+ *
+ * Empty cells are first set to R, then greedily promoted to M or P (lowest-hours
+ * nurse first, for fairness) until each day reaches its minimum M/P coverage, while
+ * respecting forbidden transitions and the weekly rest minimum. Cells that cannot or
+ * need not become M/P stay as R.
+ *
+ * @param {object} config - solver configuration (same shape as solve())
+ * @param {string[][]} fixedSchedule - current grid; '' (or null) marks a free cell
+ * @returns {{schedule: string[][], violations: object[], stats: object[], score: number}}
+ */
+function solveFillMP(config, fixedSchedule) {
+  const ctx = buildContext(config);
+  const { numDays, numNurses, minCovM, minCovP, pinned, weekDaysList, weekOf, minRPerWeek } = ctx;
+  const base = fixedSchedule || [];
+
+  // Build the working grid from the provided schedule; cells that are empty (and not
+  // structurally pinned) are the only ones we may assign. Initialise them to R.
+  const schedule = Array.from({ length: numNurses }, () => new Array(numDays).fill(''));
+  const free = Array.from({ length: numNurses }, () => new Array(numDays).fill(false));
+  for (let n = 0; n < numNurses; n++) {
+    for (let d = 0; d < numDays; d++) {
+      const cell = (base[n] && base[n][d]) || '';
+      if (cell === '' && !pinned[n][d]) {
+        free[n][d] = true;
+        schedule[n][d] = 'R';
+      } else {
+        schedule[n][d] = cell;
+      }
+    }
+  }
+
+  // True when (n, d) may legally take shift s (M or P), given the surrounding fixed
+  // cells. The cell must be free, and both the incoming and outgoing transitions valid.
+  function canAssignMP(n, d, s) {
+    if (!free[n][d]) return false;
+    const prev = d > 0 ? schedule[n][d - 1] : null;
+    if (!transitionOk(prev, s, ctx, schedule, n, d)) return false;
+    const next = d < numDays - 1 ? schedule[n][d + 1] : null;
+    if (next && !transitionOk(s, next, ctx, schedule, n, d + 1)) return false;
+    return true;
+  }
+
+  // Promoting an R to a working shift must not drop the week below its rest minimum.
+  function keepsWeeklyRest(n, d) {
+    const wDays = weekDaysList[weekOf(d)];
+    const restAfter = countWeekRest(schedule, n, wDays) - 1;
+    return restAfter >= requiredRest(wDays.length, minRPerWeek);
+  }
+
+  for (let d = 0; d < numDays; d++) {
+    for (const target of ['M', 'P']) {
+      const min = target === 'M' ? minCovM : minCovP;
+      // Each promotion adds exactly one unit of coverage, so at most numNurses steps.
+      for (let guard = 0; guard <= numNurses; guard++) {
+        const cov = dayCoverage(schedule, d, numNurses);
+        if ((target === 'M' ? cov.M : cov.P) >= min) break;
+        let pick = -1;
+        let pickHours = Infinity;
+        for (let n = 0; n < numNurses; n++) {
+          if (schedule[n][d] !== 'R' || !free[n][d]) continue;
+          if (!canAssignMP(n, d, target) || !keepsWeeklyRest(n, d)) continue;
+          const h = nurseHours(schedule, n, numDays);
+          if (h < pickHours) {
+            pickHours = h;
+            pick = n;
+          }
+        }
+        if (pick === -1) break;
+        schedule[pick][d] = target;
       }
     }
   }

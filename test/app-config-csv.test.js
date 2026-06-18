@@ -388,7 +388,7 @@ describe('config CSV helpers', () => {
 });
 
 describe('manual fixed-pattern protections', () => {
-  it('should keep the fixed 4 mattine + notte ven. pattern during manual edits', () => {
+  it('should allow manual edits on the 4 mattine + notte ven. nurse', () => {
     const currentState = toPlain(ctx._getAppState());
     ctx._setAppState({
       ...currentState,
@@ -413,8 +413,9 @@ describe('manual fixed-pattern protections', () => {
     ctx.applyManualShift(0, 2, 'M');
 
     const nextState = toPlain(ctx._getAppState());
-    assert.equal(nextState.schedule[0][0], 'M');
-    assert.equal(nextState.schedule[0][2], 'N');
+    // Cells are now manually editable even for the fixed weekly pattern.
+    assert.equal(nextState.schedule[0][0], 'P');
+    assert.equal(nextState.schedule[0][2], 'M');
   });
 });
 
