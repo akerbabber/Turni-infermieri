@@ -116,6 +116,9 @@ function withNightSkeletonPins(ctx) {
       }
     }
   }
+  // The `nightSkeletonPinned` flag signals downstream pattern selection
+  // (getPatternFamilies) to fill free cells with day-only patterns, since the
+  // night demand is now fully covered by the pinned skeleton.
   return { ...ctx, pinned: newPinned, nightSkeletonPinned: true };
 }
 
@@ -411,6 +414,8 @@ function getDayOnlyPatternFamilies(ctx, n) {
   }
 
   // Fully pinned profiles (their whole month is fixed) just need a rest filler.
+  // soloNotti nurses work only nights, which are already pinned by the skeleton, so
+  // their remaining free cells are rest days.
   if (props.soloMattine || props.quattroMattineVenerdiNotte || props.soloNotti) {
     add('night-skeleton-rest', ['R']);
     return families;
