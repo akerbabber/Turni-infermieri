@@ -29,10 +29,6 @@ const FASCIA_SHIFT_END = {
 const DEBUG = false; // Set to true for verbose solver logging
 
 const EQUITY_THRESHOLD_HOURS = 2; // ±hours from average before equity move triggers
-const HOUR_EQUITY_MILP_WEIGHT = 0.3; // weight for minimax hour equity in MILP objective
-const NIGHT_EQUITY_MILP_WEIGHT = 0.15; // weight for minimax night equity in MILP objective
-const DIURNI_EQUITY_MILP_WEIGHT = 0.15; // weight for minimax D-shift equity in MILP objective
-const MP_BALANCE_MILP_WEIGHT = 0.1; // weight for M/P balance penalty in MILP objective
 const MONTHLY_HOURS_PER_WEEKDAY = 7.12;
 
 // Weight applied to under-minimum coverage (below the required minimum staffing).
@@ -76,7 +72,7 @@ const BASE_FORBIDDEN_NEXT = {
 const NUM_RESTARTS = 8; // meno restart, più iter per restart
 const LOCAL_SEARCH_ITERS = 6000; // +50% iterazioni per convergenza migliore
 
-const MILP_MIN_TIME_PER_SOLUTION = 5;
+// Default total solving time budget (seconds) when the user picks "auto".
 const MILP_DEFAULT_TOTAL_TIME_BUDGET = 60;
 
 // Safety cap to prevent indefinite runs in zero-violations mode (10 minutes)

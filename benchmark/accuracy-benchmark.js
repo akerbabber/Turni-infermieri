@@ -13,7 +13,6 @@ const MODULES = [
   'solver/construct.js',
   'solver/local-search.js',
   'solver/pattern-planner.js',
-  'solver/lp-model.js',
   'solver/solvers.js',
 ];
 

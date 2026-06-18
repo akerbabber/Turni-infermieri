@@ -103,9 +103,13 @@ function solveNightOnly(config) {
  * adds, moves or removes nights.
  *
  * Empty cells are first set to R, then greedily promoted to M or P (lowest-hours
- * nurse first, for fairness) until each day reaches its minimum M/P coverage, while
+ * nurse first, for fairness) until each day reaches its target M/P coverage, while
  * respecting forbidden transitions and the weekly rest minimum. Cells that cannot or
  * need not become M/P stay as R.
+ *
+ * "Saturating" means each day is filled up to its maximum coverage (which always
+ * satisfies the minimum), so the correct number of nurses is staffed every day
+ * instead of stopping at the bare minimum.
  *
  * @param {object} config - solver configuration (same shape as solve())
  * @param {string[][]} fixedSchedule - current grid; '' (or null) marks a free cell
@@ -113,7 +117,7 @@ function solveNightOnly(config) {
  */
 function solveFillMP(config, fixedSchedule) {
   const ctx = buildContext(config);
-  const { numDays, numNurses, minCovM, minCovP, pinned, weekDaysList, weekOf, minRPerWeek } = ctx;
+  const { numDays, numNurses, minCovM, minCovP, maxCovM, maxCovP, pinned, weekDaysList, weekOf, minRPerWeek } = ctx;
   const base = fixedSchedule || [];
 
   // Build the working grid from the provided schedule; cells that are empty (and not
@@ -150,28 +154,42 @@ function solveFillMP(config, fixedSchedule) {
     return restAfter >= requiredRest(wDays.length, minRPerWeek);
   }
 
-  for (let d = 0; d < numDays; d++) {
-    for (const target of ['M', 'P']) {
-      const min = target === 'M' ? minCovM : minCovP;
-      // Each promotion adds exactly one unit of coverage, so at most numNurses steps.
-      for (let guard = 0; guard <= numNurses; guard++) {
-        const cov = dayCoverage(schedule, d, numNurses);
-        if ((target === 'M' ? cov.M : cov.P) >= min) break;
-        let pick = -1;
-        let pickHours = Infinity;
-        for (let n = 0; n < numNurses; n++) {
-          if (schedule[n][d] !== 'R' || !free[n][d]) continue;
-          if (!canAssignMP(n, d, target) || !keepsWeeklyRest(n, d)) continue;
-          const h = nurseHours(schedule, n, numDays);
-          if (h < pickHours) {
-            pickHours = h;
-            pick = n;
-          }
+  // Promote free R cells of day `d` to `target` (M or P) until the day reaches
+  // `limit` coverage for that shift, always picking the lowest-hours nurse for fairness.
+  // When `respectWeeklyRest` is true a promotion is skipped if it would drop the nurse's
+  // week below the rest minimum; meeting the daily minimum coverage takes priority over
+  // the weekly rest minimum, so that first pass relaxes this guard.
+  function fillDayTo(d, target, limit, respectWeeklyRest) {
+    // Each promotion adds exactly one unit of coverage, so at most numNurses steps.
+    for (let guard = 0; guard <= numNurses; guard++) {
+      const cov = dayCoverage(schedule, d, numNurses);
+      if ((target === 'M' ? cov.M : cov.P) >= limit) break;
+      let pick = -1;
+      let pickHours = Infinity;
+      for (let n = 0; n < numNurses; n++) {
+        if (schedule[n][d] !== 'R' || !free[n][d]) continue;
+        if (!canAssignMP(n, d, target)) continue;
+        if (respectWeeklyRest && !keepsWeeklyRest(n, d)) continue;
+        const h = nurseHours(schedule, n, numDays);
+        if (h < pickHours) {
+          pickHours = h;
+          pick = n;
         }
-        if (pick === -1) break;
-        schedule[pick][d] = target;
       }
+      if (pick === -1) break;
+      schedule[pick][d] = target;
     }
+  }
+
+  for (let d = 0; d < numDays; d++) {
+    // First guarantee the minimum coverage for both shifts so every day reaches the
+    // required staffing — even when that means dipping below the weekly rest minimum.
+    fillDayTo(d, 'M', minCovM, false);
+    fillDayTo(d, 'P', minCovP, false);
+    // …then saturate up to the maximum coverage to keep the correct number of nurses
+    // on duty each day, this time preserving the weekly rest minimum.
+    fillDayTo(d, 'M', maxCovM, true);
+    fillDayTo(d, 'P', maxCovP, true);
   }
 
   const violations = collectViolations(schedule, ctx);

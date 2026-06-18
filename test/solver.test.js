@@ -31,7 +31,6 @@ function loadSolver() {
     'solver/construct.js',
     'solver/local-search.js',
     'solver/pattern-planner.js',
-    'solver/lp-model.js',
     'solver/solvers.js',
   ];
 
@@ -1338,26 +1337,6 @@ describe('construct', () => {
     assert.ok(day1Coverage.P <= 3, `Day 1 afternoon coverage should stay within the maximum, got ${day1Coverage.P}`);
     assert.equal(day1Coverage.D, 1);
     assert.equal(schedule[4][0], 'D', 'The diurni_e_notturni nurse should cover day 1 with D');
-  });
-
-  it('should encode LP cycle constraints for M/P-only nurses', () => {
-    const config = makeMinimalConfig({
-      numNurses: 2,
-      nurseOverrides: {
-        0: { tags: ['no_notti', 'no_diurni'] },
-      },
-      rules: {
-        minCoverageN: 0,
-        maxCoverageN: 0,
-        targetNights: 0,
-        maxNights: 0,
-      },
-    });
-    const bctx = ctx.buildContext(config);
-    const lp = ctx.buildLP(bctx, 0);
-    assert.match(lp, /mpcPick0_0:/);
-    assert.match(lp, /mpcM0_0:/);
-    assert.match(lp, /mpcR0_4:/);
   });
 
   it('should accept shorter 5-day M/P patterns for mattine_e_pomeriggi nurses', () => {
@@ -2679,72 +2658,21 @@ describe('solver diagnostics', () => {
     ctx = loadSolver();
   });
 
-  it('should classify HiGHS infeasible statuses with a user-friendly diagnostic', () => {
-    const diagnostic = toPlain(ctx.buildHighsSolveDiagnostic('Infeasible', 12.34));
-    assert.equal(diagnostic.source, 'highs');
-    assert.equal(diagnostic.code, 'model_infeasible');
-    assert.equal(diagnostic.userMessage, 'Il modello non ha trovato una soluzione ammissibile con i vincoli attuali');
-    assert.match(diagnostic.detail, /Infeasible/);
-  });
-
-  it('should classify GLPK no-feasible statuses with a user-friendly diagnostic', () => {
-    const diagnostic = toPlain(ctx.buildGLPKSolveDiagnostic('GLP_NOFEAS', 4.2));
-    assert.equal(diagnostic.source, 'glpk');
-    assert.equal(diagnostic.code, 'model_infeasible');
-    assert.equal(diagnostic.userMessage, 'Il modello non ha trovato una soluzione ammissibile con i vincoli attuali');
-    assert.match(diagnostic.detail, /GLP_NOFEAS/);
-  });
-
-  it('should use fallback solver and include diagnostic when HiGHS loading fails', async () => {
-    vm.runInContext(
-      `
-      loadHiGHS = async function () {
-        _highsLoadState = makeDiagnostic(
-          'highs',
-          'script_load',
-          'cdn_load_failed',
-          'error',
-          'HiGHS non caricato: errore rete/CDN',
-          'importScripts failed: network error'
-        );
-        _highsLoadDiag = _highsLoadState.detail;
-        return null;
-      };
-      buildContext = function () {
-        return {
-          numNurses: 1,
-          numDays: 1,
-          minCovM: 0,
-          maxCovM: 0,
-          minCovP: 0,
-          maxCovP: 0,
-          minCovN: 0,
-          maxCovN: 0,
-          minCovD: 0,
-          maxCovD: 0
-        };
-      };
-      construct = function () { return [['R']]; };
-      localSearch = function (schedule) { return schedule; };
-      collectViolations = function () { return []; };
-      computeStats = function () { return []; };
-      computeScore = function () { return { total: 0, hard: 0, soft: 0 }; };
-      progress = function () {};
-    `,
-      ctx
-    );
-
-    const config = makeMinimalConfig({
-      numNurses: 1,
-      rules: { minCoverageM: 0, maxCoverageM: 0, minCoverageP: 0, maxCoverageP: 0, minCoverageN: 0, maxCoverageN: 0 },
-    });
-    const result = await ctx.solve(config, 1, 15, false, 'milp');
-    const diagnostics = toPlain(result.diagnostics);
-
+  it('produces a heuristic solution for the default "auto" choice', async () => {
+    const config = makeMinimalConfig({ numNurses: 12 });
+    const result = await ctx.solve(config, 1, 5, false, 'auto');
     assert.equal(result.solutions.length, 1);
     assert.equal(result.solutions[0].solverMethod, 'fallback');
-    assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non caricato: errore rete/CDN'));
-    assert.ok(diagnostics.some(diag => diag.userMessage === 'HiGHS non disponibile, uso euristica come fallback'));
+    assert.ok(Array.isArray(result.diagnostics));
+  });
+
+  it('routes legacy MILP/GLPK choices to the heuristic', async () => {
+    const config = makeMinimalConfig({ numNurses: 12 });
+    for (const legacy of ['milp', 'glpk', 'milp_strict']) {
+      const result = await ctx.solve(config, 1, 5, false, legacy);
+      assert.equal(result.solutions.length, 1, `choice ${legacy} should still produce a solution`);
+      assert.equal(result.solutions[0].solverMethod, 'fallback', `choice ${legacy} should use the heuristic`);
+    }
   });
 });
 

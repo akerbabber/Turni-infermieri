@@ -316,7 +316,7 @@ let state = {
   solverProgress: { percent: 0, message: '' },
   numSolutions: 3,
   timeBudget: 0, // 0 = auto (inferred from constraints); >0 = user-chosen seconds; -1 = until zero violations
-  solverChoice: 'auto', // 'auto'|'milp'|'glpk'|'pattern'|'night_first_pattern'|'night_only'|'fallback'
+  solverChoice: 'auto', // 'auto'|'pattern'|'night_first_pattern'|'night_only'|'fallback'
   worker: null,
   darkMode: false,
   previousMonthSchedule: null, // 2D array [nurse][day] of shift codes from prev month
@@ -671,8 +671,6 @@ function normalizeDiagnostics(diagnostics) {
 }
 
 function sourceLabel(source) {
-  if (source === 'highs') return 'HiGHS';
-  if (source === 'glpk') return 'GLPK';
   if (source === 'worker') return 'Worker';
   return 'Solver';
 }
@@ -1555,6 +1553,23 @@ function buildPrevMonthTail() {
   return tail.some(entry => entry && entry.some(Boolean)) ? tail : null;
 }
 
+/**
+ * Clear every nurse's manual previous-month continuity cells (the 3 day selectors)
+ * in one click, so the user doesn't have to reset them one by one.
+ */
+function clearContinuityTails() {
+  const hasAnyManual = state.nurses.some(
+    nurse => Array.isArray(nurse.previousMonthTail) && nurse.previousMonthTail.some(Boolean)
+  );
+  if (!hasAnyManual) return;
+  if (!confirm('Svuotare tutte le caselle di continuità del mese precedente?')) return;
+  state.nurses.forEach(nurse => {
+    nurse.previousMonthTail = createEmptyPreviousMonthTail();
+  });
+  saveState();
+  renderStep3();
+}
+
 function renderContinuityList() {
   const container = document.getElementById('continuity-list');
   if (!container) return;
@@ -1697,6 +1712,13 @@ function renderGenerateStep() {
   // Bind solver choice selector
   const selSolver = document.getElementById('sel-solver-method');
   if (selSolver) {
+    // Normalise legacy/removed choices (e.g. 'milp', 'glpk', 'milp_strict' saved in
+    // localStorage before the MILP solvers were removed) back to 'auto'.
+    const validChoices = new Set(Array.from(selSolver.options).map(opt => opt.value));
+    if (!validChoices.has(state.solverChoice)) {
+      state.solverChoice = 'auto';
+      saveState();
+    }
     selSolver.value = state.solverChoice || 'auto';
     selSolver.onchange = () => {
       state.solverChoice = selSolver.value;
@@ -2163,15 +2185,7 @@ function renderSolverMethodBanner() {
   banner.classList.remove('hidden');
   const fillBtn = document.getElementById('btn-fill-mp');
   if (fillBtn) fillBtn.classList.toggle('hidden', method !== 'night_only');
-  if (method === 'milp') {
-    banner.innerHTML = `<div class="p-3 bg-green-50 dark:bg-green-950 border border-green-300 dark:border-green-700 rounded-lg">
-      <p class="font-semibold text-green-700 dark:text-green-400 text-sm">✅ Algoritmo utilizzato: <strong>HiGHS MILP</strong> (ottimizzazione matematica)</p>
-    </div>`;
-  } else if (method === 'glpk') {
-    banner.innerHTML = `<div class="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-300 dark:border-blue-700 rounded-lg">
-      <p class="font-semibold text-blue-700 dark:text-blue-400 text-sm">✅ Algoritmo utilizzato: <strong>GLPK.js</strong> (ottimizzazione matematica)</p>
-    </div>`;
-  } else if (method === 'pattern') {
+  if (method === 'pattern') {
     banner.innerHTML = `<div class="p-3 bg-cyan-50 dark:bg-cyan-950 border border-cyan-300 dark:border-cyan-700 rounded-lg">
       <p class="font-semibold text-cyan-700 dark:text-cyan-400 text-sm">✅ Algoritmo utilizzato: <strong>Pattern Beam</strong> (pianificazione ciclica per profili e copertura)</p>
     </div>`;
@@ -2779,6 +2793,7 @@ function init() {
   // ---- Step 3 ----
   document.getElementById('btn-step3-back')?.addEventListener('click', () => goToStep(2));
   document.getElementById('btn-step3-next')?.addEventListener('click', () => goToStep(4));
+  document.getElementById('btn-clear-continuity')?.addEventListener('click', clearContinuityTails);
 
   // ---- Step 4 ----
   document.getElementById('btn-step4-back')?.addEventListener('click', () => goToStep(3));
