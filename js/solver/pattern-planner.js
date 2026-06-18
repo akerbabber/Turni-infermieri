@@ -8,7 +8,7 @@
 
 /* global LOCAL_SEARCH_ITERS, MP_CYCLE_PATTERNS, SHORT_MP_CYCLE_PATTERNS, SHIFT_HOURS */
 /* global buildContext, collectViolations, computeScore, construct, countWeekRest */
-/* global dayCoverage, nurseHours, requiredRest */
+/* global dayCoverage, nurseHours */
 /* global computeStats, getAllowedMPCyclePatterns, getMPCyclePlan */
 /* global getNightPatternInfo, getShiftAt, hasForbiddenExtraNightRest, isForbiddenRestrictedNoDiurniRestDay */
 /* global isMPCycleLimitedNurse, isSplitRestDay, localSearch, requiredRest, transitionOk */

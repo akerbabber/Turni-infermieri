@@ -2338,13 +2338,11 @@ function renderStep4() {
   });
 }
 
-function getLockedManualShift(n, d) {
+function getLockedManualShift() {
   // No shifts are locked in the results grid: every cell (including the
   // "4 mattine + notte venerdì" fixed pattern) can be overridden by hand.
   // The solver still pins these patterns during generation (see context.js);
   // this only governs manual editing of the already-generated schedule.
-  void n;
-  void d;
   return null;
 }
 
