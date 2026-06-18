@@ -42,6 +42,74 @@ function solveNightFirstPattern(config, timeBudgetSec) {
   return { schedule: improved, violations, stats, score: score.total };
 }
 
+/**
+ * Night-only mode: build a grid where only the night coverage (N-S-R-R blocks)
+ * and the deterministic/fixed nurses are filled in, leaving the morning/afternoon
+ * cells of flexible M/P nurses blank ('') for manual assignment by the user.
+ *
+ * Rationale: when the automatic optimiser keeps producing too many nights and too
+ * few mornings/afternoons, this mode lets the planner own only the hard part
+ * (balanced night coverage with its mandatory rest tail) while the user fills in
+ * mornings and afternoons by hand. Nurses whose shift is fully determined by their
+ * tags (solo mattine, solo diurni, solo notti, turni fissi, diurni/notturni, …)
+ * are still assigned automatically so the user only fills the genuinely free cells.
+ *
+ * @param {object} config - solver configuration (same shape as solve())
+ * @returns {{schedule: string[][], violations: object[], stats: object[], score: number}}
+ */
+function solveNightOnly(config) {
+  const ctx = buildContext(config);
+  // A full, valid schedule used as the source for the night skeleton and for the
+  // fully-automatic (non manual-M/P) nurses.
+  const full = construct(ctx);
+  const { numDays, numNurses, nurseProps, pinned } = ctx;
+  const schedule = Array.from({ length: numNurses }, () => new Array(numDays).fill(''));
+
+  for (let n = 0; n < numNurses; n++) {
+    const manual = nightOnlyManualNurse(nurseProps[n]);
+    for (let d = 0; d < numDays; d++) {
+      if (!manual) {
+        // Deterministic / fixed-type nurse: keep the full auto-assigned schedule.
+        schedule[n][d] = full[n][d];
+        continue;
+      }
+      // Flexible M/P nurse: keep absences/pinned cells and the night blocks
+      // (N, S and their mandatory rest tail), blank everything else for manual fill.
+      if (pinned[n][d]) {
+        schedule[n][d] = pinned[n][d];
+      } else if (full[n][d] === 'N' || full[n][d] === 'S') {
+        schedule[n][d] = full[n][d];
+      } else if (full[n][d] === 'R' && isSkeletonNightRest(full, ctx, n, d)) {
+        schedule[n][d] = 'R';
+      } else {
+        schedule[n][d] = '';
+      }
+    }
+  }
+
+  const violations = collectViolations(schedule, ctx);
+  const stats = computeStats(schedule, ctx);
+  const score = computeScore(schedule, ctx);
+  return { schedule, violations, stats, score: score.total };
+}
+
+/**
+ * True when the nurse takes both morning (M) and afternoon (P) shifts, so the
+ * user must place those manually in night-only mode. Nurses with a deterministic
+ * shift type (only mornings, only day-long, only nights, day+night, fixed weekly
+ * pattern, …) are excluded — their cells are filled automatically.
+ */
+function nightOnlyManualNurse(props) {
+  return !(
+    props.soloMattine ||
+    props.soloDiurni ||
+    props.soloNotti ||
+    props.diurniENotturni ||
+    props.diurniNoNotti ||
+    props.quattroMattineVenerdiNotte
+  );
+}
+
 function constructPatternSchedule(ctx, options) {
   const beamWidth = Math.max(1, options?.beamWidth || PATTERN_BEAM_WIDTH);
   const candidateLimit = Math.max(1, options?.candidateLimit || PATTERN_CANDIDATE_LIMIT);

@@ -598,11 +598,18 @@ function solveFallback(config) {
  * @param {number} numSolutions
  * @param {number} timeBudget  – total seconds allocated; 0 or undefined = default 30s
  * @param {boolean} untilZeroViolations – keep generating until a 0-violation solution is found
- * @param {string} solverChoice – 'auto'|'milp'|'glpk'|'pattern'|'night_first_pattern'|'fallback'
+ * @param {string} solverChoice – 'auto'|'milp'|'glpk'|'pattern'|'night_first_pattern'|'night_only'|'fallback'
  */
 async function solve(config, numSolutions, timeBudget, untilZeroViolations, solverChoice) {
   solverChoice = solverChoice || 'auto';
   numSolutions = Math.max(1, Math.min(numSolutions || 1, 20));
+  // Night-only mode is deterministic (no MILP, no diversity seeds): a single grid
+  // is produced and the user fills mornings/afternoons by hand, so looping for
+  // zero violations would never terminate (M/P are intentionally left uncovered).
+  if (solverChoice === 'night_only') {
+    numSolutions = 1;
+    untilZeroViolations = false;
+  }
   const totalBudget = timeBudget && timeBudget > 0 ? timeBudget : MILP_DEFAULT_TOTAL_TIME_BUDGET;
   const ctx = buildContext(config);
   const solutions = [];
@@ -740,6 +747,19 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
       let glpkFailure = null;
 
       console.log(`[Solver] === Solution ${i + 1}/${numSolutions} (seed=${seed}) ===`);
+
+      // Night-only manual mode: cover nights + fixed nurses, leave M/P blank
+      if (solverChoice === 'night_only' && !solved) {
+        progress(pctBase, `${batchLabel}Solo notti: copertura notturna (mattine/pomeriggi manuali)…`);
+        const nightOnlyStart = Date.now();
+        const result = solveNightOnly(config);
+        const nightOnlyElapsed = (Date.now() - nightOnlyStart) / 1000;
+        console.log(
+          `[Solver] Night-only solution: score=${result.score}, violations=${result.violations.length}, elapsed=${nightOnlyElapsed.toFixed(2)}s`
+        );
+        batchSolutions.push({ ...result, solverMethod: 'night_only' });
+        solved = true;
+      }
 
       // Night-first Pattern Beam planner
       if (solverChoice === 'night_first_pattern' && !solved) {
@@ -953,6 +973,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     progress(5, 'Pattern Beam selezionato manualmente…');
   } else if (solverChoice === 'night_first_pattern') {
     progress(5, 'Night-first Pattern Beam selezionato manualmente…');
+  } else if (solverChoice === 'night_only') {
+    progress(5, 'Modalità solo notti: copertura notturna, mattine/pomeriggi manuali…');
   } else if (solverChoice === 'fallback') {
     progress(5, 'Euristica selezionata manualmente…');
   } else {
