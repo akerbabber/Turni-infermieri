@@ -477,6 +477,10 @@ function patternStateEstimate(state, ctx) {
     score += mDef * mDef * 18 + pDef * pDef * 18 + nDefMin * nDefMin * 260 + nDefTarget * nDefTarget * 25;
     score += dDef * dDef * 18;
     score += mOver * mOver * 220 + pOver * pOver * 220 + nOver * nOver * 520 + dOver * dOver * 220;
+    // Saturation pressure: days should run close to the MAXIMUM coverage, not the
+    // minimum — that is what fills the monthly monte ore instead of leaving
+    // nurses with surplus rest days.
+    score += Math.max(0, ctx.maxCovM - state.covM[d]) * 3 + Math.max(0, ctx.maxCovP - state.covP[d]) * 3;
   }
   return score;
 }
@@ -739,7 +743,8 @@ function patternRowSoftCost(row, ctx, n) {
   const props = ctx.nurseProps[n];
   const hours = row.reduce((sum, shift) => sum + (SHIFT_HOURS[shift] || 0), 0);
   const target = ctx.monthlyTargetHours + (ctx.hourDeltas ? ctx.hourDeltas[n] || 0 : 0);
-  let cost = hours < target ? (target - hours) * 4 : (hours - target) * 2.5;
+  // Deficit hours weigh heavily: rows must fill the monthly monte ore.
+  let cost = hours < target ? (target - hours) * 6 : (hours - target) * 2.5;
 
   if (patternNightEligible(props)) {
     const nights = row.filter(shift => shift === 'N').length;

@@ -508,7 +508,9 @@ function computeScore(schedule, ctx) {
   for (let n = 0; n < numNurses; n++) {
     const target = monthlyTargetHours + (hourDeltas ? hourDeltas[n] || 0 : 0);
     const hourDiff = hours[n] - target;
-    soft += hourDiff < 0 ? Math.abs(hourDiff) * 5 : Math.abs(hourDiff) * 3;
+    // Deficit hours weigh more than surplus: the monthly monte ore must be met,
+    // extra shifts are always preferable to missing hours.
+    soft += hourDiff < 0 ? Math.abs(hourDiff) * 7 : Math.abs(hourDiff) * 3;
   }
 
   // Soft: night-count fairness
@@ -635,14 +637,15 @@ function computeScore(schedule, ctx) {
     if (consRest > MAX_CONSECUTIVE_REST) soft += (consRest - MAX_CONSECUTIVE_REST) * 14;
   }
 
-  // Soft: weekly rest should stay close to the minimum (target "solo 2 riposi"):
-  // one extra R above the weekly minimum is tolerated, more is penalized.
+  // Soft: weekly rest must stay AT the minimum ("solo 2 riposi"): every rest
+  // above the weekly minimum is penalized — the solver hands out extra shifts,
+  // never extra rest days (any surplus rest is a manual decision).
   if (minRPerWeek > 0) {
     for (let n = 0; n < numNurses; n++) {
       for (const wDays of weekDaysList) {
         const need = requiredRest(wDays.length, minRPerWeek);
         const have = countWeekRest(schedule, n, wDays);
-        if (have > need + 1) soft += (have - need - 1) * 6;
+        if (have > need) soft += (have - need) * 12;
       }
     }
   }

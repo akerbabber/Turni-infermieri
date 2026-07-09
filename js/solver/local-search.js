@@ -665,7 +665,9 @@ function repairDayCoverage(schedule, ctx) {
         const aDiff = Math.abs(aMp.m + (shiftType === 'M' ? 1 : 0) - (aMp.p + (shiftType === 'P' ? 1 : 0)));
         const bDiff = Math.abs(bMp.m + (shiftType === 'M' ? 1 : 0) - (bMp.p + (shiftType === 'P' ? 1 : 0)));
         if (aDiff !== bDiff) return aDiff - bDiff;
-        return (SHIFT_HOURS[repaired[a][d]] || 0) - (SHIFT_HOURS[repaired[b][d]] || 0);
+        // Prefer the nurse with the lowest monthly hours: extra shifts must go
+        // to whoever is furthest below the monte ore target.
+        return nurseHours(repaired, a, numDays) - nurseHours(repaired, b, numDays);
       });
     if (!candidates.length) return false;
     repaired[candidates[0]][d] = shiftType;
@@ -716,6 +718,29 @@ function repairDayCoverage(schedule, ctx) {
         continue;
       }
       if ((second === 'M' ? cov.M : cov.P) < (second === 'M' ? minCovM : minCovP) && convertWithinDay(d, second)) {
+        cov = dayCoverage(repaired, d, numNurses);
+        continue;
+      }
+      break;
+    }
+
+    // Saturation: convert surplus rests (above the weekly minimum — the guard is
+    // inside canPromoteRest) into EXTRA SHIFTS up to the maximum coverage. The
+    // solver must hand out extra work, never extra rest days: this is what keeps
+    // the monthly monte ore on target. D first (12.2h, biggest hour gain), then
+    // M/P toward whichever has more headroom.
+    while (cov.D < maxCovD && cov.M < maxCovM && cov.P < maxCovP) {
+      if (!promoteRestDay(d, 'D')) break;
+      cov = dayCoverage(repaired, d, numNurses);
+    }
+    while (cov.M < maxCovM || cov.P < maxCovP) {
+      const first = maxCovM - cov.M >= maxCovP - cov.P ? 'M' : 'P';
+      const second = first === 'M' ? 'P' : 'M';
+      if ((first === 'M' ? cov.M : cov.P) < (first === 'M' ? maxCovM : maxCovP) && promoteRestDay(d, first)) {
+        cov = dayCoverage(repaired, d, numNurses);
+        continue;
+      }
+      if ((second === 'M' ? cov.M : cov.P) < (second === 'M' ? maxCovM : maxCovP) && promoteRestDay(d, second)) {
         cov = dayCoverage(repaired, d, numNurses);
         continue;
       }
