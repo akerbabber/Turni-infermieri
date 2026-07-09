@@ -249,21 +249,19 @@ function construct(ctx) {
   function canNight(n, d) {
     if (schedule[n][d] !== null || nc[n] >= maxNights) return false;
     const noDiurni = nurseProps[n].noDiurni;
+    // Every profile needs the 3-day block N-S-R; the second R is optional and
+    // never placed automatically (rest beyond 2 consecutive days is avoided).
     if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
     if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
-    // For regular nurses (including diurni_e_notturni): need 2 R after N-S (total 4 slots: N-S-R-R)
-    // For noDiurni nurses: need only 1 R after N-S (total 3 slots: N-S-R)
-    if (!noDiurni && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
 
     // Cannot start night if we're still in mandatory post-night rest period
     // Check backward: if previous day is S, we're at first R position (cannot start night)
     if (d > 0 && schedule[n][d - 1] === 'S') return false;
-    // If d-1 is R and d-2 is S, we're at second R position (mandatory for non-noDiurni)
+    // Right after an N-S-R block a new night would have no valid lead-in
     if (d > 1 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'S') return false;
     // noDiurni nurses need at least two M/P workdays before a new night can start,
     // matching the shortest allowed lead-in patterns before N (M-P, M-M, P-P).
     if (noDiurni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
-    // After N-S-R-R (4 days), day 5 is free to start a new night
     return true;
   }
 
@@ -271,30 +269,21 @@ function construct(ctx) {
     schedule[n][d] = 'N';
     if (d + 1 < numDays) schedule[n][d + 1] = 'S';
     if (d + 2 < numDays) schedule[n][d + 2] = 'R';
-    // For diurni_e_notturni and regular nurses: 2 R after smonto
-    // For noDiurni nurses: only 1 R after smonto
-    if (!nurseProps[n].noDiurni && d + 3 < numDays) {
-      schedule[n][d + 3] = 'R';
-    }
     nc[n]++;
   }
 
   // 2a — Ensure minimum night coverage per day (with smart spreading)
   const nightStarts = new Array(numDays).fill(0);
 
-  // Calculate optimal spacing per nurse based on their block size:
-  // noDiurni nurses need N-S-R (3 days), others need N-S-R-R (4 days)
-  // Cycle length = block size + 1 (minimum gap between night shift starts)
+  // Calculate optimal spacing per nurse: every profile uses the 3-day N-S-R
+  // block; noDiurni nurses additionally need two M/P lead-in workdays before the
+  // next night (cycle 5), the others just one lead-in day (cycle 4).
 
   // Assign initial starting offsets to spread nurses across the cycle
-  // Use nurse-specific cycle lengths for better spreading
   const nurseStartOffset = new Map();
   const nurseCycleLen = new Map();
   nightEligible.forEach((n, idx) => {
-    const nBlock = nurseProps[n].noDiurni ? 3 : 4;
-    // noDiurni nurses use N-S-R plus at least two M/P workdays before the next night,
-    // so their practical night-start cycle is 5 days instead of block-size + 1.
-    const nCycle = nurseProps[n].noDiurni ? 5 : nBlock + 1;
+    const nCycle = nurseProps[n].noDiurni ? 5 : 4;
     nurseCycleLen.set(n, nCycle);
     nurseStartOffset.set(n, idx % nCycle);
   });
@@ -376,9 +365,8 @@ function construct(ctx) {
         if (prev === 'R' && d > 1 && schedule[n][d - 2] === 'S') continue; // Second R after N-S, mandatory
       }
 
-      // Check if we can clear the required slots
-      const noDiurni = nurseProps[n].noDiurni;
-      const needSlots = noDiurni ? 3 : 4;
+      // Check if we can clear the required slots (N-S-R for every profile)
+      const needSlots = 3;
       if (d + needSlots > numDays) continue;
 
       let canClear = true;
@@ -463,9 +451,8 @@ function construct(ctx) {
       // Find nurse with most nights to remove
       nightNurses.sort((a, b) => nc[b] - nc[a]);
       const n = nightNurses.shift();
-      // Clear N-S-R-R block (set to null to be filled later by day shift phase)
-      const noDiurni = nurseProps[n].noDiurni;
-      const needSlots = noDiurni ? 3 : 4;
+      // Clear the N-S-R block (set to null to be filled later by day shift phase)
+      const needSlots = 3;
       for (let i = 0; i < needSlots && d + i < numDays; i++) {
         if (!pinned[n][d + i]) schedule[n][d + i] = null;
       }
@@ -708,7 +695,7 @@ function construct(ctx) {
         fillNoDiurniNightPattern(n, d);
       } else if (nurseProps[n].diurniENotturni) {
         fillPostNightWork(n, d - 1, 'D');
-        fillPostNightWork(n, d + 4, 'D');
+        fillPostNightWork(n, d + 3, 'D');
       }
     }
   }

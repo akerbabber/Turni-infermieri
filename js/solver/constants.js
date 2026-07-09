@@ -29,6 +29,7 @@ const FASCIA_SHIFT_END = {
 const DEBUG = false; // Set to true for verbose solver logging
 
 const EQUITY_THRESHOLD_HOURS = 2; // ±hours from average before equity move triggers
+const MAX_CONSECUTIVE_REST = 2; // more than 2 consecutive R days must be avoided
 const MONTHLY_HOURS_PER_WEEKDAY = 7.12;
 
 // Weight applied to under-minimum coverage (below the required minimum staffing).

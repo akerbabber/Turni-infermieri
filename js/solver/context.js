@@ -86,6 +86,9 @@ function buildContext(config) {
   const preferDiurni = rules.preferDiurni ?? false;
   const coppiaTurni = rules.coppiaTurni ?? null;
   const consente2D = rules.consente2DiurniConsecutivi ?? false;
+  // Night on-call: each day with nights tomorrow needs a nurse on M/D today
+  // whose next-day shift is N. Off unless explicitly enabled by the rules.
+  const reperibileNotturno = rules.reperibileNotturno ?? false;
 
   // Pre-compute pinned cells (absences + solo_mattine)
   // pinned[n][d] = shift code or null
@@ -118,21 +121,14 @@ function buildContext(config) {
       if (!tail || tail.length === 0) continue;
       const last = tail[tail.length - 1];
       const secondLast = tail.length >= 2 ? tail[tail.length - 2] : null;
-      const thirdLast = tail.length >= 3 ? tail[tail.length - 3] : null;
-      const noDiurni = nurseProps[n].noDiurni;
 
       if (last === 'N') {
-        // N on last day → need S, R at start; second R for non-noDiurni nurses
+        // N on last day → need S, R at start (the second R is always optional)
         if (!pinned[n][0]) pinned[n][0] = 'S';
         if (numDays > 1 && !pinned[n][1]) pinned[n][1] = 'R';
-        if (!noDiurni && numDays > 2 && !pinned[n][2]) pinned[n][2] = 'R';
       } else if (last === 'S' && secondLast === 'N') {
-        // N-S on last two days → need R, R at start
+        // N-S on last two days → need R at start
         if (!pinned[n][0]) pinned[n][0] = 'R';
-        if (!noDiurni && numDays > 1 && !pinned[n][1]) pinned[n][1] = 'R';
-      } else if (last === 'R' && secondLast === 'S' && thirdLast === 'N') {
-        // N-S-R on last three days → need second R for non-noDiurni
-        if (!noDiurni && !pinned[n][0]) pinned[n][0] = 'R';
       }
 
       // D-D continuation: when consente2D is enabled and prev month ends with D-D,
@@ -178,6 +174,7 @@ function buildContext(config) {
     preferDiurni,
     coppiaTurni,
     consente2D,
+    reperibileNotturno,
     monthlyTargetHours,
     hourDeltas: hourDeltas || null,
     prevTail,
@@ -191,7 +188,12 @@ function getAbsenceShift(nurse, day1Based, year, month) {
     const period = nurse.absencePeriods[tagKey];
     if (period && period.start && period.end) {
       const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(day1Based).padStart(2, '0')}`;
-      if (ds >= period.start && ds <= period.end) return shiftCode;
+      if (ds >= period.start && ds <= period.end) {
+        // Ferie consume 5 working days per week: Saturdays and Sundays inside a
+        // vacation period count as plain rest days, not as vacation.
+        if (tagKey === 'ferie' && isWeekend(year, month, day1Based)) return 'R';
+        return shiftCode;
+      }
     } else {
       return shiftCode;
     }

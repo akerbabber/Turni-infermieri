@@ -10,6 +10,7 @@
 /* global getRestPromotionPriority, isForbiddenExtraNightRestDay, isForbiddenRestrictedNoDiurniRestDay */
 /* global getNightPatternInfo, isMPCycleLimitedNurse, isMandatoryNightRestDay, nightCount */
 /* global isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk, patternShiftAllowed */
+/* global hasNightTomorrow, findReperibile */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
@@ -186,11 +187,11 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     const beforePass = repaired.map(row => row.join('|')).join('\n');
     repaired = repairNightCoverage(repaired, ctx);
     repaired = repairNightLeadIns(repaired, ctx);
-    repaired = repairNightRestContinuity(repaired, ctx);
     repaired = repairForbiddenExtraNightRest(repaired, ctx);
     repaired = repairForbiddenRestrictedNoDiurniRest(repaired, ctx);
     repaired = repairSplitRestDays(repaired, ctx);
     repaired = repairDayCoverage(repaired, ctx);
+    repaired = repairReperibile(repaired, ctx);
     repaired = repairWeeklyRestDeficits(repaired, ctx);
     if (repaired.map(row => row.join('|')).join('\n') === beforePass) break;
   }
@@ -446,10 +447,10 @@ function relocateNightBlock(schedule, ctx, nurseIdx, oldStart, newStart) {
 }
 
 function getNightBlockDays(start, noDiurni, numDays) {
+  // Every profile uses the 3-day N-S-R block (the second R is always optional).
   const days = [start];
   if (start + 1 < numDays) days.push(start + 1);
   if (start + 2 < numDays) days.push(start + 2);
-  if (!noDiurni && start + 3 < numDays) days.push(start + 3);
   return days;
 }
 
@@ -457,7 +458,46 @@ function placeNightBlock(schedule, nurseIdx, start, noDiurni, numDays) {
   schedule[nurseIdx][start] = 'N';
   if (start + 1 < numDays) schedule[nurseIdx][start + 1] = 'S';
   if (start + 2 < numDays) schedule[nurseIdx][start + 2] = 'R';
-  if (!noDiurni && start + 3 < numDays) schedule[nurseIdx][start + 3] = 'R';
+}
+
+/**
+ * Fix missing night on-calls (reperibile notturno): a day with nights tomorrow
+ * needs a nurse working M or D today whose next-day shift is N. The repair swaps
+ * M↔P on the same day (coverage neutral) so that a nurse with tomorrow's night
+ * gets the morning shift today.
+ */
+function repairReperibile(schedule, ctx) {
+  if (!ctx.reperibileNotturno) return schedule;
+  const { numDays, numNurses } = ctx;
+  const repaired = deepCopy(schedule);
+
+  for (let d = 0; d < numDays - 1; d++) {
+    if (!hasNightTomorrow(repaired, d, numNurses)) continue;
+    if (findReperibile(repaired, d, numNurses) !== -1) continue;
+    // Candidate: a nurse with P today and N tomorrow, to be flipped to M by
+    // swapping with a same-day M of another nurse.
+    let done = false;
+    for (let x = 0; x < numNurses && !done; x++) {
+      if (repaired[x][d] !== 'P' || repaired[x][d + 1] !== 'N') continue;
+      for (let y = 0; y < numNurses && !done; y++) {
+        if (y === x || repaired[y][d] !== 'M') continue;
+        if (!canRepairShiftChange(repaired, ctx, x, d, 'M')) break;
+        if (!canRepairShiftChange(repaired, ctx, y, d, 'P')) continue;
+        const currentScore = computeScore(repaired, ctx);
+        const candidate = deepCopy(repaired);
+        candidate[x][d] = 'M';
+        candidate[y][d] = 'P';
+        const score = computeScore(candidate, ctx);
+        if (score.hard < currentScore.hard || (score.hard === currentScore.hard && score.total <= currentScore.total)) {
+          repaired[x][d] = 'M';
+          repaired[y][d] = 'P';
+          done = true;
+        }
+      }
+    }
+  }
+
+  return repaired;
 }
 
 /**
@@ -485,28 +525,6 @@ function repairNightLeadIns(schedule, ctx) {
       }
     }
   }
-  return repaired;
-}
-
-function repairNightRestContinuity(schedule, ctx) {
-  const { numDays, numNurses, pinned, nurseProps, minCovM, minCovP } = ctx;
-  const repaired = deepCopy(schedule);
-
-  for (let n = 0; n < numNurses; n++) {
-    if (nurseProps[n].noDiurni) continue;
-    for (let d = 0; d < numDays - 3; d++) {
-      if (repaired[n][d] !== 'N' || repaired[n][d + 1] !== 'S' || repaired[n][d + 2] !== 'R') continue;
-      if (repaired[n][d + 3] === 'R' || pinned[n][d + 3]) continue;
-      const shift = repaired[n][d + 3];
-      const cov = dayCoverage(repaired, d + 3, numNurses);
-      if (shift === 'M' && cov.M <= minCovM) continue;
-      if (shift === 'P' && cov.P <= minCovP) continue;
-      if (shift === 'D' && (cov.M <= minCovM || cov.P <= minCovP)) continue;
-      if (!canRepairShiftChange(repaired, ctx, n, d + 3, 'R')) continue;
-      repaired[n][d + 3] = 'R';
-    }
-  }
-
   return repaired;
 }
 
@@ -1004,23 +1022,6 @@ function repairWeeklyRestDeficits(schedule, ctx) {
             for (let d = a; d <= b; d++) {
               candidate[n][d] = repaired[o][d];
               candidate[o][d] = repaired[n][d];
-            }
-            // Ownership of night blocks changed: a nurse that requires the full
-            // N-S-R-R tail may have inherited a short N-S-R one. Complete those
-            // tails in place so the candidate is not rejected for a fixable reason.
-            for (const x of [n, o]) {
-              if (nurseProps[x].noDiurni) continue;
-              for (let d = Math.max(0, a - 3); d <= Math.min(b, ctx.numDays - 4); d++) {
-                if (
-                  candidate[x][d] === 'N' &&
-                  candidate[x][d + 1] === 'S' &&
-                  candidate[x][d + 2] === 'R' &&
-                  candidate[x][d + 3] !== 'R' &&
-                  canRepairShiftChange(candidate, ctx, x, d + 3, 'R')
-                ) {
-                  candidate[x][d + 3] = 'R';
-                }
-              }
             }
             const score = computeScore(candidate, ctx);
             if (

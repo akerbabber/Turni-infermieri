@@ -91,23 +91,19 @@ function hasForbiddenExtraNightRest(schedule, ctx, nurseIdx, nightDayIdx) {
   );
 }
 
-// Detect mandatory rest days inside an N-S-R-R block:
-// - the first R immediately after S is always locked
-// - the second R after N-S-R is also locked for nurses who are not noDiurni
+// Detect the mandatory rest day of a night block: only the first R immediately
+// after S is locked. The second R after N-S-R is ALLOWED but never mandatory
+// (per updated contract rules) — see isOptionalRestAfterNSR.
 function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
   if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
   if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
-  const prev1 = getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1);
-  const prev2 = getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2);
-  if (prev1 === 'S') return true;
-  return !ctx.nurseProps[nurseIdx].noDiurni && prev1 === 'R' && prev2 === 'S';
+  return getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'S';
 }
 
+// The second R after N-S-R: allowed for every profile, required by none.
 function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
   if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
   if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
-  const props = ctx.nurseProps[nurseIdx];
-  if (!isRestrictedNoDiurniNightNurse(props)) return false;
   return (
     getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'R' &&
     getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2) === 'S' &&
@@ -347,6 +343,28 @@ function getNightPatternInfo(schedule, ctx, nurseIdx, nightDayIdx) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Reperibile notturno (night on-call) helpers
+// ---------------------------------------------------------------------------
+
+// True when at least one nurse works a night on day d+1.
+function hasNightTomorrow(schedule, d, numNurses) {
+  for (let n = 0; n < numNurses; n++) {
+    if (schedule[n][d + 1] === 'N') return true;
+  }
+  return false;
+}
+
+// The night on-call for day d: a nurse working the morning (M or D) on day d
+// whose next-day shift is a night. Returns the nurse index or -1.
+function findReperibile(schedule, d, numNurses) {
+  for (let n = 0; n < numNurses; n++) {
+    const today = schedule[n][d];
+    if ((today === 'M' || today === 'D') && schedule[n][d + 1] === 'N') return n;
+  }
+  return -1;
+}
+
 /**
  * True when assigning `newShift` at (n, d) would NOT break the currently-valid
  * lead-in of a night up to 3 days later (no_diurni nurses need an M/P sequence
@@ -451,19 +469,8 @@ function computeScore(schedule, ctx) {
       // S must be followed by R
       if (cur === 'S' && nxt !== 'R') hard++;
     }
-    // N-S-R-R: second R required (except no_diurni nurses need only 1 R),
-    // including night blocks that started in the previous month tail.
-    for (let d = ctx.prevTail ? -3 : 0; d < numDays - 3; d++) {
-      if (
-        getShiftAt(schedule, ctx, n, d) === 'N' &&
-        getShiftAt(schedule, ctx, n, d + 1) === 'S' &&
-        getShiftAt(schedule, ctx, n, d + 2) === 'R' &&
-        !nurseProps[n].noDiurni &&
-        getShiftAt(schedule, ctx, n, d + 3) !== 'R'
-      ) {
-        hard++;
-      }
-    }
+    // Note: the second R after N-S-R is optional for every profile (allowed but
+    // never required), so no hard penalty is applied here anymore.
     // D-D must be followed by R; no 3 consecutive D
     if (consente2D) {
       for (let d = 1; d < numDays - 1; d++) {
@@ -613,19 +620,41 @@ function computeScore(schedule, ctx) {
     }
   }
 
-  // Soft: penalize excessive rest islands (> 4 consecutive R/S) (Improvement #8)
-  const MAX_REST_ISLAND = 4;
+  // Soft: more than 2 consecutive R days must be avoided (smonto S excluded —
+  // S,R,R after a night is fine, R,R,R is not).
   for (let n = 0; n < numNurses; n++) {
     let consRest = 0;
     for (let d = 0; d < numDays; d++) {
-      if (schedule[n][d] === 'R' || schedule[n][d] === 'S') {
+      if (schedule[n][d] === 'R') {
         consRest++;
       } else {
-        if (consRest > MAX_REST_ISLAND) soft += (consRest - MAX_REST_ISLAND) * 10;
+        if (consRest > MAX_CONSECUTIVE_REST) soft += (consRest - MAX_CONSECUTIVE_REST) * 14;
         consRest = 0;
       }
     }
-    if (consRest > MAX_REST_ISLAND) soft += (consRest - MAX_REST_ISLAND) * 10;
+    if (consRest > MAX_CONSECUTIVE_REST) soft += (consRest - MAX_CONSECUTIVE_REST) * 14;
+  }
+
+  // Soft: weekly rest should stay close to the minimum (target "solo 2 riposi"):
+  // one extra R above the weekly minimum is tolerated, more is penalized.
+  if (minRPerWeek > 0) {
+    for (let n = 0; n < numNurses; n++) {
+      for (const wDays of weekDaysList) {
+        const need = requiredRest(wDays.length, minRPerWeek);
+        const have = countWeekRest(schedule, n, wDays);
+        if (have > need + 1) soft += (have - need - 1) * 6;
+      }
+    }
+  }
+
+  // Hard: reperibile notturno — every day with nights scheduled tomorrow must
+  // have at least one nurse working the morning (M or D) today AND the night
+  // tomorrow, so they can be designated as the night on-call.
+  if (ctx.reperibileNotturno) {
+    for (let d = 0; d < numDays - 1; d++) {
+      if (!hasNightTomorrow(schedule, d, numNurses)) continue;
+      if (findReperibile(schedule, d, numNurses) === -1) hard++;
+    }
   }
 
   return { hard, soft, total: hard * 1000 + soft };
@@ -791,25 +820,7 @@ function collectViolations(schedule, ctx) {
           msg: `Infermiere ${n + 1}, giorno ${d + 1}: S non seguito da R (primo riposo dopo smonto)`,
         });
     }
-    for (let d = ctx.prevTail ? -3 : 0; d < numDays - 3; d++) {
-      if (
-        getShiftAt(schedule, ctx, n, d) === 'N' &&
-        getShiftAt(schedule, ctx, n, d + 1) === 'S' &&
-        getShiftAt(schedule, ctx, n, d + 2) === 'R' &&
-        !nurseProps[n].noDiurni &&
-        getShiftAt(schedule, ctx, n, d + 3) !== 'R'
-      ) {
-        violations.push({
-          nurse: n,
-          day: d < 0 ? -1 : d,
-          type: 'need_2R_after_night',
-          msg:
-            d < 0
-              ? `Infermiere ${n + 1}, confine mese: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)`
-              : `Infermiere ${n + 1}, giorno ${d + 1}: dopo N-S-R serve un altro R (2 riposi dopo notte, S non conta)`,
-        });
-      }
-    }
+    // The second R after N-S-R is optional for every profile: no violation.
     if (consente2D) {
       for (let d = 1; d < numDays - 1; d++) {
         if (schedule[n][d - 1] === 'D' && schedule[n][d] === 'D' && schedule[n][d + 1] !== 'R')
@@ -942,34 +953,40 @@ function collectViolations(schedule, ctx) {
     }
   }
 
-  // Improvement #8: isola_di_riposo violations
-  const MAX_REST_ISLAND_V = 4;
+  // Isole di riposo: more than 2 consecutive R days (S excluded) must be avoided.
   for (let n = 0; n < numNurses; n++) {
     let consRest = 0;
     let islandStart = 0;
-    for (let d = 0; d < numDays; d++) {
-      if (schedule[n][d] === 'R' || schedule[n][d] === 'S') {
+    for (let d = 0; d <= numDays; d++) {
+      if (d < numDays && schedule[n][d] === 'R') {
         if (consRest === 0) islandStart = d;
         consRest++;
       } else {
-        if (consRest > MAX_REST_ISLAND_V) {
+        if (consRest > MAX_CONSECUTIVE_REST) {
           violations.push({
             type: 'isola_di_riposo',
             nurse: n,
             day: islandStart,
-            msg: `${ctx.nurses[n].name}: ${consRest} riposi consecutivi dal giorno ${islandStart + 1}`,
+            msg: `${ctx.nurses[n].name}: ${consRest} riposi consecutivi dal giorno ${islandStart + 1} (max 2)`,
           });
         }
         consRest = 0;
       }
     }
-    if (consRest > MAX_REST_ISLAND_V) {
-      violations.push({
-        type: 'isola_di_riposo',
-        nurse: n,
-        day: islandStart,
-        msg: `${ctx.nurses[n].name}: ${consRest} riposi consecutivi dal giorno ${islandStart + 1}`,
-      });
+  }
+
+  // Reperibile notturno: a day with nights tomorrow needs a nurse on M/D today
+  // with N tomorrow to serve as the night on-call.
+  if (ctx.reperibileNotturno) {
+    for (let d = 0; d < numDays - 1; d++) {
+      if (!hasNightTomorrow(schedule, d, numNurses)) continue;
+      if (findReperibile(schedule, d, numNurses) === -1) {
+        violations.push({
+          type: 'reperibile_mancante',
+          day: d,
+          msg: `Giorno ${d + 1}: nessun reperibile notturno (serve un infermiere con mattina/diurno oggi e notte domani)`,
+        });
+      }
     }
   }
 

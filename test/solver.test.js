@@ -1080,10 +1080,13 @@ describe('construct', () => {
     });
     const bctx = ctx.buildContext(config);
     const schedule = ctx.construct(bctx);
-    // Days 0-4 (Jan 1-5) should be 'F' for nurse 0
-    for (let d = 0; d < 5; d++) {
+    // Jan 1-3 2025 (Wed-Fri) are ferie working days → F; Jan 4-5 (Sat-Sun)
+    // fall inside the vacation period but weekends count as plain rest → R.
+    for (let d = 0; d < 3; d++) {
       assert.equal(schedule[0][d], 'F', `Nurse 0 day ${d} should be F (ferie), got ${schedule[0][d]}`);
     }
+    assert.equal(schedule[0][3], 'R', 'Saturday inside ferie should be R');
+    assert.equal(schedule[0][4], 'R', 'Sunday inside ferie should be R');
   });
 
   it('should spread extra night shifts according to the monthly target instead of saturating max coverage', () => {
@@ -1910,12 +1913,14 @@ describe('localSearch mandatory night-rest protection', () => {
     let step = 0;
     Math.random = () => {
       step++;
-      return step === 1 ? 0.11 : 0.1;
+      return step === 1 ? 0.07 : 0.1; // day 2 (first R after S), nurse 0
     };
     try {
-      assert.equal(ctx.isMandatoryNightRestDay(schedule, bctx, 0, 3), true);
+      // Only the first R (right after S) is mandatory; the second R is optional.
+      assert.equal(ctx.isMandatoryNightRestDay(schedule, bctx, 0, 2), true);
+      assert.equal(ctx.isMandatoryNightRestDay(schedule, bctx, 0, 3), false);
       assert.equal(ctx.tryChangeMove(schedule, bctx, changes), false);
-      assert.equal(schedule[0][3], 'R');
+      assert.equal(schedule[0][2], 'R');
     } finally {
       Math.random = origRandom;
     }
@@ -1944,20 +1949,20 @@ describe('localSearch mandatory night-rest protection', () => {
     schedule[0][1] = 'S';
     schedule[0][2] = 'R';
     schedule[0][3] = 'R';
-    schedule[1][3] = 'M';
+    schedule[1][2] = 'M';
     const changes = [];
     const origRandom = Math.random;
     let step = 0;
     Math.random = () => {
       step++;
-      if (step === 1) return 0.11; // day 3
+      if (step === 1) return 0.07; // day 2 (first R after S)
       if (step === 2) return 0.1; // nurse 0
       return 0.6; // nurse 1
     };
     try {
       assert.equal(ctx.trySwapMove(schedule, bctx, changes), false);
-      assert.equal(schedule[0][3], 'R');
-      assert.equal(schedule[1][3], 'M');
+      assert.equal(schedule[0][2], 'R');
+      assert.equal(schedule[1][2], 'M');
     } finally {
       Math.random = origRandom;
     }
@@ -1992,8 +1997,8 @@ describe('localSearch mandatory night-rest protection', () => {
     const origRandom = Math.random;
     Math.random = () => 0.1; // pick nurse 0
     try {
-      assert.equal(ctx.tryEquityMove(schedule, bctx, changes, cachedHours, [3]), false);
-      assert.equal(schedule[0][3], 'R');
+      assert.equal(ctx.tryEquityMove(schedule, bctx, changes, cachedHours, [2]), false);
+      assert.equal(schedule[0][2], 'R');
     } finally {
       Math.random = origRandom;
     }
@@ -2108,13 +2113,14 @@ describe('buildContext with previousMonthTail', () => {
     assert.equal(bctx.prevTail, null);
   });
 
-  it('should pin S on day 0 when previous month ends with N', () => {
+  it('should pin S on day 0 when previous month ends with N (second R optional)', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
     config.previousMonthTail = [['M', 'P', 'N'], null];
     const bctx = ctx.buildContext(config);
     assert.equal(bctx.pinned[0][0], 'S');
     assert.equal(bctx.pinned[0][1], 'R');
-    assert.equal(bctx.pinned[0][2], 'R');
+    // The second R after N-S-R is optional for every profile: not pinned.
+    assert.equal(bctx.pinned[0][2], null);
   });
 
   it('should pin R on day 0 when previous month ends with N-S', () => {
@@ -2122,14 +2128,14 @@ describe('buildContext with previousMonthTail', () => {
     config.previousMonthTail = [['R', 'N', 'S'], null];
     const bctx = ctx.buildContext(config);
     assert.equal(bctx.pinned[0][0], 'R');
-    assert.equal(bctx.pinned[0][1], 'R');
+    assert.equal(bctx.pinned[0][1], null);
   });
 
-  it('should pin R on day 0 when previous month ends with N-S-R (non-noDiurni)', () => {
+  it('should not pin day 0 when previous month ends with N-S-R (block complete)', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
     config.previousMonthTail = [['N', 'S', 'R'], null];
     const bctx = ctx.buildContext(config);
-    assert.equal(bctx.pinned[0][0], 'R');
+    assert.equal(bctx.pinned[0][0], null);
   });
 
   it('should not pin extra R for noDiurni nurse when ending with N-S-R', () => {
@@ -2286,7 +2292,7 @@ describe('collectViolations with previousMonthTail', () => {
     assert.ok(boundaryViolations[0].msg.includes('confine mese'));
   });
 
-  it('should report missing second rest after a boundary night block', () => {
+  it('should NOT report a missing second rest after a boundary night block (optional)', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
     config.previousMonthTail = [['M', 'P', 'N'], null];
     const bctx = ctx.buildContext(config);
@@ -2295,9 +2301,11 @@ describe('collectViolations with previousMonthTail', () => {
     schedule[0][1] = 'R';
     schedule[0][2] = 'M';
     const violations = ctx.collectViolations(schedule, bctx);
-    const boundaryNightRest = violations.find(v => v.type === 'need_2R_after_night');
-    assert.ok(boundaryNightRest, 'Expected a boundary second-rest violation to be reported');
-    assert.match(boundaryNightRest.msg, /confine mese/);
+    assert.equal(
+      violations.some(v => v.type === 'need_2R_after_night'),
+      false,
+      'The second rest after N-S-R is optional: no violation expected'
+    );
   });
 });
 
@@ -2324,7 +2332,8 @@ describe('buildContext with 5-day previousMonthTail', () => {
     const bctx = ctx.buildContext(config);
     assert.equal(bctx.pinned[0][0], 'S');
     assert.equal(bctx.pinned[0][1], 'R');
-    assert.equal(bctx.pinned[0][2], 'R');
+    // The second R after N-S-R is optional: not pinned.
+    assert.equal(bctx.pinned[0][2], null);
   });
 
   it('should not pin when 5-day tail shows completed N-S-R-R pattern', () => {
@@ -2335,20 +2344,20 @@ describe('buildContext with 5-day previousMonthTail', () => {
     assert.equal(bctx.pinned[0][0], null);
   });
 
-  it('should pin R on day 0 with 5-day tail ending in N-S-R', () => {
+  it('should not pin day 0 with 5-day tail ending in N-S-R (block complete)', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
     config.previousMonthTail = [['M', 'P', 'N', 'S', 'R'], null];
     const bctx = ctx.buildContext(config);
-    // N-S-R needs one more R
-    assert.equal(bctx.pinned[0][0], 'R');
+    // N-S-R is a complete block: the second R is optional.
+    assert.equal(bctx.pinned[0][0], null);
   });
 
-  it('should pin R, R on day 0-1 with 5-day tail ending in N-S', () => {
+  it('should pin R on day 0 with 5-day tail ending in N-S', () => {
     const config = makeMinimalConfig({ numNurses: 2 });
     config.previousMonthTail = [['M', 'P', 'R', 'N', 'S'], null];
     const bctx = ctx.buildContext(config);
     assert.equal(bctx.pinned[0][0], 'R');
-    assert.equal(bctx.pinned[0][1], 'R');
+    assert.equal(bctx.pinned[0][1], null);
   });
 });
 

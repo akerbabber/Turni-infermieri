@@ -210,6 +210,90 @@ describe('D (diurno) coverage enforcement', () => {
   });
 });
 
+describe('nuove regole riposi e notti', () => {
+  it('non segnala violazione quando N-S-R è seguito da lavoro (secondo R opzionale)', () => {
+    const bctx = ctx.buildContext(makeConfig({}));
+    const schedule = emptySchedule(bctx);
+    schedule[0][0] = 'M';
+    schedule[0][1] = 'P';
+    schedule[0][2] = 'N';
+    schedule[0][3] = 'S';
+    schedule[0][4] = 'R';
+    schedule[0][5] = 'M'; // lavoro subito dopo N-S-R: consentito
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(!violations.some(v => v.type === 'need_2R_after_night'));
+  });
+
+  it('segnala isola_di_riposo con più di 2 R consecutivi (S escluso)', () => {
+    const bctx = ctx.buildContext(makeConfig({}));
+    const schedule = emptySchedule(bctx, 'M');
+    schedule[0][10] = 'R';
+    schedule[0][11] = 'R';
+    schedule[0][12] = 'R'; // 3 R consecutivi → violazione
+    schedule[1][10] = 'N';
+    schedule[1][11] = 'S';
+    schedule[1][12] = 'R';
+    schedule[1][13] = 'R'; // S-R-R: solo 2 R → nessuna violazione
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(violations.some(v => v.type === 'isola_di_riposo' && v.nurse === 0));
+    assert.ok(!violations.some(v => v.type === 'isola_di_riposo' && v.nurse === 1));
+  });
+});
+
+describe('ferie con weekend a riposo', () => {
+  it('pinna F nei feriali e R nei weekend dentro il periodo ferie', () => {
+    // Aprile 2026: 4-5 aprile = sabato e domenica
+    const config = makeConfig({
+      nurseOverrides: {
+        0: {
+          tags: ['ferie'],
+          absencePeriods: { ferie: { start: '2026-04-01', end: '2026-04-07' } },
+        },
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    assert.equal(bctx.pinned[0][0], 'F'); // mer 1
+    assert.equal(bctx.pinned[0][1], 'F'); // gio 2
+    assert.equal(bctx.pinned[0][2], 'F'); // ven 3
+    assert.equal(bctx.pinned[0][3], 'R'); // sab 4
+    assert.equal(bctx.pinned[0][4], 'R'); // dom 5
+    assert.equal(bctx.pinned[0][5], 'F'); // lun 6
+    assert.equal(bctx.pinned[0][6], 'F'); // mar 7
+  });
+});
+
+describe('reperibile notturno', () => {
+  it('segnala reperibile_mancante quando nessuno ha M/D oggi e N domani', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true } }));
+    const schedule = emptySchedule(bctx);
+    schedule[0][5] = 'P'; // pomeriggio, non vale come mattina
+    schedule[0][6] = 'N';
+    schedule[0][7] = 'S';
+    schedule[0][8] = 'R';
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(violations.some(v => v.type === 'reperibile_mancante' && v.day === 5));
+    assert.ok(ctx.computeScore(schedule, bctx).hard > 0);
+  });
+
+  it('è soddisfatto da un infermiere con M (o D) oggi e N domani', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true } }));
+    const schedule = emptySchedule(bctx);
+    schedule[0][5] = 'M';
+    schedule[0][6] = 'N';
+    schedule[0][7] = 'S';
+    schedule[0][8] = 'R';
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(!violations.some(v => v.type === 'reperibile_mancante'));
+  });
+
+  it('non richiede nulla nei giorni senza notti il giorno dopo', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true } }));
+    const schedule = emptySchedule(bctx); // nessuna notte in tutto il mese
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(!violations.some(v => v.type === 'reperibile_mancante'));
+  });
+});
+
 describe('coppia sync respects pinned cells', () => {
   it('does not overwrite the absence of the paired nurse', () => {
     const config = makeConfig({

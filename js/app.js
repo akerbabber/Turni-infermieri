@@ -192,6 +192,7 @@ const DEFAULT_RULES = {
   coppiaTurni: null, // Array of 2 nurse indices [n1, n2] to have same shifts, or null
   consentePomeriggioDiurno: false, // Allow P→D transition
   consente2DiurniConsecutivi: false, // Allow D-D but require R after
+  reperibileNotturno: true, // Night on-call: M/D today + N tomorrow required each day
   fasciaOraria: 'standard', // 'standard' (6+12) or '7-10' (7+10)
 };
 
@@ -891,6 +892,10 @@ function renderStep2() {
   // New toggles for additional rules
   bindToggle('tog-consente-pom-diurno', r.consentePomeriggioDiurno, v => {
     state.rules.consentePomeriggioDiurno = v;
+    saveState();
+  });
+  bindToggle('tog-reperibile-notturno', r.reperibileNotturno, v => {
+    state.rules.reperibileNotturno = v;
     saveState();
   });
   bindToggle('tog-consente-2d', r.consente2DiurniConsecutivi, v => {
@@ -2304,6 +2309,38 @@ function renderStep4() {
   }
   bodyHTML += `<td class="stats-col"></td></tr>`;
 
+  // Reperibile notturno row: the nurse on M/D today with a night tomorrow
+  if (state.rules.reperibileNotturno) {
+    const activeNurses = state.nurses.slice(0, numNurses);
+    bodyHTML += `<tr class="coverage-row">`;
+    bodyHTML += `<td class="text-xs font-semibold">REPERIBILE</td>`;
+    for (let d = 0; d < numDays; d++) {
+      const wk = isWeekend(state.year, state.month, d + 1);
+      let repName = '';
+      let missing = false;
+      if (d < numDays - 1) {
+        let nightTomorrow = false;
+        for (let n = 0; n < numNurses; n++) if (state.schedule[n][d + 1] === 'N') nightTomorrow = true;
+        if (nightTomorrow) {
+          missing = true;
+          for (let n = 0; n < numNurses; n++) {
+            const today = state.schedule[n][d];
+            if ((today === 'M' || today === 'D') && state.schedule[n][d + 1] === 'N') {
+              repName = activeNurses[n]?.name || `Inf. ${n + 1}`;
+              missing = false;
+              break;
+            }
+          }
+        }
+      }
+      const label = missing ? '⚠' : repName ? escHtml(repName.split(' ')[0]) : '';
+      bodyHTML += `<td class="${wk ? 'col-weekend' : ''}" title="${missing ? 'Nessun reperibile notturno' : escHtml(repName)}">
+        <div class="text-center ${missing ? 'cov-warn' : 'cov-ok'}" style="font-size:8px">${label}</div>
+      </td>`;
+    }
+    bodyHTML += `<td class="stats-col"></td></tr>`;
+  }
+
   // Build violations summary
   const vioSummaryHTML =
     state.violations.length > 0
@@ -2553,6 +2590,28 @@ function revalidate() {
         type: 'coverage_N_max',
         msg: `Giorno ${d + 1}: N eccessiva (${N}/${state.rules.maxCoverageN})`,
       });
+  }
+
+  // Reperibile notturno: a day with nights tomorrow needs a nurse on M/D today
+  // whose next-day shift is N.
+  if (state.rules.reperibileNotturno) {
+    for (let d = 0; d < numDays - 1; d++) {
+      let nightTomorrow = false;
+      let hasReperibile = false;
+      for (let n = 0; n < numNurses; n++) {
+        if (state.schedule[n][d + 1] === 'N') {
+          nightTomorrow = true;
+          const today = state.schedule[n][d];
+          if (today === 'M' || today === 'D') hasReperibile = true;
+        }
+      }
+      if (nightTomorrow && !hasReperibile)
+        violations.push({
+          day: d,
+          type: 'reperibile_mancante',
+          msg: `Giorno ${d + 1}: nessun reperibile notturno (mattina/diurno oggi + notte domani)`,
+        });
+    }
   }
 
   state.violations = violations;

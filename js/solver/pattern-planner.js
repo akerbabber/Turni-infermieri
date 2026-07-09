@@ -301,13 +301,9 @@ function withNightSkeletonPins(ctx) {
  * (the R days immediately following an N-S sequence).
  */
 function isSkeletonNightRest(skeleton, ctx, n, d) {
-  const noDiurni = ctx.nurseProps[n].noDiurni;
-  // First R after N-S: day d-1 is S and day d-2 is N.
-  if (d >= 2 && skeleton[n][d - 1] === 'S' && skeleton[n][d - 2] === 'N') return true;
-  // Second R after N-S-R (only for nurses requiring the full N-S-R-R block).
-  if (!noDiurni && d >= 3 && skeleton[n][d - 1] === 'R' && skeleton[n][d - 2] === 'S' && skeleton[n][d - 3] === 'N')
-    return true;
-  return false;
+  // Only the first R after N-S is part of the mandatory block (the second R is
+  // optional for every profile and stays free for the repairs to reassign).
+  return d >= 2 && skeleton[n][d - 1] === 'S' && skeleton[n][d - 2] === 'N';
 }
 
 function constructGreedyPatternSchedule(ctx, groups, individualCandidates) {
@@ -557,8 +553,8 @@ function getPatternFamilies(ctx, n) {
   }
 
   if (props.soloNotti) {
+    add('solo-notti-3', ['N', 'S', 'R']);
     add('solo-notti-4', ['N', 'S', 'R', 'R']);
-    add('solo-notti-5', ['N', 'S', 'R', 'R', 'R']);
     return families;
   }
 
@@ -583,7 +579,7 @@ function getPatternFamilies(ctx, n) {
     if (props.soloDiurni || props.diurniNoNotti || ctx.maxCovD > 0) {
       add('diurni-balanced', ['D', 'R', 'D', 'R', 'R']);
       add('diurni-light', ['D', 'R', 'R']);
-      if (ctx.consente2D) add('diurni-double', ['D', 'D', 'R', 'R', 'R']);
+      if (ctx.consente2D) add('diurni-double', ['D', 'D', 'R', 'R']);
       return families;
     }
     // no_notti nurses without D headroom fall back to M/P cycles.
@@ -642,7 +638,7 @@ function getDayOnlyPatternFamilies(ctx, n) {
   if (canDayLong) {
     add('diurni-balanced', ['D', 'R', 'D', 'R', 'R']);
     add('diurni-light', ['D', 'R', 'R']);
-    if (ctx.consente2D) add('diurni-double', ['D', 'D', 'R', 'R', 'R']);
+    if (ctx.consente2D) add('diurni-double', ['D', 'D', 'R', 'R']);
   }
   if (canMorningAfternoon) {
     for (const pattern of MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)) add('mp-cycle', pattern);
@@ -698,17 +694,7 @@ function patternRowHardCost(row, ctx, n) {
     if (row[d] === 'N' && row[d + 1] !== 'S') hard += 100;
     if (row[d] === 'S' && row[d + 1] !== 'R') hard += 100;
   }
-  for (let d = ctx.prevTail ? -3 : 0; d < ctx.numDays - 3; d++) {
-    if (
-      getShiftAt(tmpSchedule, ctx, n, d) === 'N' &&
-      getShiftAt(tmpSchedule, ctx, n, d + 1) === 'S' &&
-      getShiftAt(tmpSchedule, ctx, n, d + 2) === 'R' &&
-      !props.noDiurni &&
-      getShiftAt(tmpSchedule, ctx, n, d + 3) !== 'R'
-    ) {
-      hard += 100;
-    }
-  }
+  // The second R after N-S-R is optional for every profile: no extra hard cost.
   if (ctx.consente2D) {
     for (let d = 1; d < ctx.numDays - 1; d++) {
       if (row[d - 1] === 'D' && row[d] === 'D' && row[d + 1] !== 'R') hard += 40;

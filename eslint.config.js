@@ -46,6 +46,9 @@ const solverSharedGlobals = {
   collectViolations: 'writable',
   computeStats: 'writable',
   keepsNightLeadIns: 'writable',
+  MAX_CONSECUTIVE_REST: 'writable',
+  hasNightTomorrow: 'writable',
+  findReperibile: 'writable',
   // construct.js
   construct: 'writable',
   trySwapMP: 'writable',
