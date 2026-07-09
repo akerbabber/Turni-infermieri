@@ -69,7 +69,7 @@ const BASE_FORBIDDEN_NEXT = {
   S: ['M', 'P', 'D', 'N', 'S'],
 };
 
-const NUM_RESTARTS = 8; // meno restart, più iter per restart
+const NUM_RESTARTS = 10; // restart multipli con early-exit a 0 violazioni
 const LOCAL_SEARCH_ITERS = 6000; // +50% iterazioni per convergenza migliore
 
 // Default total solving time budget (seconds) when the user picks "auto".

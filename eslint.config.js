@@ -45,6 +45,7 @@ const solverSharedGlobals = {
   computeScore: 'writable',
   collectViolations: 'writable',
   computeStats: 'writable',
+  keepsNightLeadIns: 'writable',
   // construct.js
   construct: 'writable',
   trySwapMP: 'writable',
@@ -55,6 +56,7 @@ const solverSharedGlobals = {
   tryChangeMove: 'writable',
   tryEquityMove: 'writable',
   tryWeeklyRestMove: 'writable',
+  tryNightBlockSwapMove: 'writable',
   // pattern-planner.js
   solvePattern: 'writable',
   solveNightFirstPattern: 'writable',

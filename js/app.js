@@ -2199,7 +2199,7 @@ function renderSolverMethodBanner() {
     </div>`;
   } else {
     banner.innerHTML = `<div class="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 rounded-lg">
-      <p class="font-semibold text-amber-700 dark:text-amber-400 text-sm">⚠️ Algoritmo utilizzato: <strong>Euristica</strong> (greedy + simulated annealing) — i solver matematici non erano disponibili oppure non hanno trovato una soluzione utilizzabile.</p>
+      <p class="font-semibold text-amber-700 dark:text-amber-400 text-sm">⚠️ Algoritmo utilizzato: <strong>Euristica</strong> (greedy + simulated annealing) — in modalità Auto ha battuto il Pattern Beam su questa istanza.</p>
     </div>`;
   }
 }

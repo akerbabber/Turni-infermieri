@@ -5,7 +5,7 @@
 
 'use strict';
 
-/* global getMonthlyContractHours */
+/* global getMonthlyContractHours, countWeekdaysInMonth */
 
 // ---------------------------------------------------------------------------
 // Preprocessing — build a shared context object used by all phases
@@ -63,8 +63,26 @@ function buildContext(config) {
     maxCovN = rules.maxCoverageN ?? 6;
 
   const targetNights = rules.targetNights ?? 4;
-  const maxNights = rules.maxNights ?? 7;
+  // maxNights is the soft monthly night cap; hardMaxNights ("Notti massime assolute")
+  // is the absolute per-nurse limit. The soft cap can never exceed the hard cap.
+  const hardMaxNights = rules.hardMaxNights ?? rules.maxNights ?? 7;
+  const maxNights = Math.min(rules.maxNights ?? 7, hardMaxNights);
   const minRPerWeek = rules.minRPerWeek ?? 2;
+
+  // Hour limits: the UI sliders express WEEKLY hours (min/max per settimana).
+  // Convert them to monthly thresholds using the number of weekdays in the month
+  // (5 weekdays = one contract week). Values above 60 cannot come from the weekly
+  // sliders and are treated as already-monthly for backward compatibility.
+  const weeksEquivalent = countWeekdaysInMonth(year, month) / 5;
+  const minHoursRule = rules.minHours || 0;
+  const minMonthlyHours = minHoursRule > 60 ? minHoursRule : Math.round(minHoursRule * weeksEquivalent * 10) / 10;
+  const maxHoursRule = rules.maxHours || 0;
+  const maxMonthlyHours =
+    maxHoursRule > 0
+      ? maxHoursRule > 60
+        ? maxHoursRule
+        : Math.round(maxHoursRule * weeksEquivalent * 10) / 10
+      : Infinity;
   const preferDiurni = rules.preferDiurni ?? false;
   const coppiaTurni = rules.coppiaTurni ?? null;
   const consente2D = rules.consente2DiurniConsecutivi ?? false;
@@ -153,6 +171,9 @@ function buildContext(config) {
     maxCovN,
     targetNights,
     maxNights,
+    hardMaxNights,
+    minMonthlyHours,
+    maxMonthlyHours,
     minRPerWeek,
     preferDiurni,
     coppiaTurni,

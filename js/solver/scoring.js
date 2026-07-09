@@ -347,6 +347,25 @@ function getNightPatternInfo(schedule, ctx, nurseIdx, nightDayIdx) {
   return null;
 }
 
+/**
+ * True when assigning `newShift` at (n, d) would NOT break the currently-valid
+ * lead-in of a night up to 3 days later (no_diurni nurses need an M/P sequence
+ * right before N, diurni_e_notturni need a D or D-R-D block).
+ */
+function keepsNightLeadIns(schedule, ctx, n, d, newShift) {
+  for (let nd = d + 1; nd <= d + 3 && nd < ctx.numDays; nd++) {
+    if (schedule[n][nd] !== 'N') continue;
+    const before = getNightPatternInfo(schedule, ctx, n, nd);
+    if (!before || !before.validLead) return true;
+    const old = schedule[n][d];
+    schedule[n][d] = newShift;
+    const after = getNightPatternInfo(schedule, ctx, n, nd);
+    schedule[n][d] = old;
+    return !after || after.validLead;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Scoring — lower is better (0 = perfect)
 // ---------------------------------------------------------------------------
@@ -358,10 +377,14 @@ function computeScore(schedule, ctx) {
     minCovM,
     minCovP,
     minCovN,
+    minCovD,
     maxCovM,
     maxCovP,
     maxCovN,
+    maxCovD,
     targetNights,
+    maxNights,
+    hardMaxNights,
     minRPerWeek,
     consente2D,
     forbidden,
@@ -386,6 +409,8 @@ function computeScore(schedule, ctx) {
     if (cov.P > maxCovP) hard += cov.P - maxCovP;
     if (cov.N < minCovN) hard += (minCovN - cov.N) * UNDER_COVERAGE_WEIGHT;
     if (cov.N > maxCovN) hard += (cov.N - maxCovN) * 3;
+    if (cov.D < minCovD) hard += (minCovD - cov.D) * UNDER_COVERAGE_WEIGHT;
+    if (cov.D > maxCovD) hard += cov.D - maxCovD;
   }
 
   // Per-nurse hard constraints
@@ -448,12 +473,13 @@ function computeScore(schedule, ctx) {
         if (schedule[n][d - 2] === 'D' && schedule[n][d - 1] === 'D' && schedule[n][d] === 'D') hard++;
       }
     }
-    // Weekly rest
+    // Weekly rest — weighted 2× so the annealer does not systematically strip
+    // rest days to patch coverage (which weighs UNDER_COVERAGE_WEIGHT).
     if (minRPerWeek > 0) {
       for (const wDays of weekDaysList) {
         const need = requiredRest(wDays.length, minRPerWeek);
         const have = countWeekRest(schedule, n, wDays);
-        if (have < need) hard += need - have;
+        if (have < need) hard += (need - have) * 2;
       }
     }
     for (let d = 0; d < numDays; d++) {
@@ -490,6 +516,17 @@ function computeScore(schedule, ctx) {
       continue;
     const nc = nightCount(schedule, n, numDays);
     soft += Math.abs(nc - targetNights) * 3;
+  }
+
+  // Per-nurse night caps: exceeding the soft cap (maxNights) costs extra soft
+  // penalty, exceeding the absolute cap (hardMaxNights) is a hard violation.
+  // quattro_mattine_venerdi_notte nurses are excluded: their nights are pinned
+  // structurally (every Friday) and not controlled by the solver.
+  for (let n = 0; n < numNurses; n++) {
+    if (nurseProps[n].quattroMattineVenerdiNotte) continue;
+    const nc = nightCount(schedule, n, numDays);
+    if (nc > maxNights) soft += (nc - maxNights) * 8;
+    if (nc > hardMaxNights) hard += nc - hardMaxNights;
   }
 
   // Soft: D-shift (diurno) count fairness among D-eligible nurses
@@ -563,13 +600,16 @@ function computeScore(schedule, ctx) {
     }
   }
 
-  // Hard: nurses with too few hours (BUG #3 fix)
-  const hardMinHours = ctx.rules.minHours || 0;
-  if (hardMinHours > 0) {
+  // Hard: nurses outside the monthly hour band (weekly sliders scaled to the month).
+  // A nurse is exempt from the minimum only when actually absent (has absence
+  // shifts): an all-R row is an unassigned nurse, not an absent one.
+  {
     const absShifts = ['F', 'MA', 'L104', 'PR', 'MT'];
     for (let n = 0; n < numNurses; n++) {
-      const isPurelyAbsent = schedule[n].every(s => absShifts.includes(s) || s === 'R');
-      if (!isPurelyAbsent && hours[n] < hardMinHours) hard++;
+      const hasAbsence = schedule[n].some(s => absShifts.includes(s));
+      const isFullyAbsent = hasAbsence && schedule[n].every(s => absShifts.includes(s) || s === 'R');
+      if (ctx.minMonthlyHours > 0 && !isFullyAbsent && hours[n] < ctx.minMonthlyHours) hard++;
+      if (hours[n] > ctx.maxMonthlyHours) hard++;
     }
   }
 
@@ -605,6 +645,8 @@ function collectViolations(schedule, ctx) {
     maxCovP,
     minCovN,
     maxCovN,
+    minCovD,
+    maxCovD,
     consente2D,
     forbidden,
     nurseProps,
@@ -650,6 +692,18 @@ function collectViolations(schedule, ctx) {
         day: d,
         type: 'coverage_N_max',
         msg: `Giorno ${d + 1}: copertura notte eccessiva (${cov.N}/${maxCovN})`,
+      });
+    if (cov.D < minCovD)
+      violations.push({
+        day: d,
+        type: 'coverage_D',
+        msg: `Giorno ${d + 1}: copertura diurni insufficiente (${cov.D}/${minCovD})`,
+      });
+    if (cov.D > maxCovD)
+      violations.push({
+        day: d,
+        type: 'coverage_D_max',
+        msg: `Giorno ${d + 1}: copertura diurni eccessiva (${cov.D}/${maxCovD})`,
       });
   }
 
@@ -850,20 +904,40 @@ function collectViolations(schedule, ctx) {
     }
   }
 
-  // BUG #3 fix: low_hours violations
-  const hardMinHoursV = ctx.rules.minHours || 0;
-  if (hardMinHoursV > 0) {
+  // Monthly hour band violations (weekly sliders scaled to the month) and
+  // per-nurse absolute night cap (hardMaxNights).
+  {
     const absShiftsV = ['F', 'MA', 'L104', 'PR', 'MT'];
     for (let n = 0; n < numNurses; n++) {
       const h = nurseHours(schedule, n, numDays);
-      const isPurelyAbsent = schedule[n].every(s => absShiftsV.includes(s) || s === 'R');
-      if (!isPurelyAbsent && h < hardMinHoursV) {
+      const hasAbsence = schedule[n].some(s => absShiftsV.includes(s));
+      const isFullyAbsent = hasAbsence && schedule[n].every(s => absShiftsV.includes(s) || s === 'R');
+      if (ctx.minMonthlyHours > 0 && !isFullyAbsent && h < ctx.minMonthlyHours) {
         violations.push({
           type: 'low_hours',
           nurse: n,
           day: -1,
-          msg: `${ctx.nurses[n].name}: ore totali ${h.toFixed(1)} < minimo ${hardMinHoursV}`,
+          msg: `${ctx.nurses[n].name}: ore totali ${h.toFixed(1)} < minimo mensile ${ctx.minMonthlyHours}`,
         });
+      }
+      if (h > ctx.maxMonthlyHours) {
+        violations.push({
+          type: 'high_hours',
+          nurse: n,
+          day: -1,
+          msg: `${ctx.nurses[n].name}: ore totali ${h.toFixed(1)} > massimo mensile ${ctx.maxMonthlyHours}`,
+        });
+      }
+      if (!nurseProps[n].quattroMattineVenerdiNotte) {
+        const nc = nightCount(schedule, n, numDays);
+        if (nc > ctx.hardMaxNights) {
+          violations.push({
+            type: 'troppe_notti',
+            nurse: n,
+            day: -1,
+            msg: `${ctx.nurses[n].name}: ${nc} notti > massimo assoluto ${ctx.hardMaxNights}`,
+          });
+        }
       }
     }
   }
