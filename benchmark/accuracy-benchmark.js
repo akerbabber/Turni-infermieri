@@ -111,6 +111,7 @@ function baseRules(overrides) {
     maxCoverageN: 7,
     targetNights: 6,
     maxNights: 6,
+    hardMaxNights: 7,
     minRPerWeek: 2,
     preferDiurni: false,
     coppiaTurni: [4, 5],

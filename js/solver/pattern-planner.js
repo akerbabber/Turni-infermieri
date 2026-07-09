@@ -340,6 +340,9 @@ function patternCandidateLoadCost(before, candidate, after, ctx) {
         score += (before.covM[d] + before.covP[d]) * 24;
         score += Math.max(0, after.covM[d] - ctx.maxCovM) * 900;
         score += Math.max(0, after.covP[d] - ctx.maxCovP) * 900;
+        score += Math.max(0, after.covD[d] - ctx.maxCovD) * 900;
+        // Reward D placements on days still short of the D minimum.
+        score -= Math.max(0, ctx.minCovD - before.covD[d]) * 40;
       } else if (shift === 'M') {
         score += before.covM[d] * 18;
         score += Math.max(0, after.covM[d] - ctx.maxCovM) * 700;
@@ -465,12 +468,19 @@ function patternStateEstimate(state, ctx) {
     const expectedN = nightTarget;
     const mDef = Math.max(0, expectedM - state.covM[d]);
     const pDef = Math.max(0, expectedP - state.covP[d]);
-    const nDef = Math.max(0, expectedN - state.covN[d]);
+    // Night deficit below the hard minimum is a violation (heavy weight); the gap
+    // between the minimum and the fairness-driven target is only a preference —
+    // weighting it like the minimum starves M/P coverage on M/P/N rosters.
+    const nDefMin = Math.max(0, ctx.minCovN - state.covN[d]);
+    const nDefTarget = Math.max(0, expectedN - state.covN[d]);
+    const dDef = Math.max(0, ctx.minCovD - state.covD[d]);
     const mOver = Math.max(0, state.covM[d] - ctx.maxCovM);
     const pOver = Math.max(0, state.covP[d] - ctx.maxCovP);
     const nOver = Math.max(0, state.covN[d] - ctx.maxCovN);
-    score += mDef * mDef * 18 + pDef * pDef * 18 + nDef * nDef * 260;
-    score += mOver * mOver * 220 + pOver * pOver * 220 + nOver * nOver * 520;
+    const dOver = Math.max(0, state.covD[d] - ctx.maxCovD);
+    score += mDef * mDef * 18 + pDef * pDef * 18 + nDefMin * nDefMin * 260 + nDefTarget * nDefTarget * 25;
+    score += dDef * dDef * 18;
+    score += mOver * mOver * 220 + pOver * pOver * 220 + nOver * nOver * 520 + dOver * dOver * 220;
   }
   return score;
 }
@@ -558,13 +568,35 @@ function getPatternFamilies(ctx, n) {
     add('mp-night-5-pp', ['P', 'P', 'N', 'S', 'R']);
     add('mp-night-6-mmp', ['M', 'M', 'P', 'N', 'S', 'R']);
     add('mp-night-6-mpp', ['M', 'P', 'P', 'N', 'S', 'R']);
+    // Double-rest variants: with minRPerWeek ≥ 2 the single-R cycles above cannot
+    // satisfy the weekly rest minimum (S does not count as rest), so provide
+    // cycles ending in N-S-R-R — the second R is the allowed optional rest.
+    add('mp-night-6-rr', ['M', 'P', 'N', 'S', 'R', 'R']);
+    add('mp-night-7-mmp-rr', ['M', 'M', 'P', 'N', 'S', 'R', 'R']);
+    add('mp-night-7-mpp-rr', ['M', 'P', 'P', 'N', 'S', 'R', 'R']);
     return families;
   }
 
   if (props.soloDiurni || props.noNotti || props.diurniNoNotti) {
-    add('diurni-balanced', ['D', 'R', 'D', 'R', 'R']);
-    add('diurni-light', ['D', 'R', 'R']);
-    if (ctx.consente2D) add('diurni-double', ['D', 'D', 'R', 'R', 'R']);
+    // D-only profiles have no alternative to D; no_notti nurses use the D cycles
+    // only while the coverage limits actually allow D shifts.
+    if (props.soloDiurni || props.diurniNoNotti || ctx.maxCovD > 0) {
+      add('diurni-balanced', ['D', 'R', 'D', 'R', 'R']);
+      add('diurni-light', ['D', 'R', 'R']);
+      if (ctx.consente2D) add('diurni-double', ['D', 'D', 'R', 'R', 'R']);
+      return families;
+    }
+    // no_notti nurses without D headroom fall back to M/P cycles.
+    for (const pattern of MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)) add('mp-cycle', pattern);
+    return families;
+  }
+
+  if (ctx.maxCovD <= 0) {
+    // D shifts are not allowed by the coverage limits: use M/P + full night
+    // block cycles (N-S-R-R tail — these profiles require the second rest).
+    add('mp-night-6', ['M', 'P', 'N', 'S', 'R', 'R']);
+    add('mp-night-7-mmp', ['M', 'M', 'P', 'N', 'S', 'R', 'R']);
+    add('mp-night-7-mpp', ['M', 'P', 'P', 'N', 'S', 'R', 'R']);
     return families;
   }
 
@@ -600,7 +632,11 @@ function getDayOnlyPatternFamilies(ctx, n) {
     return families;
   }
 
-  const canDayLong = !props.noDiurni && !props.mattineEPomeriggi;
+  const canDayLong =
+    !props.noDiurni &&
+    !props.mattineEPomeriggi &&
+    // Profiles that can also work M/P only get D cycles when D coverage is allowed.
+    (ctx.maxCovD > 0 || props.soloDiurni || props.diurniENotturni);
   const canMorningAfternoon = !props.soloDiurni && !props.diurniENotturni;
 
   if (canDayLong) {
@@ -619,6 +655,22 @@ function materializePatternRow(ctx, n, pattern, offset) {
   const row = new Array(ctx.numDays);
   for (let d = 0; d < ctx.numDays; d++) {
     row[d] = ctx.pinned[n][d] || pattern[(d + offset) % pattern.length];
+  }
+  // Pinned nights (skeleton mode, fixed profiles, month-boundary continuations)
+  // sit at arbitrary offsets relative to the cycle: complete their mandatory
+  // lead-in shifts so the row does not carry an easily fixable hard violation.
+  const props = ctx.nurseProps[n];
+  if (props.noDiurni && !props.soloNotti) {
+    for (let d = 2; d < ctx.numDays; d++) {
+      if (row[d] !== 'N' || !ctx.pinned[n][d]) continue;
+      if (!ctx.pinned[n][d - 1] && row[d - 1] !== 'M' && row[d - 1] !== 'P') row[d - 1] = 'P';
+      if (!ctx.pinned[n][d - 2] && row[d - 2] !== 'M' && row[d - 2] !== 'P') row[d - 2] = 'M';
+    }
+  } else if (props.diurniENotturni) {
+    for (let d = 1; d < ctx.numDays; d++) {
+      if (row[d] !== 'N' || !ctx.pinned[n][d]) continue;
+      if (!ctx.pinned[n][d - 1] && row[d - 1] !== 'D') row[d - 1] = 'D';
+    }
   }
   return row;
 }
@@ -666,12 +718,22 @@ function patternRowHardCost(row, ctx, n) {
     }
   }
   if (ctx.minRPerWeek > 0) {
+    // Count weekly-rest deficits: a row structurally unable to rest (deficits in
+    // several weeks, e.g. single-R 5-day cycles under minR=2) is a hard reject,
+    // while a boundary artifact of an otherwise valid cycle (one deficit week at
+    // the month edges) is fixable by local search and only costs soft points.
+    let deficitWeeks = 0;
+    let deficitUnits = 0;
     for (const wDays of ctx.weekDaysList) {
       const need = requiredRest(wDays.length, ctx.minRPerWeek);
       let have = 0;
       for (const d of wDays) if (row[d] === 'R') have++;
-      if (have < need) hard += (need - have) * 40;
+      if (have < need) {
+        deficitWeeks++;
+        deficitUnits += need - have;
+      }
     }
+    if (deficitWeeks >= 2) hard += deficitUnits * 40;
   }
   for (let d = 0; d < ctx.numDays; d++) {
     if (row[d] !== 'N') continue;
@@ -704,6 +766,23 @@ function patternRowSoftCost(row, ctx, n) {
     if (isForbiddenRestrictedNoDiurniRestDay(tmpSchedule, ctx, n, d)) splitRest += 2;
   }
   cost += splitRest * 8;
+
+  // A single deficit week (month-boundary artifact of an otherwise valid cycle)
+  // is not a hard reject — see patternRowHardCost — but still costs soft points.
+  if (ctx.minRPerWeek > 0) {
+    let deficitWeeks = 0;
+    let deficitUnits = 0;
+    for (const wDays of ctx.weekDaysList) {
+      const need = requiredRest(wDays.length, ctx.minRPerWeek);
+      let have = 0;
+      for (const d of wDays) if (row[d] === 'R') have++;
+      if (have < need) {
+        deficitWeeks++;
+        deficitUnits += need - have;
+      }
+    }
+    if (deficitWeeks === 1) cost += deficitUnits * 25;
+  }
   return cost;
 }
 

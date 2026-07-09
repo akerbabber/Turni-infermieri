@@ -17,7 +17,7 @@
 
 /* global MP_NIGHT_PATTERNS, dayCoverage, getAllowedMPCyclePatterns */
 /* global getRestPromotionPriority, isForbiddenRestrictedNoDiurniRestDay */
-/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, matchesPatternEndingAt */
+/* global isMPCycleLimitedNurse, isMandatoryNightRestDay, matchesPatternEndingAt, repairWeeklyRestDeficits, keepsNightLeadIns */
 
 // ---------------------------------------------------------------------------
 // Construction heuristic (one attempt)
@@ -312,7 +312,8 @@ function construct(ctx) {
     let d = Math.floor((i * numDays) / extraNightStarts);
     let searchLimit = maxNightLoadBumps;
     while (desiredNightLoads[d] >= maxCovN && searchLimit-- > 0) d = (d + 1) % numDays;
-    if (searchLimit <= 0) break;
+    // No day below maxCovN found for this bump: skip it, but keep placing the rest.
+    if (desiredNightLoads[d] >= maxCovN) continue;
     desiredNightLoads[d]++;
   }
 
@@ -364,6 +365,9 @@ function construct(ctx) {
 
       // Check if we can place a night here
       if (s !== null && s !== 'R') continue;
+
+      // Never start a night right after a smonto: S must be followed by R
+      if (d > 0 && schedule[n][d - 1] === 'S') continue;
 
       // For R: check it's not part of a mandatory post-night rest
       if (s === 'R' && d > 0) {
@@ -574,6 +578,25 @@ function construct(ctx) {
       return haveRest + freeSlots >= need;
     }
 
+    // Fill the minimum D (diurno) coverage first — a D also counts toward both the
+    // M and P coverage, so placing it before M/P keeps headroom under their maximums.
+    if (minCovD > 0) {
+      for (const n of avail().filter(
+        n =>
+          !nurseProps[n].noDiurni &&
+          !nurseProps[n].mattineEPomeriggi &&
+          !nurseProps[n].soloMattine &&
+          !nurseProps[n].soloNotti
+      )) {
+        if (cov.D >= minCovD || cov.M >= maxCovM || cov.P >= maxCovP) break;
+        if (!eligible(n, d, 'D')) continue;
+        schedule[n][d] = 'D';
+        cov.D++;
+        cov.M++;
+        cov.P++;
+      }
+    }
+
     if (preferDiurni) {
       for (const n of avail().filter(
         n =>
@@ -709,6 +732,7 @@ function construct(ctx) {
             if ((s === 'M' ? cov.M : cov.P) <= (s === 'M' ? minCovM : minCovP)) continue;
             const prev = d > 0 ? schedule[n][d - 1] : null;
             const next = d < numDays - 1 ? schedule[n][d + 1] : null;
+            if (!keepsNightLeadIns(schedule, ctx, n, d, 'R')) continue;
             if (transitionOk(prev, 'R', ctx, schedule, n, d) && transitionOk('R', next, ctx, schedule, n, d + 1)) {
               schedule[n][d] = 'R';
               rest++;
@@ -863,6 +887,14 @@ function construct(ctx) {
     }
   }
 
+  // Post-construction weekly rest repair — the SA moves can rarely fix structural
+  // weekly-rest deficits (night blocks misaligned with week boundaries), so run the
+  // dedicated repair right away and let every restart begin from a feasible base.
+  {
+    const restRepaired = repairWeeklyRestDeficits(schedule, ctx);
+    for (let n = 0; n < numNurses; n++) schedule[n] = restRepaired[n];
+  }
+
   // Post-construction M/P repair — cover residual deficits using optional rest days.
   for (let d = 0; d < numDays; d++) {
     let cov = dayCoverage(schedule, d, numNurses);
@@ -905,9 +937,9 @@ function trySwapMP(schedule, n, srcDays, dstDays, mid, srcIsM, ctx) {
       const prevD = dDay > 0 ? schedule[n][dDay - 1] : null;
       const nextD = dDay < numDays - 1 ? schedule[n][dDay + 1] : null;
       if (!transitionOk(prevS, newSrc, ctx, schedule, n, sDay)) continue;
-      if (!transitionOk(newSrc, nextS, ctx, schedule, n, sDay)) continue;
+      if (!transitionOk(newSrc, nextS, ctx, schedule, n, sDay + 1)) continue;
       if (!transitionOk(prevD, newDst, ctx, schedule, n, dDay)) continue;
-      if (!transitionOk(newDst, nextD, ctx, schedule, n, dDay)) continue;
+      if (!transitionOk(newDst, nextD, ctx, schedule, n, dDay + 1)) continue;
       const covS = dayCoverage(schedule, sDay, numNurses);
       const covD = dayCoverage(schedule, dDay, numNurses);
       const okS = srcIsM ? covS.M > minCovM && covS.P < maxCovP : covS.P > minCovP && covS.M < maxCovM;

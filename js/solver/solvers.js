@@ -38,6 +38,32 @@ function solveFallback(config) {
     if (bestScore.hard === 0 && bestScore.soft < 40) break;
   }
 
+  // Iterated local search: when hard violations remain, the best schedule is a
+  // fixed point for the repair chain — kick it with a burst of random (structurally
+  // legal, score-blind) moves, re-anneal, and keep the result only when better.
+  for (let polish = 0; polish < 10 && bestScore.hard > 0; polish++) {
+    progress(80 + polish, `Rifinitura ${polish + 1}/10…`);
+    const kicked = deepCopy(bestSchedule);
+    const kickChanges = [];
+    // Night-block swaps shake the night alignment (the structure cell-level moves
+    // can never reach); a few cell moves add small-scale diversity on top.
+    for (let k = 0; k < 10; k++) {
+      kickChanges.length = 0;
+      tryNightBlockSwapMove(kicked, ctx, kickChanges);
+    }
+    for (let k = 0; k < 20; k++) {
+      kickChanges.length = 0;
+      if (Math.random() < 0.5) trySwapMove(kicked, ctx, kickChanges);
+      else tryChangeMove(kicked, ctx, kickChanges);
+    }
+    const improved = localSearch(kicked, ctx, LOCAL_SEARCH_ITERS * 2);
+    const score = computeScore(improved, ctx);
+    if (score.total < bestScore.total) {
+      bestSchedule = improved;
+      bestScore = score;
+    }
+  }
+
   progress(90, 'Validazione…');
 
   const violations = collectViolations(bestSchedule, ctx);
@@ -134,7 +160,54 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
         solved = true;
       }
 
-      // Heuristic (greedy + simulated annealing) — used for 'auto', 'fallback' and any
+      // 'auto': portfolio — run the night-first Pattern Beam, the plain Pattern Beam
+      // and the heuristic on a split budget, keep the best schedule (fewer hard
+      // violations first, then total score). Each planner dominates on different
+      // rosters: night-first on D/N-heavy ERs, the plain beam on M/P/N cyclic
+      // rosters, the heuristic on small or unusual instances.
+      if (solverChoice === 'auto' && !solved) {
+        progress(pctBase, `${batchLabel}Auto (portfolio pattern + euristica): soluzione ${i + 1}/${numSolutions}…`);
+        const autoStart = Date.now();
+        const candidates = [];
+        {
+          const result = solveNightFirstPattern(config, perSolutionBudgetSec * 0.4);
+          candidates.push({
+            ...result,
+            solverMethod: 'night_first_pattern',
+            _score: computeScore(result.schedule, ctx),
+          });
+        }
+        {
+          const result = solvePattern(config, perSolutionBudgetSec * 0.3);
+          candidates.push({ ...result, solverMethod: 'pattern', _score: computeScore(result.schedule, ctx) });
+        }
+        {
+          const improved = localSearch(construct(ctx), ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec * 0.3);
+          const hScore = computeScore(improved, ctx);
+          candidates.push({
+            schedule: improved,
+            violations: collectViolations(improved, ctx),
+            stats: computeStats(improved, ctx),
+            score: hScore.total,
+            solverMethod: 'fallback',
+            _score: hScore,
+          });
+        }
+        candidates.sort((a, b) => a._score.hard - b._score.hard || a._score.total - b._score.total);
+        const bestCandidate = candidates[0];
+        const elapsed = (Date.now() - autoStart) / 1000;
+        console.log(
+          `[Solver] Auto portfolio (${elapsed.toFixed(1)}s): ` +
+            candidates
+              .map(c => `${c.solverMethod} hard=${c._score.hard} total=${Math.round(c._score.total)}`)
+              .join(' | ')
+        );
+        delete bestCandidate._score;
+        batchSolutions.push(bestCandidate);
+        solved = true;
+      }
+
+      // Heuristic (greedy + simulated annealing) — used for 'fallback' and any
       // unrecognised choice (including legacy 'milp'/'glpk' values saved in localStorage).
       if (!solved) {
         progress(pctBase, `${batchLabel}Euristica: soluzione ${i + 1}/${numSolutions}…`);
@@ -158,6 +231,8 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
     progress(5, 'Night-first Pattern Beam selezionato manualmente…');
   } else if (solverChoice === 'night_only') {
     progress(5, 'Modalità solo notti: copertura notturna, mattine/pomeriggi manuali…');
+  } else if (solverChoice === 'auto') {
+    progress(5, `Auto (night-first Pattern Beam + euristica, vince la migliore): ${numSolutions} soluzioni…`);
   } else {
     progress(5, `Euristica (greedy + simulated annealing): ${numSolutions} soluzioni…`);
   }
