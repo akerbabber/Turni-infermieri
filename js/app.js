@@ -47,9 +47,18 @@ const FASCIA_PRESETS = {
   '7-10': { M: 7.2, P: 7.2, D: 12.2, N: 10.2, S: 0, R: 0, F: 7.12, MA: 7.12, L104: 7.12, PR: 7.12, MT: 7.12 },
 };
 const MONTHLY_HOURS_PER_WEEKDAY = 7.12;
+// 'auto' picks the fascia from the diurni usage: schedules WITH diurni
+// (maxCoverageD > 0) use standard hours (M/P 6.2, N 12.2, assenze 6.12),
+// schedules WITHOUT diurni use the extended ones (M/P 7.2, N 10.2, assenze 7.12).
+function resolveFasciaOraria(fascia) {
+  if (fascia === 'auto' || !fascia) {
+    return (state?.rules?.maxCoverageD ?? DEFAULT_RULES.maxCoverageD) > 0 ? 'standard' : '7-10';
+  }
+  return FASCIA_PRESETS[fascia] ? fascia : 'standard';
+}
+
 function applyFasciaOraria(fascia) {
-  const key = FASCIA_PRESETS[fascia] ? fascia : 'standard';
-  Object.assign(SHIFT_HOURS, FASCIA_PRESETS[key]);
+  Object.assign(SHIFT_HOURS, FASCIA_PRESETS[resolveFasciaOraria(fascia)]);
 }
 const DOW_LABELS = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
 const MONTHS_IT = [
@@ -193,7 +202,7 @@ const DEFAULT_RULES = {
   consentePomeriggioDiurno: false, // Allow P→D transition
   consente2DiurniConsecutivi: false, // Allow D-D but require R after
   reperibileNotturno: true, // Night on-call: M/D today + N tomorrow required each day
-  fasciaOraria: 'standard', // 'standard' (6+12) or '7-10' (7+10)
+  fasciaOraria: 'auto', // 'auto' (segue i diurni) | 'standard' (6+12) | '7-10' (7+10)
 };
 
 // ---------------------------------------------------------------------------
@@ -826,6 +835,8 @@ function renderStep2() {
   });
   bindRange('sl-max-cov-d', 'val-max-cov-d', r.maxCoverageD, v => {
     state.rules.maxCoverageD = v;
+    // In fascia 'auto' the shift hours follow the diurni usage
+    applyFasciaOraria(state.rules.fasciaOraria);
     saveState();
   });
 
@@ -906,7 +917,7 @@ function renderStep2() {
   // Fascia oraria radio buttons
   const radios = document.querySelectorAll('input[name="fascia-oraria"]');
   radios.forEach(radio => {
-    radio.checked = radio.value === (r.fasciaOraria || 'standard');
+    radio.checked = radio.value === (r.fasciaOraria || 'auto');
     radio.onchange = () => {
       state.rules.fasciaOraria = radio.value;
       applyFasciaOraria(radio.value);

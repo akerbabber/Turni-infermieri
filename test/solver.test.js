@@ -620,6 +620,12 @@ describe('dayCoverage', () => {
 // 10. nurseHours
 // ---------------------------------------------------------------------------
 describe('nurseHours', () => {
+  // Other tests may have resolved fascia 'auto' (maxCoverageD 0 → 7-10 hours) via
+  // buildContext, which mutates the shared SHIFT_HOURS: restore the standard one.
+  before(() => {
+    vm.runInContext("applyFasciaOraria('standard')", ctx);
+  });
+
   it('should sum hours for a known schedule row', () => {
     // M=6.2, P=6.2, R=0 => total 12.4
     const schedule = [['M', 'P', 'R']];

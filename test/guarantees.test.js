@@ -262,6 +262,31 @@ describe('ferie con weekend a riposo', () => {
   });
 });
 
+describe('fascia oraria automatica', () => {
+  it('senza diurni (maxCoverageD=0): M/P valgono 7.2 e la notte 10.2', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { maxCoverageD: 0, fasciaOraria: 'auto' } }));
+    const schedule = emptySchedule(bctx);
+    schedule[0][0] = 'M';
+    schedule[0][2] = 'N';
+    assert.ok(Math.abs(ctx.nurseHours(schedule, 0, bctx.numDays) - (7.2 + 10.2)) < 1e-9);
+  });
+
+  it('con diurni (maxCoverageD>0): M/P valgono 6.2 e la notte 12.2', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { maxCoverageD: 4, fasciaOraria: 'auto' } }));
+    const schedule = emptySchedule(bctx);
+    schedule[0][0] = 'M';
+    schedule[0][2] = 'N';
+    assert.ok(Math.abs(ctx.nurseHours(schedule, 0, bctx.numDays) - (6.2 + 12.2)) < 1e-9);
+  });
+
+  it('la scelta manuale della fascia vince su auto', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { maxCoverageD: 0, fasciaOraria: 'standard' } }));
+    const schedule = emptySchedule(bctx);
+    schedule[0][0] = 'M';
+    assert.ok(Math.abs(ctx.nurseHours(schedule, 0, bctx.numDays) - 6.2) < 1e-9);
+  });
+});
+
 describe('reperibile notturno', () => {
   it('segnala reperibile_mancante quando nessuno ha M/D oggi e N domani', () => {
     const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true } }));

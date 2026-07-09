@@ -430,8 +430,22 @@
                 <input
                   type="radio"
                   name="fascia-oraria"
-                  value="standard"
+                  value="auto"
                   checked
+                  class="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <span class="text-sm font-medium">Auto (in base ai diurni)</span>
+                  <p class="text-xs text-gray-500 dark:text-slate-400">
+                    Con diurni (max D &gt; 0): standard 6h12/12h12 · Senza diurni: estesa 7h12/10h12
+                  </p>
+                </div>
+              </label>
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="fascia-oraria"
+                  value="standard"
                   class="w-4 h-4 text-blue-600 focus:ring-blue-500"
                 />
                 <div>

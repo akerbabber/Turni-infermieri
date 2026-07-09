@@ -14,8 +14,14 @@
 function buildContext(config) {
   const { year, month, nurses, rules, hourDeltas, previousMonthTail } = config;
 
-  // Apply fascia oraria before any hour-dependent computation
-  applyFasciaOraria(rules.fasciaOraria || 'standard');
+  // Apply fascia oraria before any hour-dependent computation. 'auto' follows
+  // the diurni usage: schedules WITH diurni (maxCoverageD > 0) use the standard
+  // hours (M/P 6.2, N 12.2, assenze 6.12), schedules WITHOUT diurni use the
+  // extended ones (M/P 7.2, N 10.2, assenze 7.12).
+  const requestedFascia = rules.fasciaOraria || 'auto';
+  const resolvedFascia =
+    requestedFascia === 'auto' ? ((rules.maxCoverageD ?? 4) > 0 ? 'standard' : '7-10') : requestedFascia;
+  applyFasciaOraria(resolvedFascia);
 
   const numDays = daysInMonth(year, month);
   const numNurses = nurses.length;
