@@ -321,6 +321,7 @@ let state = {
   stats: [],
   solutions: [],
   selectedSolution: 0,
+  reperibili: {}, // manual night on-call overrides: { dayIndex: nurseIndex }
   solverMethod: null,
   solverDiagnostics: [],
   solverProgress: { percent: 0, message: '' },
@@ -1165,6 +1166,7 @@ function resetGeneratedResults() {
   state.stats = [];
   state.solutions = [];
   state.selectedSolution = 0;
+  state.reperibili = {};
   state.solverMethod = null;
   state.solverDiagnostics = [];
   state.solverProgress = { percent: 0, message: '' };
@@ -2320,33 +2322,40 @@ function renderStep4() {
   }
   bodyHTML += `<td class="stats-col"></td></tr>`;
 
-  // Reperibile notturno row: the nurse on M/D today with a night tomorrow
+  // Reperibile notturno row: with diurni in use the on-call is the nurse on
+  // SMONTO today, otherwise a nurse on M today with N tomorrow. Clicking a cell
+  // cycles through the eligible nurses (manual override, persisted).
   if (state.rules.reperibileNotturno) {
     const activeNurses = state.nurses.slice(0, numNurses);
     bodyHTML += `<tr class="coverage-row">`;
-    bodyHTML += `<td class="text-xs font-semibold">REPERIBILE</td>`;
+    bodyHTML += `<td class="text-xs font-semibold" title="Clicca una cella per cambiare il reperibile del giorno">REPERIBILE</td>`;
     for (let d = 0; d < numDays; d++) {
       const wk = isWeekend(state.year, state.month, d + 1);
-      let repName = '';
-      let missing = false;
-      if (d < numDays - 1) {
+      let label = '';
+      let title = '';
+      let cls = 'cov-ok';
+      let clickable = false;
+      const skipDayOne = (state.rules.maxCoverageD ?? 0) > 0 && d === 0 && !buildPrevMonthTail();
+      if (d < numDays - 1 && !skipDayOne) {
         let nightTomorrow = false;
         for (let n = 0; n < numNurses; n++) if (state.schedule[n][d + 1] === 'N') nightTomorrow = true;
         if (nightTomorrow) {
-          missing = true;
-          for (let n = 0; n < numNurses; n++) {
-            const today = state.schedule[n][d];
-            if ((today === 'M' || today === 'D') && state.schedule[n][d + 1] === 'N') {
-              repName = activeNurses[n]?.name || `Inf. ${n + 1}`;
-              missing = false;
-              break;
-            }
+          const elig = eligibleReperibili(d);
+          const chosen = reperibileForDay(d);
+          if (chosen === -1) {
+            label = '⚠';
+            title = 'Nessun reperibile notturno disponibile';
+            cls = 'cov-warn';
+          } else {
+            const repName = activeNurses[chosen]?.name || `Inf. ${chosen + 1}`;
+            label = escHtml(repName.split(' ')[0]);
+            title = `${repName}${elig.length > 1 ? ` — clicca per cambiare (${elig.length} idonei)` : ''}`;
+            clickable = elig.length > 1;
           }
         }
       }
-      const label = missing ? '⚠' : repName ? escHtml(repName.split(' ')[0]) : '';
-      bodyHTML += `<td class="${wk ? 'col-weekend' : ''}" title="${missing ? 'Nessun reperibile notturno' : escHtml(repName)}">
-        <div class="text-center ${missing ? 'cov-warn' : 'cov-ok'}" style="font-size:8px">${label}</div>
+      bodyHTML += `<td class="${wk ? 'col-weekend' : ''} ${clickable ? 'cursor-pointer' : ''} reperibile-cell" data-rep-d="${d}" title="${escHtml(title)}">
+        <div class="text-center ${cls}" style="font-size:8px">${label}</div>
       </td>`;
     }
     bodyHTML += `<td class="stats-col"></td></tr>`;
@@ -2387,6 +2396,15 @@ function renderStep4() {
         .join('')}
     </div>
   `;
+
+  // Click on the REPERIBILE row cycles through the eligible on-call nurses
+  container.querySelectorAll('.reperibile-cell').forEach(cell => {
+    cell.addEventListener('click', e => {
+      e.stopPropagation();
+      const d = parseInt(cell.dataset.repD);
+      if (Number.isInteger(d)) cycleReperibile(d);
+    });
+  });
 
   // Attach click listeners for inline shift editing
   container.querySelectorAll('.shift-cell').forEach(cell => {
@@ -2499,6 +2517,49 @@ function recalcNurseStats(n) {
   state.stats[n] = { totalHours: Math.round(totalHours * 10) / 10, nights, diurni, weekends };
 }
 
+// ---------------------------------------------------------------------------
+// Reperibile notturno (night on-call) helpers — mirror the solver's rules:
+// with diurni in use (maxCoverageD > 0) the on-call is the nurse on SMONTO
+// today; without diurni it is a nurse on M today whose next-day shift is N.
+// ---------------------------------------------------------------------------
+
+function isReperibileEligibleUI(n, d) {
+  if (!state.schedule || !state.schedule[n]) return false;
+  if ((state.rules.maxCoverageD ?? 0) > 0) return state.schedule[n][d] === 'S';
+  const numDays = daysInMonth(state.year, state.month);
+  if (d >= numDays - 1) return false;
+  return state.schedule[n][d] === 'M' && state.schedule[n][d + 1] === 'N';
+}
+
+function eligibleReperibili(d) {
+  const out = [];
+  if (!state.schedule) return out;
+  for (let n = 0; n < state.schedule.length; n++) {
+    if (isReperibileEligibleUI(n, d)) out.push(n);
+  }
+  return out;
+}
+
+// The designated on-call for day d: the manual override when still valid,
+// otherwise the first eligible nurse; -1 when nobody qualifies.
+function reperibileForDay(d) {
+  const elig = eligibleReperibili(d);
+  const override = state.reperibili ? state.reperibili[d] : undefined;
+  if (override !== undefined && elig.includes(override)) return override;
+  return elig.length ? elig[0] : -1;
+}
+
+function cycleReperibile(d) {
+  const elig = eligibleReperibili(d);
+  if (elig.length < 2) return;
+  const current = reperibileForDay(d);
+  const idx = elig.indexOf(current);
+  if (!state.reperibili) state.reperibili = {};
+  state.reperibili[d] = elig[(idx + 1) % elig.length];
+  saveState();
+  renderStep4();
+}
+
 function revalidate() {
   if (!state.schedule) return;
   const numNurses = state.schedule.length;
@@ -2603,24 +2664,22 @@ function revalidate() {
       });
   }
 
-  // Reperibile notturno: a day with nights tomorrow needs a nurse on M/D today
-  // whose next-day shift is N.
+  // Reperibile notturno: a day with nights tomorrow needs an eligible on-call
+  // (smonto today with diurni in use; M today + N tomorrow otherwise).
   if (state.rules.reperibileNotturno) {
+    const conDiurni = (state.rules.maxCoverageD ?? 0) > 0;
     for (let d = 0; d < numDays - 1; d++) {
+      // Giorno 1 in modalità smonto: senza dati di continuità nessuno può avere S
+      if (conDiurni && d === 0 && !buildPrevMonthTail()) continue;
       let nightTomorrow = false;
-      let hasReperibile = false;
-      for (let n = 0; n < numNurses; n++) {
-        if (state.schedule[n][d + 1] === 'N') {
-          nightTomorrow = true;
-          const today = state.schedule[n][d];
-          if (today === 'M' || today === 'D') hasReperibile = true;
-        }
-      }
-      if (nightTomorrow && !hasReperibile)
+      for (let n = 0; n < numNurses; n++) if (state.schedule[n][d + 1] === 'N') nightTomorrow = true;
+      if (nightTomorrow && reperibileForDay(d) === -1)
         violations.push({
           day: d,
           type: 'reperibile_mancante',
-          msg: `Giorno ${d + 1}: nessun reperibile notturno (mattina/diurno oggi + notte domani)`,
+          msg: conDiurni
+            ? `Giorno ${d + 1}: nessun reperibile notturno (serve un infermiere in smonto)`
+            : `Giorno ${d + 1}: nessun reperibile notturno (mattina oggi + notte domani)`,
         });
     }
   }

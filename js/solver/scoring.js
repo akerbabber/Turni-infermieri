@@ -355,12 +355,19 @@ function hasNightTomorrow(schedule, d, numNurses) {
   return false;
 }
 
-// The night on-call for day d: a nurse working the morning (M or D) on day d
-// whose next-day shift is a night. Returns the nurse index or -1.
-function findReperibile(schedule, d, numNurses) {
+// True when the nurse can serve as night on-call on day d.
+// With diurni in use (maxCovD > 0) the on-call is the nurse on SMONTO today
+// (just off last night's shift); without diurni it is a nurse working the
+// morning today whose next-day shift is a night.
+function isReperibileEligible(schedule, ctx, n, d) {
+  if (ctx.maxCovD > 0) return schedule[n][d] === 'S';
+  return schedule[n][d] === 'M' && schedule[n][d + 1] === 'N';
+}
+
+// The (first) eligible night on-call for day d, or -1 when none exists.
+function findReperibile(schedule, d, numNurses, ctx) {
   for (let n = 0; n < numNurses; n++) {
-    const today = schedule[n][d];
-    if ((today === 'M' || today === 'D') && schedule[n][d + 1] === 'N') return n;
+    if (isReperibileEligible(schedule, ctx, n, d)) return n;
   }
   return -1;
 }
@@ -622,30 +629,31 @@ function computeScore(schedule, ctx) {
     }
   }
 
-  // Soft: more than 2 consecutive R days must be avoided (smonto S excluded —
+  // HARD: more than 2 consecutive R days are not allowed (smonto S excluded —
   // S,R,R after a night is fine, R,R,R is not).
   for (let n = 0; n < numNurses; n++) {
     let consRest = 0;
-    for (let d = 0; d < numDays; d++) {
-      if (schedule[n][d] === 'R') {
+    for (let d = 0; d <= numDays; d++) {
+      if (d < numDays && schedule[n][d] === 'R') {
         consRest++;
       } else {
-        if (consRest > MAX_CONSECUTIVE_REST) soft += (consRest - MAX_CONSECUTIVE_REST) * 14;
+        if (consRest > MAX_CONSECUTIVE_REST) hard += consRest - MAX_CONSECUTIVE_REST;
         consRest = 0;
       }
     }
-    if (consRest > MAX_CONSECUTIVE_REST) soft += (consRest - MAX_CONSECUTIVE_REST) * 14;
   }
 
-  // Soft: weekly rest must stay AT the minimum ("solo 2 riposi"): every rest
-  // above the weekly minimum is penalized — the solver hands out extra shifts,
-  // never extra rest days (any surplus rest is a manual decision).
+  // Weekly rest cap ("solo 2 riposi a settimana"): one extra rest above the
+  // minimum can be unavoidable for D/N cycles (N-S-R blocks + no D-D adjacency
+  // make some 3-rest calendar weeks mathematically forced), so it costs soft
+  // points; from TWO extras up (4+ rests in a week) it is a hard violation.
   if (minRPerWeek > 0) {
     for (let n = 0; n < numNurses; n++) {
       for (const wDays of weekDaysList) {
         const need = requiredRest(wDays.length, minRPerWeek);
         const have = countWeekRest(schedule, n, wDays);
-        if (have > need) soft += (have - need) * 12;
+        if (have > need + 1) hard += have - need - 1;
+        if (have > need) soft += (have - need) * 10;
       }
     }
   }
@@ -655,8 +663,10 @@ function computeScore(schedule, ctx) {
   // tomorrow, so they can be designated as the night on-call.
   if (ctx.reperibileNotturno) {
     for (let d = 0; d < numDays - 1; d++) {
+      // In smonto mode nobody can be on S on day 1 without previous-month data.
+      if (ctx.maxCovD > 0 && d === 0 && !ctx.prevTail) continue;
       if (!hasNightTomorrow(schedule, d, numNurses)) continue;
-      if (findReperibile(schedule, d, numNurses) === -1) hard++;
+      if (findReperibile(schedule, d, numNurses, ctx) === -1) hard++;
     }
   }
 
@@ -897,6 +907,13 @@ function collectViolations(schedule, ctx) {
             type: 'min_R_week',
             msg: `Infermiere ${n + 1}, settimana ${w + 1}: solo ${have} riposi (minimo ${need})`,
           });
+        if (have > need + 1)
+          violations.push({
+            nurse: n,
+            week: w,
+            type: 'troppi_riposi_settimana',
+            msg: `Infermiere ${n + 1}, settimana ${w + 1}: ${have} riposi (massimo ${need + 1})`,
+          });
       }
     }
   }
@@ -982,12 +999,17 @@ function collectViolations(schedule, ctx) {
   // with N tomorrow to serve as the night on-call.
   if (ctx.reperibileNotturno) {
     for (let d = 0; d < numDays - 1; d++) {
+      // In smonto mode nobody can be on S on day 1 without previous-month data.
+      if (ctx.maxCovD > 0 && d === 0 && !ctx.prevTail) continue;
       if (!hasNightTomorrow(schedule, d, numNurses)) continue;
-      if (findReperibile(schedule, d, numNurses) === -1) {
+      if (findReperibile(schedule, d, numNurses, ctx) === -1) {
         violations.push({
           type: 'reperibile_mancante',
           day: d,
-          msg: `Giorno ${d + 1}: nessun reperibile notturno (serve un infermiere con mattina/diurno oggi e notte domani)`,
+          msg:
+            ctx.maxCovD > 0
+              ? `Giorno ${d + 1}: nessun reperibile notturno (serve un infermiere in smonto)`
+              : `Giorno ${d + 1}: nessun reperibile notturno (mattina oggi + notte domani)`,
         });
       }
     }

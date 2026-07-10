@@ -193,6 +193,7 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     repaired = repairDayCoverage(repaired, ctx);
     repaired = repairReperibile(repaired, ctx);
     repaired = repairWeeklyRestDeficits(repaired, ctx);
+    repaired = repairRestExcess(repaired, ctx);
     if (repaired.map(row => row.join('|')).join('\n') === beforePass) break;
   }
   return repaired;
@@ -468,12 +469,15 @@ function placeNightBlock(schedule, nurseIdx, start, noDiurni, numDays) {
  */
 function repairReperibile(schedule, ctx) {
   if (!ctx.reperibileNotturno) return schedule;
+  // With diurni in use the on-call is the nurse on smonto (S today): there is
+  // nothing to repair by swapping M/P — the S cells follow the night blocks.
+  if (ctx.maxCovD > 0) return schedule;
   const { numDays, numNurses } = ctx;
   const repaired = deepCopy(schedule);
 
   for (let d = 0; d < numDays - 1; d++) {
     if (!hasNightTomorrow(repaired, d, numNurses)) continue;
-    if (findReperibile(repaired, d, numNurses) !== -1) continue;
+    if (findReperibile(repaired, d, numNurses, ctx) !== -1) continue;
     // Candidate: a nurse with P today and N tomorrow, to be flipped to M by
     // swapping with a same-day M of another nurse.
     let done = false;
@@ -539,11 +543,21 @@ function isRepairShiftAllowed(props, shiftType) {
   return shiftType === 'M' || shiftType === 'P' || shiftType === 'D';
 }
 
+// True when assigning R at (n, d) would create a run of more than
+// MAX_CONSECUTIVE_REST consecutive R days ("più di 2 riposi attaccati").
+function createsRestRun(schedule, ctx, n, d) {
+  let run = 1;
+  for (let k = d - 1; k >= 0 && schedule[n][k] === 'R'; k--) run++;
+  for (let k = d + 1; k < ctx.numDays && schedule[n][k] === 'R'; k++) run++;
+  return run > MAX_CONSECUTIVE_REST;
+}
+
 function canRepairShiftChange(schedule, ctx, n, d, nextShift) {
   const { numDays, pinned, nurseProps } = ctx;
   if (pinned[n][d] || schedule[n][d] === nextShift) return false;
   if (isMPCycleLimitedNurse(nurseProps[n])) return false;
   if (!isRepairShiftAllowed(nurseProps[n], nextShift)) return false;
+  if (nextShift === 'R' && createsRestRun(schedule, ctx, n, d)) return false;
   if (nextShift === 'R' && isForbiddenExtraNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift !== 'R' && schedule[n][d] === 'R' && isMandatoryNightRestDay(schedule, ctx, n, d)) return false;
   if (nextShift === 'R' && isOptionalRestAfterNSR(schedule, ctx, n, d)) return false;
@@ -1131,6 +1145,129 @@ function repairWeeklyRestDeficits(schedule, ctx) {
           break outer;
         }
       }
+    }
+  }
+
+  return repaired;
+}
+
+/**
+ * Fix rest EXCESS: weekly rests above the cap ("solo 2 riposi a settimana") and
+ * runs of more than MAX_CONSECUTIVE_REST consecutive R days. Surplus rest days
+ * are converted into shifts when the day has coverage headroom, otherwise handed
+ * same-day to a nurse whose week can absorb one more rest. Score-guided.
+ */
+function repairRestExcess(schedule, ctx) {
+  const { numDays, numNurses, nurseProps, minRPerWeek, weekDaysList, weekOf, maxCovM, maxCovP, maxCovD, pinned } = ctx;
+  const repaired = deepCopy(schedule);
+
+  function weekAllowed(wDays) {
+    // One extra rest above the weekly minimum is tolerated (soft), two are hard:
+    // the repair brings weeks back under the hard cap and, when it can do so at
+    // no cost, down to the minimum via the score-guided acceptance.
+    return requiredRest(wDays.length, minRPerWeek) + 1;
+  }
+
+  function runLenAt(n, d) {
+    let run = 1;
+    for (let k = d - 1; k >= 0 && repaired[n][k] === 'R'; k--) run++;
+    for (let k = d + 1; k < numDays && repaired[n][k] === 'R'; k++) run++;
+    return run;
+  }
+
+  function acceptCandidate(mutate) {
+    const currentScore = computeScore(repaired, ctx);
+    const candidate = deepCopy(repaired);
+    mutate(candidate);
+    const score = computeScore(candidate, ctx);
+    if (score.hard < currentScore.hard || (score.hard === currentScore.hard && score.total < currentScore.total)) {
+      for (let row = 0; row < numNurses; row++) repaired[row] = candidate[row];
+      return true;
+    }
+    return false;
+  }
+
+  function tryConvert(n, d) {
+    const cov = dayCoverage(repaired, d, numNurses);
+    const options = [];
+    if (cov.D < maxCovD && cov.M < maxCovM && cov.P < maxCovP) options.push('D');
+    if (cov.M < maxCovM) options.push('M');
+    if (cov.P < maxCovP) options.push('P');
+    for (const s of options) {
+      if (!canRepairShiftChange(repaired, ctx, n, d, s)) continue;
+      if (acceptCandidate(c => (c[n][d] = s))) return true;
+    }
+    return false;
+  }
+
+  function trySwapSameDay(n, d) {
+    const wDays = weekDaysList[weekOf(d)];
+    for (let o = 0; o < numNurses; o++) {
+      if (o === n || pinned[o][d]) continue;
+      const shift = repaired[o][d];
+      if (shift !== 'M' && shift !== 'P' && shift !== 'D') continue;
+      if (countWeekRest(repaired, o, wDays) >= weekAllowed(wDays)) continue;
+      if (!canRepairShiftChange(repaired, ctx, o, d, 'R')) continue;
+      if (!canRepairShiftChange(repaired, ctx, n, d, shift)) continue;
+      if (
+        acceptCandidate(c => {
+          c[o][d] = 'R';
+          c[n][d] = shift;
+        })
+      )
+        return true;
+    }
+    return false;
+  }
+
+  function fixableRestDay(n, d) {
+    return repaired[n][d] === 'R' && !pinned[n][d] && !isMandatoryNightRestDay(repaired, ctx, n, d);
+  }
+
+  for (let n = 0; n < numNurses; n++) {
+    if (isMPCycleLimitedNurse(nurseProps[n])) continue;
+
+    // 1) Weekly excess: bring every week back to its rest cap, starting from the
+    //    rest day inside the longest consecutive run.
+    if (minRPerWeek > 0) {
+      for (const wDays of weekDaysList) {
+        const allowed = weekAllowed(wDays);
+        let guard = wDays.length;
+        while (countWeekRest(repaired, n, wDays) > allowed && guard-- > 0) {
+          const days = wDays.filter(d => fixableRestDay(n, d)).sort((a, b) => runLenAt(n, b) - runLenAt(n, a));
+          let progressed = false;
+          for (const d of days) {
+            if (tryConvert(n, d) || trySwapSameDay(n, d)) {
+              progressed = true;
+              break;
+            }
+          }
+          if (!progressed) break;
+        }
+      }
+    }
+
+    // 2) Residual runs of 3+ consecutive R (possibly spanning week boundaries).
+    for (let d = 0; d < numDays; d++) {
+      if (repaired[n][d] !== 'R') continue;
+      let end = d;
+      while (end + 1 < numDays && repaired[n][end + 1] === 'R') end++;
+      let guard = end - d + 1;
+      while (end - d + 1 > MAX_CONSECUTIVE_REST && guard-- > 0) {
+        let progressed = false;
+        for (let k = d; k <= end; k++) {
+          if (!fixableRestDay(n, k)) continue;
+          if (tryConvert(n, k) || trySwapSameDay(n, k)) {
+            progressed = true;
+            break;
+          }
+        }
+        if (!progressed) break;
+        while (d <= end && repaired[n][d] !== 'R') d++;
+        end = d;
+        while (end + 1 < numDays && repaired[n][end + 1] === 'R') end++;
+      }
+      d = end;
     }
   }
 

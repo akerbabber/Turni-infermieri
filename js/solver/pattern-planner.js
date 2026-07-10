@@ -477,10 +477,9 @@ function patternStateEstimate(state, ctx) {
     score += mDef * mDef * 18 + pDef * pDef * 18 + nDefMin * nDefMin * 260 + nDefTarget * nDefTarget * 25;
     score += dDef * dDef * 18;
     score += mOver * mOver * 220 + pOver * pOver * 220 + nOver * nOver * 520 + dOver * dOver * 220;
-    // Saturation pressure: days should run close to the MAXIMUM coverage, not the
-    // minimum — that is what fills the monthly monte ore instead of leaving
-    // nurses with surplus rest days.
-    score += Math.max(0, ctx.maxCovM - state.covM[d]) * 3 + Math.max(0, ctx.maxCovP - state.covP[d]) * 3;
+    // Note: no linear "saturation pressure" toward the maximums here — with
+    // whole-month rows it overshoots badly; the monte ore saturation is done by
+    // the score-guided repair pass instead (repairDayCoverage).
   }
   return score;
 }
@@ -760,6 +759,8 @@ function patternRowSoftCost(row, ctx, n) {
 
   // A single deficit week (month-boundary artifact of an otherwise valid cycle)
   // is not a hard reject — see patternRowHardCost — but still costs soft points.
+  // Weekly EXCESS ("solo 2 riposi a settimana") is likewise penalized as cost so
+  // the beam prefers denser cycles and leaves residual fixes to the repairs.
   if (ctx.minRPerWeek > 0) {
     let deficitWeeks = 0;
     let deficitUnits = 0;
@@ -771,8 +772,21 @@ function patternRowSoftCost(row, ctx, n) {
         deficitWeeks++;
         deficitUnits += need - have;
       }
+      if (have > need) cost += (have - need) * 20;
     }
     if (deficitWeeks === 1) cost += deficitUnits * 25;
+  }
+
+  // Runs of more than 2 consecutive R inside the row cost as well.
+  {
+    let run = 0;
+    for (let d = 0; d <= ctx.numDays; d++) {
+      if (d < ctx.numDays && row[d] === 'R') run++;
+      else {
+        if (run > 2) cost += (run - 2) * 30;
+        run = 0;
+      }
+    }
   }
   return cost;
 }

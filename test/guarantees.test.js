@@ -288,8 +288,8 @@ describe('fascia oraria automatica', () => {
 });
 
 describe('reperibile notturno', () => {
-  it('segnala reperibile_mancante quando nessuno ha M/D oggi e N domani', () => {
-    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true } }));
+  it('senza diurni: segnala reperibile_mancante quando nessuno ha M oggi e N domani', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true, maxCoverageD: 0 } }));
     const schedule = emptySchedule(bctx);
     schedule[0][5] = 'P'; // pomeriggio, non vale come mattina
     schedule[0][6] = 'N';
@@ -300,8 +300,8 @@ describe('reperibile notturno', () => {
     assert.ok(ctx.computeScore(schedule, bctx).hard > 0);
   });
 
-  it('è soddisfatto da un infermiere con M (o D) oggi e N domani', () => {
-    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true } }));
+  it('senza diurni: soddisfatto da un infermiere con M oggi e N domani', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true, maxCoverageD: 0 } }));
     const schedule = emptySchedule(bctx);
     schedule[0][5] = 'M';
     schedule[0][6] = 'N';
@@ -311,11 +311,65 @@ describe('reperibile notturno', () => {
     assert.ok(!violations.some(v => v.type === 'reperibile_mancante'));
   });
 
+  it('con diurni: il reperibile è chi è in smonto oggi', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true, maxCoverageD: 4 } }));
+    const schedule = emptySchedule(bctx);
+    // Notte di n0 il giorno 5: smonto il 6. Notte di n1 il giorno 7 → il giorno 6
+    // ha "notti domani" e n0 è in smonto → reperibile coperto.
+    schedule[0][5] = 'N';
+    schedule[0][6] = 'S';
+    schedule[0][7] = 'R';
+    schedule[1][6] = 'D';
+    schedule[1][7] = 'N';
+    schedule[1][8] = 'S';
+    schedule[1][9] = 'R';
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(!violations.some(v => v.type === 'reperibile_mancante' && v.day === 6));
+    // Il giorno 4 ha "notte domani" (n0 il 5) ma nessuno in smonto → violazione.
+    assert.ok(violations.some(v => v.type === 'reperibile_mancante' && v.day === 4));
+  });
+
   it('non richiede nulla nei giorni senza notti il giorno dopo', () => {
     const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true } }));
     const schedule = emptySchedule(bctx); // nessuna notte in tutto il mese
     const violations = ctx.collectViolations(schedule, bctx);
     assert.ok(!violations.some(v => v.type === 'reperibile_mancante'));
+  });
+});
+
+describe('limiti hard sui riposi', () => {
+  it('3 R consecutivi sono una violazione hard', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { minRPerWeek: 0 } }));
+    const schedule = emptySchedule(bctx, 'M');
+    schedule[0][10] = 'R';
+    schedule[0][11] = 'R';
+    schedule[0][12] = 'R';
+    assert.ok(ctx.computeScore(schedule, bctx).hard > 0);
+  });
+
+  it('4 o più riposi in una settimana sono una violazione hard (3 solo penalità)', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { minRPerWeek: 2 } }));
+    const schedule = emptySchedule(bctx, 'M');
+    // Aprile 2026: settimana piena 6-12 (lun-dom, indici 5-11)
+    schedule[0][5] = 'R';
+    schedule[0][7] = 'R';
+    schedule[0][9] = 'R';
+    schedule[0][11] = 'R'; // 4 R nella stessa settimana → hard
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(violations.some(v => v.type === 'troppi_riposi_settimana' && v.nurse === 0));
+
+    // Con 3 R (uno oltre il minimo) niente violazione hard, solo penalità soft.
+    schedule[0][11] = 'M';
+    const after = ctx.collectViolations(schedule, bctx);
+    assert.ok(!after.some(v => v.type === 'troppi_riposi_settimana'));
+  });
+
+  it('canRepairShiftChange rifiuta un R che crea 3 riposi attaccati', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { minRPerWeek: 0 } }));
+    const schedule = emptySchedule(bctx, 'M');
+    schedule[0][10] = 'R';
+    schedule[0][12] = 'R';
+    assert.equal(ctx.canRepairShiftChange(schedule, bctx, 0, 11, 'R'), false);
   });
 });
 
