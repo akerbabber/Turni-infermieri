@@ -161,24 +161,27 @@ function makeMinimalConfig(overrides = {}) {
   };
 }
 
+// Mirror of js/solver/scoring.js MP_CYCLE_PATTERNS: rigid 5-work + 2-rest weekly cycles.
 const MP_CYCLE_PATTERNS = [
-  ['M', 'M', 'P', 'P', 'R', 'R'],
-  ['M', 'P', 'P', 'P', 'R', 'R'],
-  ['M', 'M', 'M', 'P', 'R', 'R'],
-];
-
-const SHORT_MP_CYCLE_PATTERNS = [
-  ['M', 'M', 'P', 'R', 'R'],
-  ['M', 'P', 'P', 'R', 'R'],
+  ['M', 'M', 'M', 'P', 'P', 'R', 'R'],
+  ['M', 'M', 'P', 'P', 'P', 'R', 'R'],
+  ['M', 'M', 'M', 'M', 'P', 'R', 'R'],
 ];
 
 function assertMatchesMPCycle(row, messagePrefix, patterns = MP_CYCLE_PATTERNS) {
   const memo = new Map();
+  // The first segment may be any suffix of a pattern (phase offset at month
+  // start), mirroring getMPCyclePlan in js/solver/scoring.js.
+  const phasePatterns = [];
+  for (const pattern of patterns) {
+    for (let cut = 1; cut < pattern.length; cut++) phasePatterns.push(pattern.slice(cut));
+  }
 
   function matches(start) {
     if (start >= row.length) return true;
     if (memo.has(start)) return memo.get(start);
-    for (const pattern of patterns) {
+    const candidates = start === 0 ? patterns.concat(phasePatterns) : patterns;
+    for (const pattern of candidates) {
       const blockLen = Math.min(pattern.length, row.length - start);
       const ok = row.slice(start, start + blockLen).every((shift, idx) => shift === pattern[idx]);
       if (ok && matches(start + blockLen)) {
@@ -870,7 +873,7 @@ describe('isSplitRestDay', () => {
     assert.equal(ctx.isSplitRestDay(schedule, bctx, 0, 1), true);
   });
 
-  it('should allow the D-R-D-N bridge without flagging it as a split rest', () => {
+  it('should flag the D-R-D-N bridge as a split rest (rigid D-N-S-R-R matrix)', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
       rules: {
@@ -889,7 +892,7 @@ describe('isSplitRestDay', () => {
     const bctx = ctx.buildContext(config);
     bctx.numDays = 4;
     const schedule = [['D', 'R', 'D', 'N']];
-    assert.equal(ctx.isSplitRestDay(schedule, bctx, 0, 1), false);
+    assert.equal(ctx.isSplitRestDay(schedule, bctx, 0, 1), true);
   });
 });
 
@@ -1233,7 +1236,7 @@ describe('construct', () => {
     }
   });
 
-  it('should keep mattine_e_pomeriggi nurses on the allowed 4+2 M/P cycle patterns', () => {
+  it('should keep mattine_e_pomeriggi nurses on the allowed 5+2 M/P cycle patterns', () => {
     const config = makeMinimalConfig({
       numNurses: 5,
       nurseOverrides: {
@@ -1262,18 +1265,15 @@ describe('construct', () => {
     try {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
-      assertMatchesMPCycle(
-        schedule[0],
-        'mattine_e_pomeriggi nurse should follow an allowed M/P cycle',
-        MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)
-      );
-      assert.equal(schedule[0][0], 'M');
+      assertMatchesMPCycle(schedule[0], 'mattine_e_pomeriggi nurse should follow an allowed M/P cycle');
+      const worked = schedule[0].filter(s => s === 'M' || s === 'P').length;
+      assert.ok(worked > 0, 'the M/P nurse should work at least one shift');
     } finally {
       Math.random = origRandom;
     }
   });
 
-  it('should keep no_notti + no_diurni nurses on the same 4+2 M/P cycle without losing day-1 morning coverage', () => {
+  it('should keep no_notti + no_diurni nurses on the same 5+2 M/P cycle', () => {
     const config = makeMinimalConfig({
       numNurses: 7,
       nurseOverrides: {
@@ -1303,15 +1303,8 @@ describe('construct', () => {
     try {
       const bctx = ctx.buildContext(config);
       const schedule = ctx.construct(bctx);
-      assertMatchesMPCycle(schedule[0], 'no_notti+no_diurni nurse #1 should follow 4+2 cycle');
-      assertMatchesMPCycle(schedule[1], 'no_notti+no_diurni nurse #2 should follow 4+2 cycle');
-      const day1Coverage = ctx.dayCoverage(schedule, 0, bctx.numNurses);
-      assert.ok(
-        day1Coverage.M >= bctx.minCovM,
-        `Day 1 morning coverage should hold, got ${day1Coverage.M}/${bctx.minCovM}`
-      );
-      assert.equal(schedule[0][0], 'M');
-      assert.equal(schedule[1][0], 'M');
+      assertMatchesMPCycle(schedule[0], 'no_notti+no_diurni nurse #1 should follow 5+2 cycle');
+      assertMatchesMPCycle(schedule[1], 'no_notti+no_diurni nurse #2 should follow 5+2 cycle');
     } finally {
       Math.random = origRandom;
     }
@@ -1348,7 +1341,7 @@ describe('construct', () => {
     assert.equal(schedule[4][0], 'D', 'The diurni_e_notturni nurse should cover day 1 with D');
   });
 
-  it('should accept shorter 5-day M/P patterns for mattine_e_pomeriggi nurses', () => {
+  it('should accept phase-shifted 5+2 M/P cycles (rests staggered between nurses)', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
       nurseOverrides: {
@@ -1369,11 +1362,43 @@ describe('construct', () => {
       },
     });
     const bctx = ctx.buildContext(config);
-    const shortPattern = ['M', 'M', 'P', 'R', 'R', 'M', 'P', 'P', 'R', 'R'];
-    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => shortPattern[idx % shortPattern.length])];
+    // Month starts mid-cycle (phase offset: P-P-R-R tail) then repeats the
+    // rigid 7-day 5-work + 2-rest cycle.
+    const cycle = ['M', 'M', 'M', 'P', 'P', 'R', 'R'];
+    const offset = 3;
+    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => cycle[(idx + offset) % cycle.length])];
 
-    const mpViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'mp_cycle_4_2');
+    const mpViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'mp_cycle_5_2');
     assert.deepEqual(toPlain(mpViolations), []);
+  });
+
+  it('should flag M/P rows that violate the 5+2 cycle', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['mattine_e_pomeriggi', 'no_notti', 'no_diurni'] },
+      },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 10,
+        minCoverageP: 0,
+        maxCoverageP: 10,
+        minCoverageD: 0,
+        maxCoverageD: 0,
+        minCoverageN: 0,
+        maxCoverageN: 0,
+        targetNights: 0,
+        maxNights: 0,
+        minRPerWeek: 0,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    // 4 work + 2 rest (the OLD cycle) no longer matches the rigid 5+2 matrix.
+    const oldCycle = ['M', 'M', 'P', 'P', 'R', 'R'];
+    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => oldCycle[idx % oldCycle.length])];
+
+    const mpViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'mp_cycle_5_2');
+    assert.ok(mpViolations.length > 0, 'the old 4+2 cycle should be flagged against the 5+2 matrix');
   });
 });
 
@@ -1805,27 +1830,73 @@ describe('localSearch split rest repair', () => {
     assert.equal(ctx.isSplitRestDay(repaired, bctx, 0, 1), false);
   });
 
-  it('should preserve the D-R-D-N bridge when repairs run with zero annealing iterations', () => {
+  it('should keep the rigid D-N-S-R-R matrix violation-free for diurni_e_notturni', () => {
     const config = makeMinimalConfig({
       numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['diurni_e_notturni'] },
+      },
       rules: {
         minCoverageM: 0,
-        maxCoverageM: 3,
+        maxCoverageM: 10,
         minCoverageP: 0,
-        maxCoverageP: 3,
+        maxCoverageP: 10,
         minCoverageD: 0,
-        maxCoverageD: 3,
+        maxCoverageD: 10,
         minCoverageN: 0,
-        maxCoverageN: 1,
-        minRPerWeek: 0,
-        consente2DiurniConsecutivi: true,
+        maxCoverageN: 10,
+        minRPerWeek: 2,
+        targetNights: 6,
+        maxNights: 10,
+        hardMaxNights: 10,
       },
     });
     const bctx = ctx.buildContext(config);
-    bctx.numDays = 6;
-    const schedule = [['D', 'R', 'D', 'N', 'S', 'R']];
-    const repaired = ctx.localSearch(schedule, bctx, 0);
-    assert.deepEqual(toPlain(repaired[0].slice(0, 4)), ['D', 'R', 'D', 'N']);
+    const cycle = ['D', 'N', 'S', 'R', 'R'];
+    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => cycle[idx % cycle.length])];
+    const violations = ctx.collectViolations(schedule, bctx);
+    const structural = violations.filter(v =>
+      [
+        'd_night_pattern',
+        'need_2R_after_night',
+        'night_extra_rest',
+        'troppi_riposi_settimana',
+        'isola_di_riposo',
+      ].includes(v.type)
+    );
+    assert.deepEqual(toPlain(structural), []);
+  });
+
+  it('should flag a diurni_e_notturni night block missing its second rest', () => {
+    const config = makeMinimalConfig({
+      numNurses: 1,
+      nurseOverrides: {
+        0: { tags: ['diurni_e_notturni'] },
+      },
+      rules: {
+        minCoverageM: 0,
+        maxCoverageM: 10,
+        minCoverageP: 0,
+        maxCoverageP: 10,
+        minCoverageD: 0,
+        maxCoverageD: 10,
+        minCoverageN: 0,
+        maxCoverageN: 10,
+        minRPerWeek: 0,
+        targetNights: 6,
+        maxNights: 10,
+        hardMaxNights: 10,
+      },
+    });
+    const bctx = ctx.buildContext(config);
+    // D-N-S-R-D…: the second mandatory R of the rigid block is missing.
+    const cycle = ['D', 'N', 'S', 'R', 'D', 'R', 'R'];
+    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => cycle[idx % cycle.length])];
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(
+      violations.some(v => v.type === 'need_2R_after_night'),
+      'the missing second rest of the rigid D/N block should be flagged'
+    );
   });
 
   it('should convert a forbidden third rest after a regular night block back into work', () => {

@@ -12,6 +12,7 @@
   --border: #e5e7eb;
   --accent: #1e3a5f;
   --weekend-bg: #fef9f0;
+  --festivo-bg: #fdeee3;
   --violation-bg: #fef2f2;
   --violation-bdr: #ef4444;
   --scrollbar-thumb: #9ca3af;
@@ -26,6 +27,7 @@ html.dark {
   --border: #334155;
   --accent: #3b82f6;
   --weekend-bg: #1e2a3a;
+  --festivo-bg: #2a2436;
   --violation-bg: #3b1515;
   --violation-bdr: #ef4444;
   --scrollbar-thumb: #475569;
@@ -193,6 +195,11 @@ body {
 /* Weekend columns */
 .col-weekend {
   background-color: var(--weekend-bg) !important;
+}
+
+/* Sunday/holiday columns (reperibile diurno festivo) */
+.col-festivo {
+  background-color: var(--festivo-bg) !important;
 }
 
 /* Coverage row */
@@ -385,6 +392,30 @@ td.violation-cell {
 
 .drag-handle:active {
   cursor: grabbing;
+}
+
+/* Reorder buttons (▲▼) next to the drag handle */
+.nurse-move-buttons {
+  gap: 1px;
+}
+.nurse-move-buttons .btn-move-up,
+.nurse-move-buttons .btn-move-down {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.nurse-move-buttons .btn-move-up:hover:not(:disabled),
+.nurse-move-buttons .btn-move-down:hover:not(:disabled) {
+  color: var(--accent);
+  background-color: var(--weekend-bg);
+}
+.nurse-move-buttons .btn-move-up:disabled,
+.nurse-move-buttons .btn-move-down:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* ---------- Tags ---------- */

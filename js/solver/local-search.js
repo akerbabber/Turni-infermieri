@@ -8,9 +8,9 @@
 
 /* global D_NIGHT_PATTERNS, MP_NIGHT_PATTERNS, canAssignRestrictedNoDiurniRest, computeScore, countWeekRest, dayCoverage, deepCopy */
 /* global getRestPromotionPriority, isForbiddenExtraNightRestDay, isForbiddenRestrictedNoDiurniRestDay */
-/* global getNightPatternInfo, isMPCycleLimitedNurse, isMandatoryNightRestDay, nightCount */
-/* global isOptionalRestAfterNSR, isSplitRestDay, requiredRest, transitionOk, patternShiftAllowed */
-/* global hasNightTomorrow, findReperibile */
+/* global getNightPatternInfo, isMPCycleLimitedNurse, isMandatoryNightRestDay, isNightBlockRestDay, nightCount */
+/* global isOptionalRestAfterNSR, isSplitRestDay, needsSecondNightRest, requiredRest, transitionOk, patternShiftAllowed */
+/* global hasNightOnDay, findReperibile */
 
 // ---------------------------------------------------------------------------
 // Local search — simulated annealing
@@ -66,6 +66,24 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     const temp = useTimeLimit
       ? Math.max(0.1, 120 * Math.exp(-5 * fraction))
       : Math.max(0.1, 120 * Math.pow(0.9945, iter));
+
+    // Periodic light repair: when hard violations persist, run the targeted
+    // coverage repairs on the current state so the annealer keeps searching
+    // from a cleaner basin instead of wasting budget on fixable deficits.
+    if (iter > 0 && iter % 2000 === 0 && currentScore.hard > 0) {
+      let fixedState = repairNightCoverage(current, ctx, 2);
+      fixedState = repairDayCoverage(fixedState, ctx);
+      const fixedScore = computeScore(fixedState, ctx);
+      if (fixedScore.total < currentScore.total) {
+        for (let n = 0; n < numNurses; n++) current[n] = fixedState[n];
+        currentScore = fixedScore;
+        for (let n = 0; n < numNurses; n++) cachedHours[n] = nurseHours(current, n, numDays);
+        if (fixedScore.total < bestScore.total) {
+          best = deepCopy(current);
+          bestScore = fixedScore;
+        }
+      }
+    }
 
     changes.length = 0;
 
@@ -183,7 +201,7 @@ function localSearch(schedule, ctx, maxIter, timeLimitSec) {
     }
   }
   let repaired = deepCopy(best);
-  for (let pass = 0; pass < 3; pass++) {
+  for (let pass = 0; pass < 6; pass++) {
     const beforePass = repaired.map(row => row.join('|')).join('\n');
     repaired = repairNightCoverage(repaired, ctx);
     repaired = repairNightLeadIns(repaired, ctx);
@@ -353,12 +371,12 @@ function addNightBlockCandidate(schedule, ctx, nurseIdx, start) {
   if (start < 0 || start >= numDays || schedule[nurseIdx][start] === 'N') return null;
 
   const candidate = deepCopy(schedule);
-  const blockDays = getNightBlockDays(start, props.noDiurni, numDays);
+  const blockDays = getNightBlockDays(start, props, numDays);
   for (const d of blockDays) {
     if (!canOverwriteForNightRepair(candidate, ctx, nurseIdx, d)) return null;
   }
 
-  placeNightBlock(candidate, nurseIdx, start, props.noDiurni, numDays);
+  placeNightBlock(candidate, nurseIdx, start, props, numDays);
 
   if (props.noDiurni && !ensureNightLeadIn(candidate, ctx, nurseIdx, start, MP_NIGHT_PATTERNS)) return null;
   if (props.diurniENotturni && !ensureNightLeadIn(candidate, ctx, nurseIdx, start, D_NIGHT_PATTERNS)) return null;
@@ -424,10 +442,9 @@ function relocateNightBlock(schedule, ctx, nurseIdx, oldStart, newStart) {
   if (oldStart === newStart || schedule[nurseIdx][oldStart] !== 'N' || newStart < 0 || newStart >= numDays) return null;
 
   const props = nurseProps[nurseIdx];
-  const noDiurni = props.noDiurni;
-  const oldDays = getNightBlockDays(oldStart, noDiurni, numDays);
+  const oldDays = getNightBlockDays(oldStart, props, numDays);
   const oldDaySet = new Set(oldDays);
-  const newDays = getNightBlockDays(newStart, noDiurni, numDays);
+  const newDays = getNightBlockDays(newStart, props, numDays);
   for (const d of oldDays) {
     if (pinned[nurseIdx][d]) return null;
   }
@@ -441,31 +458,33 @@ function relocateNightBlock(schedule, ctx, nurseIdx, oldStart, newStart) {
     }
   }
 
-  placeNightBlock(candidate, nurseIdx, newStart, noDiurni, numDays);
+  placeNightBlock(candidate, nurseIdx, newStart, props, numDays);
   if (props.noDiurni && !ensureNightLeadIn(candidate, ctx, nurseIdx, newStart, MP_NIGHT_PATTERNS)) return null;
   if (props.diurniENotturni && !ensureNightLeadIn(candidate, ctx, nurseIdx, newStart, D_NIGHT_PATTERNS)) return null;
   return candidate;
 }
 
-function getNightBlockDays(start, noDiurni, numDays) {
-  // Every profile uses the 3-day N-S-R block (the second R is always optional).
-  const days = [start];
-  if (start + 1 < numDays) days.push(start + 1);
-  if (start + 2 < numDays) days.push(start + 2);
+function getNightBlockDays(start, props, numDays) {
+  // Every profile uses the 3-day N-S-R block; diurni_e_notturni follow the
+  // rigid 4-day N-S-R-R block (matrix D-N-S-R-R, both rests mandatory).
+  const len = props && props.diurniENotturni ? 4 : 3;
+  const days = [];
+  for (let i = 0; i < len && start + i < numDays; i++) days.push(start + i);
   return days;
 }
 
-function placeNightBlock(schedule, nurseIdx, start, noDiurni, numDays) {
+function placeNightBlock(schedule, nurseIdx, start, props, numDays) {
   schedule[nurseIdx][start] = 'N';
   if (start + 1 < numDays) schedule[nurseIdx][start + 1] = 'S';
   if (start + 2 < numDays) schedule[nurseIdx][start + 2] = 'R';
+  if (props && props.diurniENotturni && start + 3 < numDays) schedule[nurseIdx][start + 3] = 'R';
 }
 
 /**
- * Fix missing night on-calls (reperibile notturno): a day with nights tomorrow
- * needs a nurse working M or D today whose next-day shift is N. The repair swaps
- * M↔P on the same day (coverage neutral) so that a nurse with tomorrow's night
- * gets the morning shift today.
+ * Fix missing night on-calls (reperibile notturno): a day with nights needs a
+ * nurse working the MORNING that day (regime without diurni — the on-call is
+ * "dopo la mattina"). The repair flips a P into M (score-guided) so that the
+ * day gains an eligible on-call.
  */
 function repairReperibile(schedule, ctx) {
   if (!ctx.reperibileNotturno) return schedule;
@@ -475,28 +494,22 @@ function repairReperibile(schedule, ctx) {
   const { numDays, numNurses } = ctx;
   const repaired = deepCopy(schedule);
 
-  for (let d = 0; d < numDays - 1; d++) {
-    if (!hasNightTomorrow(repaired, d, numNurses)) continue;
+  for (let d = 0; d < numDays; d++) {
+    if (!hasNightOnDay(repaired, d, numNurses)) continue;
     if (findReperibile(repaired, d, numNurses, ctx) !== -1) continue;
-    // Candidate: a nurse with P today and N tomorrow, to be flipped to M by
-    // swapping with a same-day M of another nurse.
+    // Nobody works the morning today: promote a P (or a rest day) to M.
     let done = false;
     for (let x = 0; x < numNurses && !done; x++) {
-      if (repaired[x][d] !== 'P' || repaired[x][d + 1] !== 'N') continue;
-      for (let y = 0; y < numNurses && !done; y++) {
-        if (y === x || repaired[y][d] !== 'M') continue;
-        if (!canRepairShiftChange(repaired, ctx, x, d, 'M')) break;
-        if (!canRepairShiftChange(repaired, ctx, y, d, 'P')) continue;
-        const currentScore = computeScore(repaired, ctx);
-        const candidate = deepCopy(repaired);
-        candidate[x][d] = 'M';
-        candidate[y][d] = 'P';
-        const score = computeScore(candidate, ctx);
-        if (score.hard < currentScore.hard || (score.hard === currentScore.hard && score.total <= currentScore.total)) {
-          repaired[x][d] = 'M';
-          repaired[y][d] = 'P';
-          done = true;
-        }
+      const s = repaired[x][d];
+      if (s !== 'P' && s !== 'R') continue;
+      if (!canRepairShiftChange(repaired, ctx, x, d, 'M')) continue;
+      const currentScore = computeScore(repaired, ctx);
+      const candidate = deepCopy(repaired);
+      candidate[x][d] = 'M';
+      const score = computeScore(candidate, ctx);
+      if (score.hard < currentScore.hard || (score.hard === currentScore.hard && score.total <= currentScore.total)) {
+        repaired[x][d] = 'M';
+        done = true;
       }
     }
   }
@@ -595,11 +608,14 @@ function repairDayCoverage(schedule, ctx) {
     return countWeekRest(repaired, n, wDays) > requiredRest(wDays.length, minRPerWeek);
   }
 
-  function canPromoteRest(n, d, shiftType) {
+  function canPromoteRest(n, d, shiftType, relaxWeeklyRest) {
     if (repaired[n][d] !== 'R' || pinned[n][d]) return false;
     if (isMandatoryNightRestDay(repaired, ctx, n, d)) return false;
-    if (isMPCycleLimitedNurse(nurseProps[n])) return false;
-    if (!hasSpareWeeklyRest(n, d)) return false;
+    // Rigid-matrix M/P nurses are normally untouchable, but the daily MINIMUM
+    // coverage outranks the matrix: the relaxed (absolute) pass may promote
+    // their rests too — the residual mp_cycle_5_2 mismatch stays visible.
+    if (!relaxWeeklyRest && isMPCycleLimitedNurse(nurseProps[n])) return false;
+    if (!relaxWeeklyRest && !hasSpareWeeklyRest(n, d)) return false;
     // Shift-aware tag check: e.g. solo_diurni/diurni_e_notturni may take D but not
     // M/P, while no_diurni may take M/P but not D.
     if (nurseProps[n].soloMattine || nurseProps[n].soloNotti) return false;
@@ -667,9 +683,9 @@ function repairDayCoverage(schedule, ctx) {
     return true;
   }
 
-  function promoteRestDay(d, shiftType) {
+  function promoteRestDay(d, shiftType, relaxWeeklyRest) {
     const candidates = shuffle(Array.from({ length: numNurses }, (_, i) => i))
-      .filter(n => canPromoteRest(n, d, shiftType))
+      .filter(n => canPromoteRest(n, d, shiftType, relaxWeeklyRest))
       .sort((a, b) => {
         const aPriority = getRestPromotionPriority(nurseProps[a]);
         const bPriority = getRestPromotionPriority(nurseProps[b]);
@@ -732,6 +748,26 @@ function repairDayCoverage(schedule, ctx) {
         continue;
       }
       if ((second === 'M' ? cov.M : cov.P) < (second === 'M' ? minCovM : minCovP) && convertWithinDay(d, second)) {
+        cov = dayCoverage(repaired, d, numNurses);
+        continue;
+      }
+      break;
+    }
+
+    // Second pass — the daily MINIMUM is an absolute constraint: when the
+    // normal promotions cannot reach it, relax the weekly-rest guard (the same
+    // priority as solveFillMP: minimum coverage wins over the weekly rest
+    // minimum; the residual deficit stays visible as a min_R_week violation).
+    while (cov.D < minCovD && cov.M < maxCovM && cov.P < maxCovP) {
+      if (!promoteRestDay(d, 'D', true)) break;
+      cov = dayCoverage(repaired, d, numNurses);
+    }
+    while (cov.M < minCovM || cov.P < minCovP) {
+      if (cov.M < minCovM && promoteRestDay(d, 'M', true)) {
+        cov = dayCoverage(repaired, d, numNurses);
+        continue;
+      }
+      if (cov.P < minCovP && promoteRestDay(d, 'P', true)) {
         cov = dayCoverage(repaired, d, numNurses);
         continue;
       }
@@ -1224,6 +1260,20 @@ function repairRestExcess(schedule, ctx) {
     return repaired[n][d] === 'R' && !pinned[n][d] && !isMandatoryNightRestDay(repaired, ctx, n, d);
   }
 
+  // Rests that count toward the weekly excess: mandatory night-block rests of
+  // diurni_e_notturni nurses (rigid D-N-S-R-R matrix) are exempt, mirroring
+  // computeScore/collectViolations.
+  function countDiscretionaryWeekRest(n, wDays) {
+    let c = 0;
+    const exemptBlockRests = needsSecondNightRest(nurseProps[n]);
+    for (const d of wDays) {
+      if (repaired[n][d] !== 'R') continue;
+      if (exemptBlockRests && isNightBlockRestDay(repaired, ctx, n, d)) continue;
+      c++;
+    }
+    return c;
+  }
+
   for (let n = 0; n < numNurses; n++) {
     if (isMPCycleLimitedNurse(nurseProps[n])) continue;
 
@@ -1233,7 +1283,7 @@ function repairRestExcess(schedule, ctx) {
       for (const wDays of weekDaysList) {
         const allowed = weekAllowed(wDays);
         let guard = wDays.length;
-        while (countWeekRest(repaired, n, wDays) > allowed && guard-- > 0) {
+        while (countDiscretionaryWeekRest(n, wDays) > allowed && guard-- > 0) {
           const days = wDays.filter(d => fixableRestDay(n, d)).sort((a, b) => runLenAt(n, b) - runLenAt(n, a));
           let progressed = false;
           for (const d of days) {

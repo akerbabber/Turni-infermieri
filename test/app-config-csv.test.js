@@ -420,10 +420,13 @@ describe('manual fixed-pattern protections', () => {
 });
 
 describe('previous month hour compensation', () => {
-  it('should compute previous-month deltas relative to the imported roster average', () => {
+  it('should compute deltas relative to the previous-month contractual monte ore, clamped', () => {
     const currentState = toPlain(ctx._getAppState());
     ctx._setAppState({
       ...currentState,
+      // Planning May 2026 → the imported roster is April 2026 (22 weekdays → 156.64h).
+      month: 4,
+      year: 2026,
       totalNurses: 4,
       absentNurses: 0,
       nurses: [
@@ -438,24 +441,90 @@ describe('previous month hour compensation', () => {
         ['M', 'M'],
         [null, null],
       ],
-      previousMonthHours: [124.0, 130.2, 136.4, null],
+      // A is 6h under the monte ore (recovers), B on target, C 6h over,
+      // D unknown; a 56.64h shortfall is clamped to the ±24h carryover cap.
+      previousMonthHours: [150.64, 156.64, 162.64, null],
     });
 
     const deltas = toPlain(ctx.computePrevMonthDeltas());
 
     assert.deepEqual(deltas, {
-      A: -6.2,
+      A: -6,
       B: 0,
-      C: 6.2,
+      C: 6,
     });
-    const deltaSum = Object.values(deltas).reduce((sum, value) => sum + value, 0);
-    assert.equal(deltaSum, 0);
+
+    ctx._setAppState({
+      ...toPlain(ctx._getAppState()),
+      previousMonthHours: [100, 156.64, 162.64, null],
+    });
+    const clamped = toPlain(ctx.computePrevMonthDeltas());
+    assert.equal(clamped.A, -24);
   });
 
-  it('should build zero-sum hourDeltas for the solver', () => {
+  it('moveNurse keeps names, schedule rows and aliased solution arrays aligned', () => {
+    const currentState = toPlain(ctx._getAppState());
+    const schedule = [
+      ['M', 'P'],
+      ['P', 'M'],
+      ['N', 'S'],
+      ['R', 'R'],
+    ];
+    const stats = [{ totalHours: 1 }, { totalHours: 2 }, { totalHours: 3 }, { totalHours: 4 }];
+    // state.schedule/stats ALIAS the selected solution's arrays, exactly like
+    // applySolveResult/selectSolution do (assignment by reference).
+    const solution = { schedule, stats, violations: [{ nurse: 0, day: 0, type: 'x', msg: 'x' }] };
+    ctx._setAppState({
+      ...currentState,
+      totalNurses: 4,
+      absentNurses: 0,
+      nurses: [
+        { id: 'n1', name: 'A', tags: [], absencePeriods: {} },
+        { id: 'n2', name: 'B', tags: [], absencePeriods: {} },
+        { id: 'n3', name: 'C', tags: [], absencePeriods: {} },
+        { id: 'n4', name: 'D', tags: [], absencePeriods: {} },
+      ],
+      schedule,
+      stats,
+      violations: solution.violations,
+      solutions: [solution],
+      selectedSolution: 0,
+      previousMonthSchedule: [['M'], ['P'], ['N'], ['R']],
+      previousMonthHours: [10, 20, 30, 40],
+      reperibili: { 0: 2 },
+      reperibiliDiurni: {},
+    });
+
+    ctx.moveNurse(0, 2);
+
+    const st = ctx._getAppState();
+    assert.deepEqual(
+      st.nurses.map(n => n.name),
+      ['B', 'C', 'A', 'D']
+    );
+    // The aliased schedule must be moved exactly ONCE (rows follow the names).
+    assert.deepEqual(toPlain(st.schedule), [
+      ['P', 'M'],
+      ['N', 'S'],
+      ['M', 'P'],
+      ['R', 'R'],
+    ]);
+    assert.deepEqual(toPlain(st.solutions[0].schedule), toPlain(st.schedule));
+    assert.equal(st.stats[2].totalHours, 1);
+    // Previous-month data follows the reorder too.
+    assert.deepEqual(toPlain(st.previousMonthHours), [20, 30, 10, 40]);
+    assert.deepEqual(toPlain(st.previousMonthSchedule), [['P'], ['N'], ['M'], ['R']]);
+    // Violation indices and on-call overrides are remapped.
+    assert.equal(st.violations[0].nurse, 2);
+    assert.equal(st.reperibili[0], 1);
+  });
+
+  it('should build hourDeltas that make under-target nurses recover hours', () => {
     const currentState = toPlain(ctx._getAppState());
     ctx._setAppState({
       ...currentState,
+      month: 4,
+      year: 2026,
       totalNurses: 4,
       absentNurses: 0,
       nurses: [
@@ -470,14 +539,13 @@ describe('previous month hour compensation', () => {
         ['M', 'M'],
         [null, null],
       ],
-      previousMonthHours: [124.0, 130.2, 136.4, null],
+      previousMonthHours: [150.64, 156.64, 162.64, null],
     });
 
     const hourDeltas = toPlain(ctx.buildHourDeltas());
 
-    assert.deepEqual(hourDeltas, [6.2, 0, -6.2, 0]);
-    const deltaSum = hourDeltas.reduce((sum, value) => sum + value, 0);
-    assert.equal(deltaSum, 0);
+    // A was 6h under the monte ore → positive adjustment (works more this month).
+    assert.deepEqual(hourDeltas, [6, 0, -6, 0]);
   });
 });
 

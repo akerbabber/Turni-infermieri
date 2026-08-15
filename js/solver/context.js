@@ -25,7 +25,13 @@ function buildContext(config) {
 
   const numDays = daysInMonth(year, month);
   const numNurses = nurses.length;
-  const monthlyTargetHours = getMonthlyContractHours(year, month);
+  // Monthly target: contractual hours (7.12 per weekday) by default; when the
+  // weekly target slider is moved away from 36 it overrides the contract value
+  // (targetHours/5 per weekday). Mirrored in app.js getMonthlyTargetHours.
+  const monthlyTargetHours =
+    rules.targetHours && rules.targetHours !== 36
+      ? Math.round(countWeekdaysInMonth(year, month) * (rules.targetHours / 5) * 100) / 100
+      : getMonthlyContractHours(year, month);
 
   // Forbidden-transition table (may be relaxed by rule flags)
   const forbidden = {
@@ -89,12 +95,25 @@ function buildContext(config) {
         ? maxHoursRule
         : Math.round(maxHoursRule * weeksEquivalent * 10) / 10
       : Infinity;
+  // Weekly fluctuation band (soft): the same sliders, kept at weekly scale.
+  // Weeks may fluctuate between these bounds while the monthly band stays hard.
+  const weeklyMinHours = minHoursRule > 60 ? 0 : minHoursRule;
+  const weeklyMaxHours = maxHoursRule > 0 && maxHoursRule <= 60 ? maxHoursRule : Infinity;
   const preferDiurni = rules.preferDiurni ?? false;
   const coppiaTurni = rules.coppiaTurni ?? null;
   const consente2D = rules.consente2DiurniConsecutivi ?? false;
-  // Night on-call: each day with nights tomorrow needs a nurse on M/D today
-  // whose next-day shift is N. Off unless explicitly enabled by the rules.
+  // Night on-call: each day with nights needs an eligible on-call (smonto today
+  // with diurni in use, morning today otherwise). Off unless explicitly enabled.
   const reperibileNotturno = rules.reperibileNotturno ?? false;
+  // Day on-call on Sundays/holidays: assigned to a nurse working the night that
+  // day. Off unless explicitly enabled by the rules, and structurally impossible
+  // when nights are disallowed (maxCovN = 0) — disabled in that case so the
+  // solver does not chase an unsatisfiable hard constraint.
+  const reperibileDiurnoFestivo = maxCovN > 0 ? (rules.reperibileDiurnoFestivo ?? false) : false;
+
+  // Precomputed Sunday/holiday flags for the month (festivi[d], 0-based day)
+  const festivi = [];
+  for (let d = 0; d < numDays; d++) festivi.push(isFestivoItaliano(year, month, d + 1));
 
   // Pre-compute pinned cells (absences + solo_mattine)
   // pinned[n][d] = shift code or null
@@ -128,12 +147,21 @@ function buildContext(config) {
       const last = tail[tail.length - 1];
       const secondLast = tail.length >= 2 ? tail[tail.length - 2] : null;
 
+      // For diurni_e_notturni the night block is the rigid N-S-R-R, so the
+      // second R must be pinned too when the block crosses the month boundary.
+      const rigidSecondR = nurseProps[n].diurniENotturni;
+      const thirdLast = tail.length >= 3 ? tail[tail.length - 3] : null;
       if (last === 'N') {
-        // N on last day → need S, R at start (the second R is always optional)
+        // N on last day → need S, R at start (second R only for rigid D/N)
         if (!pinned[n][0]) pinned[n][0] = 'S';
         if (numDays > 1 && !pinned[n][1]) pinned[n][1] = 'R';
+        if (rigidSecondR && numDays > 2 && !pinned[n][2]) pinned[n][2] = 'R';
       } else if (last === 'S' && secondLast === 'N') {
         // N-S on last two days → need R at start
+        if (!pinned[n][0]) pinned[n][0] = 'R';
+        if (rigidSecondR && numDays > 1 && !pinned[n][1]) pinned[n][1] = 'R';
+      } else if (rigidSecondR && last === 'R' && secondLast === 'S' && thirdLast === 'N') {
+        // N-S-R on last three days → the rigid block still owes the second R
         if (!pinned[n][0]) pinned[n][0] = 'R';
       }
 
@@ -176,11 +204,15 @@ function buildContext(config) {
     hardMaxNights,
     minMonthlyHours,
     maxMonthlyHours,
+    weeklyMinHours,
+    weeklyMaxHours,
     minRPerWeek,
     preferDiurni,
     coppiaTurni,
     consente2D,
     reperibileNotturno,
+    reperibileDiurnoFestivo,
+    festivi,
     monthlyTargetHours,
     hourDeltas: hourDeltas || null,
     prevTail,

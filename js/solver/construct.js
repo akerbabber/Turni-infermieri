@@ -249,10 +249,12 @@ function construct(ctx) {
   function canNight(n, d) {
     if (schedule[n][d] !== null || nc[n] >= maxNights) return false;
     const noDiurni = nurseProps[n].noDiurni;
-    // Every profile needs the 3-day block N-S-R; the second R is optional and
-    // never placed automatically (rest beyond 2 consecutive days is avoided).
+    const rigidDN = nurseProps[n].diurniENotturni;
+    // Every profile needs the 3-day block N-S-R; diurni_e_notturni need the
+    // rigid 4-day block N-S-R-R (matrix D-N-S-R-R), so day d+3 must be free too.
     if (d + 1 < numDays && schedule[n][d + 1] !== null) return false;
     if (d + 2 < numDays && schedule[n][d + 2] !== null) return false;
+    if (rigidDN && d + 3 < numDays && schedule[n][d + 3] !== null) return false;
 
     // Cannot start night if we're still in mandatory post-night rest period
     // Check backward: if previous day is S, we're at first R position (cannot start night)
@@ -262,6 +264,9 @@ function construct(ctx) {
     // noDiurni nurses need at least two M/P workdays before a new night can start,
     // matching the shortest allowed lead-in patterns before N (M-P, M-M, P-P).
     if (noDiurni && d > 2 && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S') return false;
+    // diurni_e_notturni need the D lead-in day between the block and a new night
+    if (rigidDN && d > 2 && schedule[n][d - 1] === 'R' && schedule[n][d - 2] === 'R' && schedule[n][d - 3] === 'S')
+      return false;
     return true;
   }
 
@@ -269,21 +274,24 @@ function construct(ctx) {
     schedule[n][d] = 'N';
     if (d + 1 < numDays) schedule[n][d + 1] = 'S';
     if (d + 2 < numDays) schedule[n][d + 2] = 'R';
+    // Rigid D/N matrix: the second R is mandatory for diurni_e_notturni
+    if (nurseProps[n].diurniENotturni && d + 3 < numDays) schedule[n][d + 3] = 'R';
     nc[n]++;
   }
 
   // 2a — Ensure minimum night coverage per day (with smart spreading)
   const nightStarts = new Array(numDays).fill(0);
 
-  // Calculate optimal spacing per nurse: every profile uses the 3-day N-S-R
-  // block; noDiurni nurses additionally need two M/P lead-in workdays before the
-  // next night (cycle 5), the others just one lead-in day (cycle 4).
+  // Calculate optimal spacing per nurse: noDiurni nurses need two M/P lead-in
+  // workdays before the next night (cycle 5); diurni_e_notturni follow the
+  // rigid 5-day matrix D-N-S-R-R (cycle 5); the other profiles use the 3-day
+  // N-S-R block plus one lead-in day (cycle 4).
 
   // Assign initial starting offsets to spread nurses across the cycle
   const nurseStartOffset = new Map();
   const nurseCycleLen = new Map();
   nightEligible.forEach((n, idx) => {
-    const nCycle = nurseProps[n].noDiurni ? 5 : 4;
+    const nCycle = nurseProps[n].noDiurni || nurseProps[n].diurniENotturni ? 5 : 4;
     nurseCycleLen.set(n, nCycle);
     nurseStartOffset.set(n, idx % nCycle);
   });
@@ -365,8 +373,9 @@ function construct(ctx) {
         if (prev === 'R' && d > 1 && schedule[n][d - 2] === 'S') continue; // Second R after N-S, mandatory
       }
 
-      // Check if we can clear the required slots (N-S-R for every profile)
-      const needSlots = 3;
+      // Check if we can clear the required slots: N-S-R for every profile,
+      // N-S-R-R for the rigid diurni_e_notturni matrix.
+      const needSlots = nurseProps[n].diurniENotturni ? 4 : 3;
       if (d + needSlots > numDays) continue;
 
       let canClear = true;
@@ -451,8 +460,8 @@ function construct(ctx) {
       // Find nurse with most nights to remove
       nightNurses.sort((a, b) => nc[b] - nc[a]);
       const n = nightNurses.shift();
-      // Clear the N-S-R block (set to null to be filled later by day shift phase)
-      const needSlots = 3;
+      // Clear the night block (set to null to be filled later by day shift phase)
+      const needSlots = nurseProps[n].diurniENotturni ? 4 : 3;
       for (let i = 0; i < needSlots && d + i < numDays; i++) {
         if (!pinned[n][d + i]) schedule[n][d + i] = null;
       }
@@ -463,13 +472,22 @@ function construct(ctx) {
   }
 
   // Phase 3 — Day shifts (M, P, D)
-  for (let n = 0; n < numNurses; n++) {
-    if (!isMPCycleLimitedNurse(nurseProps[n])) continue;
+  // M/P-limited nurses follow the rigid 5-work + 2-rest weekly cycle. Their
+  // initial phase is staggered across nurses so the R-R days do not all land
+  // on the same calendar days (which would sink M/P coverage twice a week).
+  const mpLimited = [];
+  for (let n = 0; n < numNurses; n++) if (isMPCycleLimitedNurse(nurseProps[n])) mpLimited.push(n);
+  mpLimited.forEach((n, mpIdx) => {
     const patterns = getAllowedMPCyclePatterns(nurseProps[n]);
+    const cycleLen = patterns[0].length;
+    const phaseCut = mpLimited.length > 1 ? Math.floor((mpIdx * cycleLen) / mpLimited.length) % cycleLen : 0;
+    let firstBlock = phaseCut > 0;
     for (let startDay = 0; startDay < numDays; ) {
       let bestPattern = null;
       let bestScore = -Infinity;
-      for (const pattern of patterns) {
+      for (const base of patterns) {
+        const pattern = firstBlock ? base.slice(phaseCut) : base;
+        if (pattern.length === 0) continue;
         const score = scoreMPCyclePattern(n, startDay, pattern);
         if (score > bestScore) {
           bestScore = score;
@@ -477,11 +495,13 @@ function construct(ctx) {
         }
       }
       if (!bestPattern || bestScore === -Infinity) {
-        // Advance by one day so mattine_e_pomeriggi nurses can still pick up a shorter
-        // 5-day pattern starting at the next slot when the current alignment is blocked.
+        // Advance by one day so the nurse can re-align with the cycle at the
+        // next slot when the current alignment is blocked (e.g. by absences).
+        // The phase offset stays available until the first block is placed.
         startDay++;
         continue;
       }
+      firstBlock = false;
       const blockLen = Math.min(bestPattern.length, numDays - startDay);
       for (let offset = 0; offset < blockLen; offset++) {
         const day = startDay + offset;
@@ -489,7 +509,7 @@ function construct(ctx) {
       }
       startDay += blockLen;
     }
-  }
+  });
 
   function eligible(n, d, s) {
     if (schedule[n][d] !== null) return false;
@@ -694,8 +714,10 @@ function construct(ctx) {
       if (nurseProps[n].noDiurni) {
         fillNoDiurniNightPattern(n, d);
       } else if (nurseProps[n].diurniENotturni) {
+        // Rigid matrix D-N-S-R-R: D right before the night, next D after the
+        // two mandatory rests (d+3 is the second R, so the next work day is d+4).
         fillPostNightWork(n, d - 1, 'D');
-        fillPostNightWork(n, d + 3, 'D');
+        fillPostNightWork(n, d + 4, 'D');
       }
     }
   }
@@ -704,9 +726,13 @@ function construct(ctx) {
   for (let n = 0; n < numNurses; n++)
     for (let d = 0; d < numDays; d++) if (schedule[n][d] === null) schedule[n][d] = 'R';
 
-  // Phase 4.5 — Weekly rest enforcement
+  // Phase 4.5 — Weekly rest enforcement. M/P-limited nurses are skipped: their
+  // rigid 5+2 cycle already carries 2 rests per full week, and flipping one of
+  // their work days to R would corrupt the matrix (any boundary-week artifact
+  // is handled by the phase-aware cycle check instead).
   if (minRPerWeek > 0) {
     for (let n = 0; n < numNurses; n++) {
+      if (isMPCycleLimitedNurse(nurseProps[n])) continue;
       for (const wDays of weekDaysList) {
         let rest = countWeekRest(schedule, n, wDays);
         const need = requiredRest(wDays.length, minRPerWeek);

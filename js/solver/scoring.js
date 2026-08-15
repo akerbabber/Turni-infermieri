@@ -91,16 +91,28 @@ function hasForbiddenExtraNightRest(schedule, ctx, nurseIdx, nightDayIdx) {
   );
 }
 
-// Detect the mandatory rest day of a night block: only the first R immediately
-// after S is locked. The second R after N-S-R is ALLOWED but never mandatory
-// (per updated contract rules) — see isOptionalRestAfterNSR.
+// True for profiles whose night block is the rigid 4-day N-S-R-R (both rests
+// mandatory): the diurni_e_notturni matrix is D-N-S-R-R with no shortcuts.
+function needsSecondNightRest(props) {
+  return !!(props && props.diurniENotturni);
+}
+
+// Detect the mandatory rest days of a night block: the first R immediately
+// after S is locked for everyone; the second R (N-S-R-R) is locked only for
+// diurni_e_notturni profiles (rigid D-N-S-R-R matrix) — for the others it is
+// allowed but never mandatory, see isOptionalRestAfterNSR.
 function isMandatoryNightRestDay(schedule, ctx, nurseIdx, dayIdx) {
   if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
   if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
-  return getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'S';
+  if (getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'S') return true;
+  if (needsSecondNightRest(ctx.nurseProps && ctx.nurseProps[nurseIdx])) {
+    return isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx);
+  }
+  return false;
 }
 
-// The second R after N-S-R: allowed for every profile, required by none.
+// The second R after N-S-R: allowed for every profile, required only by the
+// diurni_e_notturni matrix (see isMandatoryNightRestDay).
 function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
   if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0) return false;
   if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
@@ -109,6 +121,28 @@ function isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx) {
     getShiftAt(schedule, ctx, nurseIdx, dayIdx - 2) === 'S' &&
     getShiftAt(schedule, ctx, nurseIdx, dayIdx - 3) === 'N'
   );
+}
+
+// True when day coverage `cov` still has headroom on a shift THIS nurse could
+// actually work (tag-aware): a rest is "avoidable" only if the nurse could
+// have been assigned somewhere with spare capacity.
+function nurseHasSpareCapacityOn(cov, ctx, props) {
+  return (
+    (cov.M < ctx.maxCovM && isRepairShiftAllowed(props, 'M')) ||
+    (cov.P < ctx.maxCovP && isRepairShiftAllowed(props, 'P')) ||
+    (cov.N < ctx.maxCovN && isRepairShiftAllowed(props, 'N')) ||
+    (cov.D < ctx.maxCovD && isRepairShiftAllowed(props, 'D'))
+  );
+}
+
+// An R that belongs to a night recovery block (first R after S, or the second
+// R of N-S-R-R). Used to exempt structural block rests from the weekly rest
+// EXCESS accounting for diurni_e_notturni nurses: their rigid D-N-S-R-R cycle
+// can legitimately place 3-4 block rests inside one calendar week.
+function isNightBlockRestDay(schedule, ctx, nurseIdx, dayIdx) {
+  if (getShiftAt(schedule, ctx, nurseIdx, dayIdx) !== 'R') return false;
+  if (getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'S') return true;
+  return isOptionalRestAfterNSR(schedule, ctx, nurseIdx, dayIdx);
 }
 
 function canAssignRestrictedNoDiurniRest(schedule, ctx, nurseIdx, dayIdx) {
@@ -135,14 +169,6 @@ function isWorkShift(shift) {
   return shift === 'M' || shift === 'P' || shift === 'D' || shift === 'N';
 }
 
-function isDRDNBridge(schedule, ctx, nurseIdx, dayIdx) {
-  return (
-    getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1) === 'D' &&
-    getShiftAt(schedule, ctx, nurseIdx, dayIdx + 1) === 'D' &&
-    getShiftAt(schedule, ctx, nurseIdx, dayIdx + 2) === 'N'
-  );
-}
-
 function isSplitRestDay(schedule, ctx, nurseIdx, dayIdx) {
   if (nurseIdx === undefined || nurseIdx === null || dayIdx < 0 || dayIdx >= ctx.numDays) return false;
   if (ctx.pinned && ctx.pinned[nurseIdx] && ctx.pinned[nurseIdx][dayIdx]) return false;
@@ -153,9 +179,6 @@ function isSplitRestDay(schedule, ctx, nurseIdx, dayIdx) {
   const prev = getShiftAt(schedule, ctx, nurseIdx, dayIdx - 1);
   const next = getShiftAt(schedule, ctx, nurseIdx, dayIdx + 1);
   if (!isWorkShift(prev) || !isWorkShift(next)) return false;
-
-  // Keep the D-R-D-N bridge available when diurni need to stay separated before a night.
-  if (isDRDNBridge(schedule, ctx, nurseIdx, dayIdx)) return false;
 
   return true;
 }
@@ -214,15 +237,11 @@ function requiredRest(weekLen, minR) {
   return Math.max(1, Math.ceil((weekLen * minR) / 7));
 }
 
+// Rigid M/P weekly matrix: 5 working days + 2 consecutive rest days (7-day cycle).
 const MP_CYCLE_PATTERNS = [
-  ['M', 'M', 'P', 'P', 'R', 'R'],
-  ['M', 'P', 'P', 'P', 'R', 'R'],
-  ['M', 'M', 'M', 'P', 'R', 'R'],
-];
-
-const SHORT_MP_CYCLE_PATTERNS = [
-  ['M', 'M', 'P', 'R', 'R'],
-  ['M', 'P', 'P', 'R', 'R'],
+  ['M', 'M', 'M', 'P', 'P', 'R', 'R'],
+  ['M', 'M', 'P', 'P', 'P', 'R', 'R'],
+  ['M', 'M', 'M', 'M', 'P', 'R', 'R'],
 ];
 const MP_NIGHT_PATTERNS = [
   ['M', 'M', 'P'],
@@ -233,10 +252,9 @@ const MP_NIGHT_PATTERNS = [
   ['M', 'M'],
   ['P', 'P'],
 ];
-const D_NIGHT_PATTERNS = [['D'], ['D', 'R', 'D']];
-const MP_CYCLE_PATTERN_LABELS = MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS)
-  .map(pattern => pattern.join('-'))
-  .join(', ');
+// Rigid D/N matrix lead-in: the day before a night must be a D (cycle D-N-S-R-R).
+const D_NIGHT_PATTERNS = [['D']];
+const MP_CYCLE_PATTERN_LABELS = MP_CYCLE_PATTERNS.map(pattern => pattern.join('-')).join(', ');
 const MP_NIGHT_PATTERN_LABELS = MP_NIGHT_PATTERNS.map(pattern => pattern.join('-')).join(', ');
 const D_NIGHT_PATTERN_LABELS = D_NIGHT_PATTERNS.map(pattern => pattern.join('-')).join(', ');
 
@@ -244,8 +262,8 @@ function isMPCycleLimitedNurse(props) {
   return props.mattineEPomeriggi || (props.noNotti && props.noDiurni);
 }
 
-function getAllowedMPCyclePatterns(props) {
-  return props.mattineEPomeriggi ? MP_CYCLE_PATTERNS.concat(SHORT_MP_CYCLE_PATTERNS) : MP_CYCLE_PATTERNS;
+function getAllowedMPCyclePatterns() {
+  return MP_CYCLE_PATTERNS;
 }
 
 function isAllowedMPCycleShift(shift) {
@@ -254,46 +272,66 @@ function isAllowedMPCycleShift(shift) {
 
 function getMPCyclePlan(schedule, nurseIdx, numDays, props) {
   const row = schedule[nurseIdx];
-  const patterns = getAllowedMPCyclePatterns(props);
+  const basePatterns = getAllowedMPCyclePatterns(props);
+  // At month start the nurse may be mid-cycle (phase offset): allow any suffix
+  // of a pattern as the first segment so rest days can be staggered between
+  // nurses while every full cycle stays a rigid 5-work + 2-rest week.
+  const phasePatterns = [];
+  for (const pattern of basePatterns) {
+    for (let cut = 1; cut < pattern.length; cut++) phasePatterns.push(pattern.slice(cut));
+  }
   const memo = new Map();
 
-  function solve(startDay) {
+  function scoreBlock(startDay, pattern) {
+    // The block is truncated at the month end or at the first non-comparable
+    // cell (absences interrupt the cycle without invalidating it).
+    let mismatch = 0;
+    let blockLen = 0;
+    for (let offset = 0; offset < pattern.length && startDay + offset < numDays; offset++) {
+      const shift = row[startDay + offset];
+      if (!isAllowedMPCycleShift(shift)) break;
+      if (shift !== pattern[offset]) mismatch++;
+      blockLen++;
+    }
+    if (blockLen === 0) return null;
+    return { blockLen, mismatch };
+  }
+
+  function solve(startDay, allowPhase) {
     if (startDay >= numDays) return { mismatch: 0, segments: [] };
-    if (memo.has(startDay)) return memo.get(startDay);
+    const key = startDay * 2 + (allowPhase ? 1 : 0);
+    if (memo.has(key)) return memo.get(key);
+
+    // Non-comparable cell (absence code): skip it and resume the cycle with a
+    // free phase, so the 5+2 matrix stays validated after every absence.
+    if (!isAllowedMPCycleShift(row[startDay])) {
+      const skipped = solve(startDay + 1, true);
+      memo.set(key, skipped);
+      return skipped;
+    }
 
     let best = { mismatch: Infinity, segments: [] };
-    for (const pattern of patterns) {
-      const blockLen = Math.min(pattern.length, numDays - startDay);
-      let mismatch = 0;
-      let comparable = false;
-      for (let offset = 0; offset < blockLen; offset++) {
-        const shift = row[startDay + offset];
-        if (!isAllowedMPCycleShift(shift)) {
-          comparable = false;
-          mismatch = Infinity;
-          break;
-        }
-        comparable = true;
-        if (shift !== pattern[offset]) mismatch++;
-      }
-      if (!comparable || !Number.isFinite(mismatch)) continue;
+    const candidates = allowPhase ? basePatterns.concat(phasePatterns) : basePatterns;
+    for (const pattern of candidates) {
+      const block = scoreBlock(startDay, pattern);
+      if (!block) continue;
 
-      const tail = solve(startDay + blockLen);
-      const totalMismatch = mismatch + tail.mismatch;
+      const tail = solve(startDay + block.blockLen, false);
+      const totalMismatch = block.mismatch + tail.mismatch;
       if (totalMismatch < best.mismatch) {
         best = {
           mismatch: totalMismatch,
-          segments: [{ startDay, blockLen, mismatch, pattern }, ...tail.segments],
+          segments: [{ startDay, blockLen: block.blockLen, mismatch: block.mismatch, pattern }, ...tail.segments],
         };
       }
     }
 
     const result = Number.isFinite(best.mismatch) ? best : { mismatch: 0, segments: [] };
-    memo.set(startDay, result);
+    memo.set(key, result);
     return result;
   }
 
-  return solve(0);
+  return solve(0, true);
 }
 
 function getMPCycleBlockMismatch(schedule, nurseIdx, startDay, numDays, props) {
@@ -347,27 +385,37 @@ function getNightPatternInfo(schedule, ctx, nurseIdx, nightDayIdx) {
 // Reperibile notturno (night on-call) helpers
 // ---------------------------------------------------------------------------
 
-// True when at least one nurse works a night on day d+1.
-function hasNightTomorrow(schedule, d, numNurses) {
+// True when at least one nurse works a night on day d (the night starting
+// that evening — the one the on-call backs up).
+function hasNightOnDay(schedule, d, numNurses) {
   for (let n = 0; n < numNurses; n++) {
-    if (schedule[n][d + 1] === 'N') return true;
+    if (schedule[n][d] === 'N') return true;
   }
   return false;
 }
 
 // True when the nurse can serve as night on-call on day d.
 // With diurni in use (maxCovD > 0) the on-call is the nurse on SMONTO today
-// (just off last night's shift); without diurni it is a nurse working the
-// morning today whose next-day shift is a night.
+// (just off last night's shift); without diurni it is a nurse who worked the
+// MORNING today ("dopo la mattina" — no other requirement).
 function isReperibileEligible(schedule, ctx, n, d) {
   if (ctx.maxCovD > 0) return schedule[n][d] === 'S';
-  return schedule[n][d] === 'M' && schedule[n][d + 1] === 'N';
+  return schedule[n][d] === 'M';
 }
 
 // The (first) eligible night on-call for day d, or -1 when none exists.
 function findReperibile(schedule, d, numNurses, ctx) {
   for (let n = 0; n < numNurses; n++) {
     if (isReperibileEligible(schedule, ctx, n, d)) return n;
+  }
+  return -1;
+}
+
+// Day on-call for Sundays/holidays: assigned to a nurse working the night that
+// same day (both regimes). Returns the first eligible nurse, or -1.
+function findReperibileDiurno(schedule, d, numNurses) {
+  for (let n = 0; n < numNurses; n++) {
+    if (schedule[n][d] === 'N') return n;
   }
   return -1;
 }
@@ -426,8 +474,12 @@ function computeScore(schedule, ctx) {
   // the solver guarantees the required daily minimums first and only then assigns extra
   // staff toward the maximum. Night overcoverage is penalized 3× harder so the solver
   // prefers to exceed on M/P/D positions rather than on night shifts.
+  // covByDay[d]: daily coverage, reused by the weekly rest-excess accounting to
+  // decide (tag-aware) when an extra rest was avoidable vs. structural.
+  const covByDay = new Array(numDays);
   for (let d = 0; d < numDays; d++) {
     const cov = dayCoverage(schedule, d, numNurses);
+    covByDay[d] = cov;
     if (cov.M < minCovM) hard += (minCovM - cov.M) * UNDER_COVERAGE_WEIGHT;
     if (cov.M > maxCovM) hard += cov.M - maxCovM;
     if (cov.P < minCovP) hard += (minCovP - cov.P) * UNDER_COVERAGE_WEIGHT;
@@ -476,8 +528,15 @@ function computeScore(schedule, ctx) {
       // S must be followed by R
       if (cur === 'S' && nxt !== 'R') hard++;
     }
-    // Note: the second R after N-S-R is optional for every profile (allowed but
-    // never required), so no hard penalty is applied here anymore.
+    // Rigid D/N matrix: for diurni_e_notturni the night block is N-S-R-R, so
+    // the second R (day N+3) is mandatory whenever it falls inside the month.
+    // For every other profile the second R stays optional.
+    if (needsSecondNightRest(nurseProps[n])) {
+      for (let d = -3; d < numDays - 3; d++) {
+        if (getShiftAt(schedule, ctx, n, d) !== 'N') continue;
+        if (d + 3 >= 0 && schedule[n][d + 3] !== 'R') hard++;
+      }
+    }
     // D-D must be followed by R; no 3 consecutive D
     if (consente2D) {
       for (let d = 1; d < numDays - 1; d++) {
@@ -489,8 +548,13 @@ function computeScore(schedule, ctx) {
     }
     // Weekly rest — weighted 2× so the annealer does not systematically strip
     // rest days to patch coverage (which weighs UNDER_COVERAGE_WEIGHT).
+    // Partial boundary weeks are exempt for rigid-matrix M/P nurses: their 5+2
+    // cycle guarantees 2 rests per full week, and a month starting or ending
+    // mid-cycle is a calendar artifact, not a violation.
     if (minRPerWeek > 0) {
+      const mpMatrix = isMPCycleLimitedNurse(nurseProps[n]);
       for (const wDays of weekDaysList) {
+        if (mpMatrix && wDays.length < 7) continue;
         const need = requiredRest(wDays.length, minRPerWeek);
         const have = countWeekRest(schedule, n, wDays);
         if (have < need) hard += (need - have) * 2;
@@ -518,6 +582,25 @@ function computeScore(schedule, ctx) {
     // Deficit hours weigh more than surplus: the monthly monte ore must be met,
     // extra shifts are always preferable to missing hours.
     soft += hourDiff < 0 ? Math.abs(hourDiff) * 7 : Math.abs(hourDiff) * 3;
+  }
+
+  // Soft: weekly hour fluctuation band. The weekly min/max sliders bound how
+  // much a single calendar week may fluctuate; weeks outside the band cost
+  // light soft points — the monthly monte ore stays the binding hard target,
+  // so later weeks can compensate earlier ones ("il tornaconto mensile").
+  if (ctx.weeklyMinHours > 0 || ctx.weeklyMaxHours < Infinity) {
+    for (let n = 0; n < numNurses; n++) {
+      for (const wDays of weekDaysList) {
+        if (wDays.length < 4) continue; // skip tiny boundary weeks
+        let wh = 0;
+        for (const d of wDays) wh += SHIFT_HOURS[schedule[n][d]] || 0;
+        const scale = wDays.length / 7;
+        const lo = ctx.weeklyMinHours * scale;
+        const hi = ctx.weeklyMaxHours === Infinity ? Infinity : ctx.weeklyMaxHours * scale;
+        if (wh < lo) soft += lo - wh;
+        else if (wh > hi) soft += wh - hi;
+      }
+    }
   }
 
   // Soft: night-count fairness
@@ -647,26 +730,52 @@ function computeScore(schedule, ctx) {
   // minimum can be unavoidable for D/N cycles (N-S-R blocks + no D-D adjacency
   // make some 3-rest calendar weeks mathematically forced), so it costs soft
   // points; from TWO extras up (4+ rests in a week) it is a hard violation.
+  // Two exemptions keep the rigid matrices intact: (a) mandatory night-block
+  // rests of diurni_e_notturni nurses never count toward the excess (their
+  // D-N-S-R-R cycle can align 3-4 block rests inside one calendar week);
+  // (b) when the week has no spare coverage capacity (every shift already at
+  // its maximum) the surplus rest is structural over-staffing, soft only.
   if (minRPerWeek > 0) {
     for (let n = 0; n < numNurses; n++) {
+      const exemptBlockRests = needsSecondNightRest(nurseProps[n]);
+      const mpMatrixExcess = isMPCycleLimitedNurse(nurseProps[n]);
       for (const wDays of weekDaysList) {
+        // Partial boundary weeks are exempt for rigid-matrix M/P nurses (their
+        // phase can legally place the R-R pair inside a 1-2 day calendar week).
+        if (mpMatrixExcess && wDays.length < 7) continue;
         const need = requiredRest(wDays.length, minRPerWeek);
         const have = countWeekRest(schedule, n, wDays);
-        if (have > need + 1) hard += have - need - 1;
-        if (have > need) soft += (have - need) * 10;
+        let discretionary = have;
+        let hasSpareDay = false;
+        for (const d of wDays) {
+          if (schedule[n][d] !== 'R') continue;
+          if (exemptBlockRests && isNightBlockRestDay(schedule, ctx, n, d)) discretionary--;
+          else if (nurseHasSpareCapacityOn(covByDay[d], ctx, nurseProps[n])) hasSpareDay = true;
+        }
+        if (discretionary > need + 1 && hasSpareDay) hard += discretionary - need - 1;
+        if (discretionary > need) soft += (discretionary - need) * 10;
       }
     }
   }
 
-  // Hard: reperibile notturno — every day with nights scheduled tomorrow must
-  // have at least one nurse working the morning (M or D) today AND the night
-  // tomorrow, so they can be designated as the night on-call.
+  // Hard: reperibile notturno — every day with nights scheduled must have an
+  // eligible on-call: a nurse on smonto today (regime with diurni) or a nurse
+  // who worked the morning today (regime without diurni).
   if (ctx.reperibileNotturno) {
-    for (let d = 0; d < numDays - 1; d++) {
+    for (let d = 0; d < numDays; d++) {
       // In smonto mode nobody can be on S on day 1 without previous-month data.
       if (ctx.maxCovD > 0 && d === 0 && !ctx.prevTail) continue;
-      if (!hasNightTomorrow(schedule, d, numNurses)) continue;
+      if (!hasNightOnDay(schedule, d, numNurses)) continue;
       if (findReperibile(schedule, d, numNurses, ctx) === -1) hard++;
+    }
+  }
+
+  // Hard: reperibile diurno festivo — every Sunday/holiday must have a nurse
+  // working the night that day, so they can be designated as the day on-call.
+  if (ctx.reperibileDiurnoFestivo && ctx.festivi) {
+    for (let d = 0; d < numDays; d++) {
+      if (!ctx.festivi[d]) continue;
+      if (findReperibileDiurno(schedule, d, numNurses) === -1) hard++;
     }
   }
 
@@ -697,8 +806,11 @@ function collectViolations(schedule, ctx) {
   } = ctx;
   const violations = [];
 
+  // Mirror of computeScore: daily coverage reused by the rest-excess checks.
+  const covByDay = new Array(numDays);
   for (let d = 0; d < numDays; d++) {
     const cov = dayCoverage(schedule, d, numNurses);
+    covByDay[d] = cov;
     if (cov.M < minCovM)
       violations.push({
         day: d,
@@ -833,7 +945,21 @@ function collectViolations(schedule, ctx) {
           msg: `Infermiere ${n + 1}, giorno ${d + 1}: S non seguito da R (primo riposo dopo smonto)`,
         });
     }
-    // The second R after N-S-R is optional for every profile: no violation.
+    // Rigid D/N matrix: for diurni_e_notturni the second R of N-S-R-R is
+    // mandatory (D-N-S-R-R cycle). For every other profile it stays optional.
+    if (needsSecondNightRest(nurseProps[n])) {
+      for (let d = -3; d < numDays - 3; d++) {
+        if (getShiftAt(schedule, ctx, n, d) !== 'N') continue;
+        if (d + 3 >= 0 && schedule[n][d + 3] !== 'R') {
+          violations.push({
+            nurse: n,
+            day: Math.max(0, d),
+            type: 'need_2R_after_night',
+            msg: `Infermiere ${n + 1}, giorno ${Math.max(0, d) + 1}: la matrice D-N-S-R-R richiede due riposi dopo lo smonto`,
+          });
+        }
+      }
+    }
     if (consente2D) {
       for (let d = 1; d < numDays - 1; d++) {
         if (schedule[n][d - 1] === 'D' && schedule[n][d] === 'D' && schedule[n][d + 1] !== 'R')
@@ -884,10 +1010,10 @@ function collectViolations(schedule, ctx) {
           violations.push({
             nurse: n,
             day: segment.startDay,
-            type: 'mp_cycle_4_2',
+            type: 'mp_cycle_5_2',
             msg:
               `Infermiere ${n + 1}, giorni ${segment.startDay + 1}-${Math.min(numDays, segment.startDay + segment.blockLen)}: ` +
-              `il ciclo M/P deve seguire uno tra ${MP_CYCLE_PATTERN_LABELS}`,
+              `il ciclo M/P deve seguire 5 giorni di lavoro + 2 riposi (${MP_CYCLE_PATTERN_LABELS})`,
           });
         }
       }
@@ -896,23 +1022,39 @@ function collectViolations(schedule, ctx) {
 
   if (minRPerWeek > 0) {
     for (let n = 0; n < numNurses; n++) {
+      const exemptBlockRests = needsSecondNightRest(nurseProps[n]);
+      const mpMatrix = isMPCycleLimitedNurse(nurseProps[n]);
       for (let w = 0; w < weekDaysList.length; w++) {
         const wDays = weekDaysList[w];
         const need = requiredRest(wDays.length, minRPerWeek);
         const have = countWeekRest(schedule, n, wDays);
-        if (have < need)
+        // Partial boundary weeks are exempt for rigid-matrix M/P nurses
+        // (mirror of computeScore).
+        if (have < need && !(mpMatrix && wDays.length < 7))
           violations.push({
             nurse: n,
             week: w,
             type: 'min_R_week',
             msg: `Infermiere ${n + 1}, settimana ${w + 1}: solo ${have} riposi (minimo ${need})`,
           });
-        if (have > need + 1)
+        // Mirror of computeScore: exclude mandatory night-block rests for
+        // diurni_e_notturni, exempt partial boundary weeks for rigid-matrix
+        // M/P nurses, and count only rests the nurse could have avoided
+        // (tag-aware spare capacity).
+        if (mpMatrix && wDays.length < 7) continue;
+        let discretionary = have;
+        let hasSpareDay = false;
+        for (const d of wDays) {
+          if (schedule[n][d] !== 'R') continue;
+          if (exemptBlockRests && isNightBlockRestDay(schedule, ctx, n, d)) discretionary--;
+          else if (nurseHasSpareCapacityOn(covByDay[d], ctx, nurseProps[n])) hasSpareDay = true;
+        }
+        if (discretionary > need + 1 && hasSpareDay)
           violations.push({
             nurse: n,
             week: w,
             type: 'troppi_riposi_settimana',
-            msg: `Infermiere ${n + 1}, settimana ${w + 1}: ${have} riposi (massimo ${need + 1})`,
+            msg: `Infermiere ${n + 1}, settimana ${w + 1}: ${discretionary} riposi (massimo ${need + 1})`,
           });
       }
     }
@@ -995,13 +1137,13 @@ function collectViolations(schedule, ctx) {
     }
   }
 
-  // Reperibile notturno: a day with nights tomorrow needs a nurse on M/D today
-  // with N tomorrow to serve as the night on-call.
+  // Reperibile notturno: a day with nights needs an eligible on-call (smonto
+  // today with diurni in use, morning today otherwise).
   if (ctx.reperibileNotturno) {
-    for (let d = 0; d < numDays - 1; d++) {
+    for (let d = 0; d < numDays; d++) {
       // In smonto mode nobody can be on S on day 1 without previous-month data.
       if (ctx.maxCovD > 0 && d === 0 && !ctx.prevTail) continue;
-      if (!hasNightTomorrow(schedule, d, numNurses)) continue;
+      if (!hasNightOnDay(schedule, d, numNurses)) continue;
       if (findReperibile(schedule, d, numNurses, ctx) === -1) {
         violations.push({
           type: 'reperibile_mancante',
@@ -1009,7 +1151,22 @@ function collectViolations(schedule, ctx) {
           msg:
             ctx.maxCovD > 0
               ? `Giorno ${d + 1}: nessun reperibile notturno (serve un infermiere in smonto)`
-              : `Giorno ${d + 1}: nessun reperibile notturno (mattina oggi + notte domani)`,
+              : `Giorno ${d + 1}: nessun reperibile notturno (serve un infermiere di mattina)`,
+        });
+      }
+    }
+  }
+
+  // Reperibile diurno festivo: every Sunday/holiday needs a nurse working the
+  // night that day to serve as the day on-call.
+  if (ctx.reperibileDiurnoFestivo && ctx.festivi) {
+    for (let d = 0; d < numDays; d++) {
+      if (!ctx.festivi[d]) continue;
+      if (findReperibileDiurno(schedule, d, numNurses) === -1) {
+        violations.push({
+          type: 'reperibile_diurno_mancante',
+          day: d,
+          msg: `Giorno ${d + 1} (festivo): nessun reperibile diurno (serve un infermiere di notte)`,
         });
       }
     }

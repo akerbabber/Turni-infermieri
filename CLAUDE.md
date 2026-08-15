@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-**Turni Infermieri** (Pronto Soccorso) is a browser-only Italian-language web application for scheduling nurse shifts in an emergency room. It solves the Nurse Scheduling Problem (NSP) using mathematical optimization (MILP) with heuristic fallback.
+**Turni Infermieri** (Pronto Soccorso) is a browser-only Italian-language web application for scheduling nurse shifts in an emergency room. It solves the Nurse Scheduling Problem (NSP) with a cyclic Pattern Beam planner plus a greedy + simulated-annealing heuristic (the earlier MILP back-ends HiGHS/GLPK were removed — they were never the ones producing the schedules).
 
 Zero dependencies. No server. No build step. Open `index.html` in a browser and it works.
 
-The app is a 4-step wizard: configure staff (Organico) -> set rules (Regole) -> generate schedule (Genera) -> view/edit results (Risultati).
+The app is a 5-step wizard: configure staff (Organico) -> set rules (Regole) -> previous-month continuity (Continuità) -> generate schedule (Genera) -> view/edit results (Risultati). `TOTAL_WIZARD_STEPS = 5`; the results renderer is still called `renderStep4()` (legacy name).
 
 ---
 
@@ -38,21 +38,22 @@ npm run validate       # Run lint + format check + tests (all-in-one)
 
 ```
 /
-├── index.html              # Single-page app: 4-step wizard UI (739 lines)
+├── index.html              # Single-page app: 5-step wizard UI
 ├── js/
-│   ├── app.js              # Main thread: state, UI rendering, event handling (~1300 lines)
-│   ├── solver.js           # Web Worker entry point: loads modules via importScripts (~80 lines)
+│   ├── app.js              # Main thread: state, UI rendering, event handling
+│   ├── solver.js           # Web Worker entry point: loads modules via importScripts
 │   └── solver/             # Modular solver components (loaded in dependency order)
-│       ├── constants.js    # Shift constants, weights, utilities (shuffle, dayOfWeek, etc.)
+│       ├── constants.js    # Shift constants, weights, utilities, Italian holidays, seeded RNG
 │       ├── context.js      # buildContext(), getAbsenceShift() — preprocessing
 │       ├── scoring.js      # transitionOk, dayCoverage, computeScore, collectViolations, computeStats
-│       ├── construct.js    # Greedy construction heuristic (8 phases)
-│       ├── local-search.js # Simulated annealing + 4 move types (swap, change, equity, rest)
-│       ├── lp-model.js     # MILP LP formulation (buildLP), solution parsers, GLPK conversion
-│       └── solvers.js      # HiGHS/GLPK loaders, solve orchestration, fallback heuristic
+│       ├── construct.js    # Greedy construction heuristic (night blocks, M/P cycles, coverage)
+│       ├── local-search.js # Simulated annealing (6 moves) + 9 targeted repair passes
+│       ├── pattern-planner.js # Cyclic Pattern Beam planner (pattern/night-first/night-only/fill-MP)
+│       └── solvers.js      # Solve orchestration: auto portfolio + heuristic fallback
 ├── css/
-│   └── custom.css          # Styles, dark mode vars, print styles (~500 lines)
+│   └── custom.css          # Styles, dark mode vars, print styles
 ├── test/                   # Node.js test files (node --test)
+├── benchmark/              # accuracy-benchmark.js (seeded, 3 scenarios × 3 algorithms)
 ├── package.json            # Dev scripts only (lint, test, format)
 ├── eslint.config.js        # ESLint 9 flat config with solver shared globals
 ├── .prettierrc.json        # Prettier config (2-space, single quotes, semicolons)
@@ -60,7 +61,7 @@ npm run validate       # Run lint + format check + tests (all-in-one)
 └── .github/
     └── workflows/
         ├── ci.yml          # Lint + format check + test on PRs
-        └── deploy.yml      # Deploy to GitHub Pages on push to main
+        └── deploy.yml      # Deploy to GitHub Pages on push to main (NOT gated on CI)
 ```
 
 ### How components relate
@@ -74,8 +75,9 @@ index.html
         └── Spawns js/solver.js as Web Worker
               ├── solver.js defines progress() then importScripts() loads:
               │     constants.js → context.js → scoring.js → construct.js
-              │     → local-search.js → lp-model.js → solvers.js
+              │     → local-search.js → pattern-planner.js → solvers.js
               ├── Receives: {type:'solve', config, numSolutions, timeBudget, solverChoice}
+              ├── Also handles: {type:'rebalance'} and {type:'fill_mp'} messages
               ├── Sends:    {type:'progress', percent, message}
               ├── Sends:    {type:'result', schedule, violations, stats, solutions, solverMethod}
               └── Sends:    {type:'error', message}
@@ -87,7 +89,7 @@ index.html
 
 | Command | Description |
 |---------|-------------|
-| `npm test` | Run tests via `node --test test/` |
+| `npm test` | Run tests via `node --test` on the EXPLICIT file list in package.json (new test files must be added there) |
 | `npm run lint` | Lint `js/` with ESLint |
 | `npm run lint:fix` | Auto-fix ESLint issues |
 | `npm run format` | Format JS, CSS, HTML with Prettier |
@@ -101,8 +103,7 @@ index.html
 
 - **Pure HTML/CSS/JavaScript** -- no frameworks, no bundler
 - **Tailwind CSS** via CDN (`cdn.tailwindcss.com`) with offline fallbacks in `custom.css`
-- **HiGHS** MILP solver loaded as WASM inside the Web Worker
-- **GLPK.js** as secondary MILP solver (loaded on demand)
+- **In-worker heuristics only**: Pattern Beam planner + greedy construction + simulated annealing (no WASM, no MILP)
 - **Web Workers** for non-blocking solver execution
 - **localStorage** for state persistence
 - **Node.js built-in test runner** (`node --test`) for unit tests
@@ -113,19 +114,21 @@ index.html
 
 ### Shift Codes
 
-| Code | Italian Name | English | Hours | Color |
+| Code | Italian Name | English | Hours (standard / 7-10 fascia) | Color |
 |------|-------------|---------|-------|-------|
-| M | Mattina | Morning | 6.2 | Blue |
-| P | Pomeriggio | Afternoon | 6.2 | Amber |
+| M | Mattina | Morning | 6.2 / 7.2 | Blue |
+| P | Pomeriggio | Afternoon | 6.2 / 7.2 | Amber |
 | D | Diurno | Day-long (covers M+P) | 12.2 | Purple |
-| N | Notte | Night | 12.2 | Dark blue |
+| N | Notte | Night | 12.2 / 10.2 | Dark blue |
 | S | Smonto | Post-night off | 0 | Gray |
 | R | Riposo | Rest day | 0 | Green |
-| F | Ferie | Holiday/vacation | 6.12 | Cyan |
-| MA | Malattia | Sick leave | 6.12 | Red |
-| L104 | Legge 104 | Disability law leave | 6.12 | Indigo |
-| PR | Permesso Retribuito | Paid leave | 6.12 | Pink |
-| MT | Maternita | Maternity leave | 6.12 | Light pink |
+| F | Ferie | Holiday/vacation | 6.12 / 7.12 | Cyan |
+| MA | Malattia | Sick leave | 6.12 / 7.12 | Red |
+| L104 | Legge 104 | Disability law leave | 6.12 / 7.12 | Indigo |
+| PR | Permesso Retribuito | Paid leave | 6.12 / 7.12 | Pink |
+| MT | Maternita | Maternity leave | 6.12 / 7.12 | Light pink |
+
+`SHIFT_HOURS` is **mutable**: `applyFasciaOraria()` switches between the `standard` preset (wards WITH diurni, `maxCoverageD > 0`) and the `7-10` preset (pure M/P/N wards). With `fasciaOraria: 'auto'` (default) the preset follows the diurni usage, so absence days are worth 7.12 h in pure M/P/N wards and 6.12 h in wards with diurni or mixed.
 
 ### Nurse Tags
 
@@ -143,18 +146,21 @@ Absence tags (with date ranges via `absencePeriods`):
 ### Constraint Types
 
 **Hard constraints** (must be satisfied):
-- Daily coverage: min/max nurses per shift type (M, P, D, N)
+- Daily coverage: min/max nurses per shift type (M, P, D, N). Under-minimum coverage weighs `UNDER_COVERAGE_WEIGHT = 8` — the top, non-negotiable priority
 - Forbidden transitions: P->M, P->D (unless relaxed), D->M, D->P, D->D (unless relaxed), N->S mandatory, S->R mandatory
-- N-S-R-R pattern: night must be followed by smonto, then rest, then another rest
+- Night block: N->S->R for every profile; the second R is optional EXCEPT for `diurni_e_notturni`, whose rigid matrix is **D-N-S-R-R** (second R mandatory, third rest forbidden, D lead-in right before N)
+- M/P weekly matrix: `mattine_e_pomeriggi` and `no_notti + no_diurni` nurses follow rigid **5 work + 2 consecutive rest** 7-day cycles (`MP_CYCLE_PATTERNS`), with a free phase offset at month start so rests stagger between nurses
 - 11-hour minimum gap between shifts
-- Weekly rest minimums (default: 2 R per week)
-- Night shift caps per nurse
+- Weekly rest minimums (default: 2 R per week; partial boundary weeks are exempt for rigid-matrix M/P nurses; mandatory D/N block rests never count as weekly excess)
+- Night shift caps per nurse (soft `maxNights`, absolute `hardMaxNights`)
+- Reperibile notturno (night on-call): every day with a night needs an eligible on-call — the nurse on SMONTO that day (wards with diurni) or a nurse who worked the MORNING that day (wards without diurni)
+- Reperibile diurno festivo (day on-call): every Sunday/Italian holiday (fixed holidays + Pasquetta, see `isFestivoItaliano`) needs a nurse working the NIGHT that day
 
 **Soft objectives** (optimized):
-- Hours equity across nurses (weight 3)
-- Night-shift count fairness (weight 3)
-- D-shift count fairness among eligible nurses (weight 3)
-- M/P balance for `no_diurni` nurses (weight 2)
+- Hours equity vs. individual target = monthly monte ore + carryover delta (deficit ×7, surplus ×3)
+- Weekly hour fluctuation band (min/max sliders at weekly scale, light weight)
+- Night-shift count fairness, D-shift count fairness, M/P balance
+- No split rests (isolated R between work days), rests attached to night blocks for M/P/N nurses
 
 ---
 
@@ -182,10 +188,10 @@ Absence tags (with date ranges via `absencePeriods`):
 Zero-dependency philosophy. The app is a static site for GitHub Pages. Users (hospital staff) open `index.html` directly. No npm install, no webpack, no transpilation. The only dev dependencies are ESLint and Prettier for code quality.
 
 ### Why Web Workers
-The MILP solver can take 10-60+ seconds. Running it on the main thread would freeze the UI. The Web Worker (`js/solver.js`) runs the solver in a background thread, sending progress updates via `postMessage` so the UI can show a progress bar.
+The solver can take 10-60+ seconds. Running it on the main thread would freeze the UI. The Web Worker (`js/solver.js`) runs the solver in a background thread, sending progress updates via `postMessage` so the UI can show a progress bar.
 
-### Why MILP + heuristic fallback
-MILP (via HiGHS WASM or GLPK.js) provides optimal or near-optimal solutions with mathematical guarantees. The greedy + simulated annealing fallback ensures the app always produces a schedule even if the WASM solvers fail to load (e.g., offline, CDN blocked, browser incompatibility).
+### Why pattern planner + heuristic (MILP removed)
+The MILP back-ends (HiGHS WASM, GLPK.js) were removed: in practice the heuristics produced the schedules. The Pattern Beam planner builds whole-month rows from rigid per-profile cycles (the "matrici": M/P 5+2, D-N-S-R-R, N-S-R…) with coverage-aware beam search; the greedy construction + simulated annealing + 9 targeted repairs polish and fix residual violations. The `auto` choice runs a portfolio (night-first beam 40%, plain beam 30%, heuristic 30%) and keeps the best result. Each solution runs under a seeded RNG (`withSeededRandom`) so batches are diverse AND reproducible.
 
 ### Why Tailwind via CDN
 Keeps the zero-dependency promise. `custom.css` provides fallback classes (`.hidden`, `.flex`, etc.) so the app works offline when the CDN is unreachable.
@@ -208,7 +214,7 @@ Keeps the zero-dependency promise. `custom.css` provides fallback classes (`.hid
    - `context.js`: Add to `buildContext()` to extract the rule from config
    - `scoring.js`: Implement in `computeScore()` (hard/soft penalty) and `collectViolations()`
    - `construct.js`: Add to `construct()` if it affects initial schedule building
-   - `lp-model.js`: Add to `buildLP()` if the MILP formulation should enforce it
+   - `pattern-planner.js`: Add to `patternRowHardCost()`/`patternRowSoftCost()` and, if it shapes whole cycles, to `getPatternFamilies()`
    - `local-search.js`: Add to move functions if relevant
 
 ### Modifying the solver
@@ -217,20 +223,18 @@ The solver is split into 7 modules under `js/solver/` loaded via `importScripts(
 
 | Module | Responsibility |
 |--------|---------------|
-| `constants.js` | Shift data, weights, utility functions |
-| `context.js` | `buildContext()`, `getAbsenceShift()` |
-| `scoring.js` | Constraints, scoring, violations, stats |
-| `construct.js` | Greedy construction heuristic |
-| `local-search.js` | Simulated annealing + move functions |
-| `lp-model.js` | MILP LP generation, solution parsing, GLPK conversion |
-| `solvers.js` | HiGHS/GLPK loaders, solve orchestration, fallback |
+| `constants.js` | Shift data, weights, utilities, Italian holidays, `withSeededRandom` |
+| `context.js` | `buildContext()`, `getAbsenceShift()`, month-boundary pins, `festivi[]` |
+| `scoring.js` | Constraints, scoring, violations, stats, cycle patterns (`MP_CYCLE_PATTERNS`, `getMPCyclePlan`), on-call helpers |
+| `construct.js` | Greedy construction heuristic (night blocks, staggered M/P cycles, coverage) |
+| `local-search.js` | Simulated annealing (6 moves) + 9 repair passes + mid-search periodic repairs |
+| `pattern-planner.js` | Pattern Beam (`solvePattern`), night-first (`solveNightFirstPattern`), night-only + fill-MP modes, cycle families (`getPatternFamilies`) |
+| `solvers.js` | `solve()` orchestration (auto portfolio), `solveFallback()` (restarts + ILS kicks) |
 
-- The solver has three entry points: `solveOneMILP()` (HiGHS), `solveOneGLPK()` (GLPK.js), `solveFallback()` (greedy + SA)
+- `solverChoice` values: `'auto' | 'pattern' | 'night_first_pattern' | 'night_only' | 'fallback'` (legacy `'milp'`/`'glpk'` are normalised to the heuristic)
 - All strategies share: `buildContext()`, `computeScore()`, `collectViolations()`, `computeStats()`, `localSearch()`
-- The MILP formulation is in `buildLP()` which generates CPLEX LP format strings
-- After any MILP solution, `localSearch()` polishes the result
-- All modules share scope via `importScripts()` — functions from any module are available to all
-- Test changes by generating schedules and checking violation counts in the UI
+- All modules share scope via `importScripts()` — functions from any module are available to all (register new shared names in `eslint.config.js` `solverSharedGlobals`)
+- Test changes with `npm test` and `npm run benchmark:accuracy`, then by generating schedules and checking violation counts in the UI
 
 ### Modifying the UI
 
@@ -247,7 +251,7 @@ The solver is split into 7 modules under `js/solver/` loaded via `importScripts(
 ### Running tests
 
 ```bash
-npm test               # Runs: node --test test/
+npm test               # Runs node --test on the explicit file list in package.json
 ```
 
 Tests use the **Node.js built-in test runner** (`node:test` module). No additional test framework needed.
@@ -347,15 +351,15 @@ Scores combine hard and soft penalties: `total = hard * 1000 + soft`. A score wi
 
 2. **D shifts count toward M+P coverage** -- When computing coverage, a D shift increments M count, P count, AND D count. Forgetting this leads to incorrect coverage calculations.
 
-3. **Absence hours are 6.12, not 6.2** -- Working shifts (M, P) are 6.2 hours, but absence shifts (F, MA, L104, PR, MT) are 6.12 hours. This is an intentional contractual distinction.
+3. **Absence hours are 6.12 (or 7.12), not 6.2** -- Working shifts (M, P) are 6.2 hours in the standard fascia, but absence shifts (F, MA, L104, PR, MT) are 6.12 hours — an intentional contractual distinction. In the `7-10` fascia (pure M/P/N wards, no diurni) absences are worth 7.12 hours; `fasciaOraria: 'auto'` picks the preset from `maxCoverageD`.
 
 4. **Italian month names array is 0-indexed** -- `MONTHS_IT[0]` is `'Gennaio'` (January). The `state.month` field is also 0-indexed (0 = January, 11 = December), matching JavaScript's `Date.getMonth()`.
 
-5. **N-S-R-R is a 4-day mandatory pattern** -- After a night shift, the sequence must be N -> S -> R -> R. The second R is enforced for most nurses (except those with `no_diurni` tag who only need N -> S -> R).
+5. **Night block: N-S-R for everyone, N-S-R-R only for diurni_e_notturni** -- After a night the sequence N -> S -> R is mandatory for every profile; the second R is optional EXCEPT for `diurni_e_notturni` nurses, whose rigid matrix D-N-S-R-R makes it mandatory (see `needsSecondNightRest`, `isMandatoryNightRestDay`). A third rest after N-S-R-R is forbidden for non-`no_diurni` profiles.
 
 6. **`SHIFT_HOURS` is duplicated** -- Both `app.js` and `js/solver/constants.js` define their own `SHIFT_HOURS` constant because the Worker cannot share variables with the main thread. If you change shift hours, update both files.
 
-7. **The solver generates multiple solutions** -- By default `numSolutions: 3`. Each uses a different random seed for MILP objective perturbation to produce diverse schedules. The UI lets users pick between them.
+7. **The solver generates multiple solutions** -- By default `numSolutions: 3`. Each runs under its own seeded RNG (`withSeededRandom` in `solvers.js`), so solutions are genuinely diverse and reproducible. The UI lets users pick between them.
 
 8. **`escHtml()` is critical for security** -- All user-provided text (nurse names) inserted into HTML must go through `escHtml()` to prevent XSS. Never use raw string interpolation for user input in innerHTML.
 

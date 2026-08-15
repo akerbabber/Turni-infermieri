@@ -7,9 +7,9 @@
 ## Repository Structure
 
 ```
-index.html        — Single-page UI: 4-step wizard (Organico → Regole → Genera → Risultati)
+index.html        — Single-page UI: 5-step wizard (Organico → Regole → Continuità → Genera → Risultati)
 js/app.js         — Main application logic: state management, UI rendering, event wiring
-js/solver.js      — Web Worker: scheduling solver (HiGHS MILP + greedy/simulated-annealing fallback)
+js/solver.js      — Web Worker entry point; js/solver/*.js — modular solver (Pattern Beam + greedy/simulated-annealing)
 css/custom.css    — Custom CSS with CSS variables for light/dark themes
 README.md         — Architecture analysis of the solver approach
 ```
@@ -18,7 +18,7 @@ README.md         — Architecture analysis of the solver approach
 
 - **Pure HTML / CSS / JavaScript** — no frameworks, no bundler, no npm
 - **Tailwind CSS** via CDN (`cdn.tailwindcss.com`) with offline fallbacks in `css/custom.css`
-- **HiGHS** MILP solver loaded from CDN as WASM inside the Web Worker (`js/solver.js`)
+- **In-worker heuristics**: cyclic Pattern Beam planner + greedy construction + simulated annealing (the MILP back-ends were removed)
 - State is persisted in `localStorage`
 
 ## Key Domain Concepts
@@ -45,12 +45,13 @@ Nurse tags: `solo_mattine`, `solo_diurni`, `solo_notti`, `no_notti`, `no_diurni`
 
 The solver runs in a **Web Worker** and uses a dual strategy:
 
-1. **HiGHS MILP** (primary) — Builds a CPLEX LP formulation with binary decision variables `x[nurse][day][shift]`, hard constraints (coverage, transitions, night blocks), and a fairness objective. Uses multiple seeds with objective perturbation for diverse solutions.
-2. **Greedy + Simulated Annealing** (fallback) — Multi-restart construction heuristic followed by local search (swap, change, equity, weekly-rest moves) with simulated annealing acceptance.
+1. **Pattern Beam planner** (`js/solver/pattern-planner.js`) — Builds whole-month rows from rigid per-profile cycles (M/P 5 work + 2 rest, D-N-S-R-R for diurni/notturni, N-S-R…) with coverage-aware beam search; a night-first variant pins a balanced night skeleton first.
+2. **Greedy + Simulated Annealing** — Construction heuristic followed by local search (6 move types) plus 9 targeted repair passes; the `auto` choice runs a portfolio and keeps the best result. Each solution runs under a seeded RNG for reproducible diversity.
 
 Hard constraints include:
 - Minimum/maximum daily coverage per shift type
-- Forbidden transitions (e.g., P→M, N must be followed by S→R→R)
+- Forbidden transitions (e.g., P→M; N must be followed by S→R, plus a second R for diurni_e_notturni)
+- On-call rules: reperibile notturno (smonto/morning nurse) and reperibile diurno on Sundays/Italian holidays (night nurse)
 - 11-hour minimum gap between shifts
 - Weekly rest minimums
 - Night-shift caps per nurse
@@ -59,12 +60,13 @@ Soft objectives: hours equity, night-shift fairness, weekend fairness.
 
 ## Application Flow (`js/app.js`)
 
-The UI is a 4-step wizard:
+The UI is a 5-step wizard:
 
-1. **Step 1 — Organico**: Configure month/year, nurse roster (names, tags, absence periods). Supports drag-and-drop reordering.
-2. **Step 2 — Regole**: Configure coverage ranges, hour targets, night limits, constraint toggles, nurse pairing.
-3. **Step 3 — Genera**: Summary + generate button. Launches the Web Worker solver.
-4. **Step 4 — Risultati**: Interactive schedule grid with inline shift editing, violation display, solution picker, CSV export, JSON config save/load, print.
+1. **Step 1 — Organico**: Configure month/year (2025–2099), nurse roster (names, tags, absence periods). Reordering via drag-and-drop or ▲▼ buttons (the order is the results-grid row order).
+2. **Step 2 — Regole**: Coverage ranges, fascia oraria, hour targets, night limits, constraint toggles, on-call rules, nurse pairing, previous-month import.
+3. **Step 3 — Continuità**: Manual previous-month tail (last 3 days) per nurse.
+4. **Step 4 — Genera**: Summary, feasibility pre-check, solver options + generate button. Launches the Web Worker solver.
+5. **Step 5 — Risultati**: Interactive schedule grid with inline shift editing, coverage and on-call rows, violation display, solution picker, CSV export, print.
 
 ## Coding Conventions
 
@@ -72,7 +74,7 @@ The UI is a 4-step wizard:
 - Constants are `UPPER_SNAKE_CASE`; functions and variables are `camelCase`
 - The UI is in Italian (labels, messages, violation texts)
 - HTML is generated via template literals and `innerHTML` — escape user text with `escHtml()`
-- No test framework is present — validate changes by opening `index.html` in a browser
+- Tests use the Node.js built-in runner (`npm test` — explicit file list in package.json)
 - The solver communicates with the main thread via `postMessage` / `onmessage` (standard Web Worker API)
 
 ## How to Run / Test

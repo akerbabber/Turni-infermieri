@@ -191,17 +191,15 @@ const DEFAULT_RULES = {
   targetNights: 4,
   maxNights: 6,
   hardMaxNights: 7,
-  noConsecD: true,
-  mandatoryS: true,
   minGap11h: true,
-  forwardOnly: true,
   minRPerWeek: 2,
   preferDiurni: false,
   // New flags
   coppiaTurni: null, // Array of 2 nurse indices [n1, n2] to have same shifts, or null
   consentePomeriggioDiurno: false, // Allow P→D transition
   consente2DiurniConsecutivi: false, // Allow D-D but require R after
-  reperibileNotturno: true, // Night on-call: M/D today + N tomorrow required each day
+  reperibileNotturno: true, // Night on-call: smonto today (with diurni) / morning today (without)
+  reperibileDiurnoFestivo: true, // Day on-call on Sundays/holidays: nurse working the night that day
   fasciaOraria: 'auto', // 'auto' (segue i diurni) | 'standard' (6+12) | '7-10' (7+10)
 };
 
@@ -231,6 +229,17 @@ function countWeekdaysInMonth(year, month) {
 
 function getMonthlyContractHours(year, month) {
   return Math.round(countWeekdaysInMonth(year, month) * MONTHLY_HOURS_PER_WEEKDAY * 100) / 100;
+}
+
+// Monthly target hours actually used by the solver: the contractual value
+// (7.12 per weekday) with targetHours=36, otherwise the weekly target slider
+// scaled to the month (targetHours/5 per weekday). Mirrored in js/solver/context.js.
+function getMonthlyTargetHours(year, month) {
+  const target = state?.rules?.targetHours;
+  if (target && target !== 36) {
+    return Math.round(countWeekdaysInMonth(year, month) * (target / 5) * 100) / 100;
+  }
+  return getMonthlyContractHours(year, month);
 }
 
 function createEmptyAbsencePeriods() {
@@ -322,6 +331,7 @@ let state = {
   solutions: [],
   selectedSolution: 0,
   reperibili: {}, // manual night on-call overrides: { dayIndex: nurseIndex }
+  reperibiliDiurni: {}, // manual day on-call overrides (Sundays/holidays): { dayIndex: nurseIndex }
   solverMethod: null,
   solverDiagnostics: [],
   solverProgress: { percent: 0, message: '' },
@@ -332,6 +342,7 @@ let state = {
   darkMode: false,
   previousMonthSchedule: null, // 2D array [nurse][day] of shift codes from prev month
   previousMonthHours: null, // array of total hours per nurse from prev month
+  previousMonthPeriod: null, // { month, year } the imported roster belongs to
 };
 
 // ---------------------------------------------------------------------------
@@ -386,6 +397,54 @@ function dayOfWeek(year, month, day) {
 function isWeekend(year, month, day) {
   const d = dayOfWeek(year, month, day);
   return d === 0 || d === 6;
+}
+
+// Italian national holidays (month 0-indexed) — duplicated in js/solver/constants.js
+// because the Worker cannot share code with the main thread.
+const ITALIAN_FIXED_HOLIDAYS = [
+  [0, 1],
+  [0, 6],
+  [3, 25],
+  [4, 1],
+  [5, 2],
+  [7, 15],
+  [10, 1],
+  [11, 8],
+  [11, 25],
+  [11, 26],
+];
+
+// Gregorian computus (Anonymous/Meeus algorithm): Easter Sunday for a year.
+function easterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return { month: month - 1, day };
+}
+
+function easterMonday(year) {
+  const easter = easterSunday(year);
+  const date = new Date(year, easter.month, easter.day + 1);
+  return { month: date.getMonth(), day: date.getDate() };
+}
+
+// True for Sundays and Italian national holidays (including Pasquetta).
+function isFestivoItaliano(year, month, day1Based) {
+  if (dayOfWeek(year, month, day1Based) === 0) return true;
+  if (ITALIAN_FIXED_HOLIDAYS.some(([m, d]) => m === month && d === day1Based)) return true;
+  const pasquetta = easterMonday(year);
+  return pasquetta.month === month && pasquetta.day === day1Based;
 }
 
 // ---------------------------------------------------------------------------
@@ -451,12 +510,34 @@ function renderStepNav() {
 // Step 1 — Organico
 // ---------------------------------------------------------------------------
 
+const YEAR_RANGE_START = 2025;
+const YEAR_RANGE_END = 2099;
+
+function populateYearOptions() {
+  const selYear = document.getElementById('sel-year');
+  if (!selYear) return;
+  const years = [];
+  // Include out-of-range years (e.g. from imported configs) so the select stays consistent
+  if (state.year < YEAR_RANGE_START) years.push(state.year);
+  for (let y = YEAR_RANGE_START; y <= YEAR_RANGE_END; y++) years.push(y);
+  if (state.year > YEAR_RANGE_END) years.push(state.year);
+  selYear.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+}
+
 function renderStep1() {
   // Month/year selectors
   const selMonth = document.getElementById('sel-month');
   const selYear = document.getElementById('sel-year');
   if (selMonth) selMonth.value = state.month;
-  if (selYear) selYear.value = state.year;
+  if (selYear) {
+    if (!selYear.querySelector(`option[value="${state.year}"]`)) populateYearOptions();
+    selYear.value = state.year;
+  }
+
+  // Absence hours legend follows the active fascia (7.12 without diurni, 6.12 otherwise)
+  document.querySelectorAll('.absence-hours-label').forEach(el => {
+    el.textContent = String(SHIFT_HOURS.F);
+  });
 
   // Nurse counts
   const inpTotal = document.getElementById('inp-total');
@@ -465,6 +546,89 @@ function renderStep1() {
   if (inpAbsent) inpAbsent.value = state.absentNurses;
 
   renderNurseList();
+}
+
+// Map an array index after moving an element from `from` to `to` (splice semantics)
+function remapIndexAfterMove(i, from, to) {
+  if (i === from) return to;
+  if (from < to && i > from && i <= to) return i - 1;
+  if (to < from && i >= to && i < from) return i + 1;
+  return i;
+}
+
+function remapOverrideMap(map, from, to) {
+  if (!map) return map;
+  const out = {};
+  for (const [day, nIdx] of Object.entries(map)) {
+    out[day] = remapIndexAfterMove(nIdx, from, to);
+  }
+  return out;
+}
+
+// Move a nurse within the active roster, keeping every positional structure
+// (schedule rows, stats, solutions, previous-month data, coppia indices,
+// on-call overrides, violation indices) aligned.
+function moveNurse(fromIdx, toIdx) {
+  const activeCount = state.totalNurses - state.absentNurses;
+  if (!Number.isInteger(fromIdx) || !Number.isInteger(toIdx)) return;
+  if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= activeCount || toIdx >= activeCount) return;
+
+  // Generated results may have fewer rows than the roster (staff enlarged after
+  // a generation): a move that crosses the results boundary cannot be kept
+  // aligned, so drop the stale results instead of silently corrupting them.
+  const crossesBoundary = arr => Array.isArray(arr) && arr.length > 0 && fromIdx < arr.length !== toIdx < arr.length;
+  if (crossesBoundary(state.schedule) || (state.solutions || []).some(sol => sol && crossesBoundary(sol.schedule))) {
+    resetGeneratedResults();
+  }
+  if (crossesBoundary(state.previousMonthSchedule) || crossesBoundary(state.previousMonthHours)) {
+    // Imported previous-month data cannot follow this move: drop it rather
+    // than attributing hours/continuity tails to the wrong nurse.
+    state.previousMonthSchedule = null;
+    state.previousMonthHours = null;
+    state.previousMonthPeriod = null;
+  }
+
+  const moved = state.nurses.splice(fromIdx, 1)[0];
+  state.nurses.splice(toIdx, 0, moved);
+
+  // state.schedule/state.stats usually ALIAS the selected solution's arrays
+  // (applySolveResult/selectSolution assign by reference): track what was
+  // already moved so shared arrays are never spliced twice.
+  const movedArrays = new Set();
+  const moveRows = arr => {
+    if (!Array.isArray(arr) || movedArrays.has(arr)) return;
+    if (fromIdx >= arr.length || toIdx >= arr.length) return;
+    movedArrays.add(arr);
+    const row = arr.splice(fromIdx, 1)[0];
+    arr.splice(toIdx, 0, row);
+  };
+  const remapViolations = list => {
+    if (!Array.isArray(list) || movedArrays.has(list)) return;
+    movedArrays.add(list);
+    for (const v of list) {
+      if (v && Number.isInteger(v.nurse)) v.nurse = remapIndexAfterMove(v.nurse, fromIdx, toIdx);
+    }
+  };
+  moveRows(state.schedule);
+  moveRows(state.stats);
+  moveRows(state.previousMonthSchedule);
+  moveRows(state.previousMonthHours);
+  remapViolations(state.violations);
+  (state.solutions || []).forEach(sol => {
+    if (!sol) return;
+    moveRows(sol.schedule);
+    moveRows(sol.stats);
+    remapViolations(sol.violations);
+  });
+  if (Array.isArray(state.rules.coppiaTurni)) {
+    state.rules.coppiaTurni = state.rules.coppiaTurni.map(i => remapIndexAfterMove(i, fromIdx, toIdx));
+  }
+  state.reperibili = remapOverrideMap(state.reperibili, fromIdx, toIdx);
+  state.reperibiliDiurni = remapOverrideMap(state.reperibiliDiurni, fromIdx, toIdx);
+
+  saveState();
+  renderNurseList();
+  renderStep4();
 }
 
 function renderNurseList() {
@@ -543,7 +707,7 @@ function renderNurseList() {
               Al: <input type="date" class="absence-end border rounded px-1 py-0.5 text-xs bg-white dark:bg-slate-700 dark:border-slate-600"
                    data-nurse="${idx}" data-type="${t.key}" value="${period.end || ''}" />
             </label>
-            <span class="text-gray-500">(6.12 ore/giorno)</span>
+            <span class="text-gray-500">(${SHIFT_HOURS.F} ore/giorno)</span>
           </div>
         </div>
       `;
@@ -552,6 +716,12 @@ function renderNurseList() {
     item.innerHTML = `
       <div class="flex items-center gap-2 w-full">
         <span class="drag-handle" title="Trascina per riordinare">⠿</span>
+        <span class="flex flex-col nurse-move-buttons">
+          <button class="btn-move-up" data-nurse="${idx}" title="Sposta su" ${idx === 0 ? 'disabled' : ''}>▲</button>
+          <button class="btn-move-down" data-nurse="${idx}" title="Sposta giù" ${
+            idx === activeNurses.length - 1 ? 'disabled' : ''
+          }>▼</button>
+        </span>
         <span class="flex-1 text-sm font-medium nurse-name"
               contenteditable="true"
               data-nurse="${idx}"
@@ -575,6 +745,12 @@ function renderNurseList() {
         nameEl.blur();
       }
     });
+
+    // Reorder buttons
+    const upBtn = item.querySelector('.btn-move-up');
+    const downBtn = item.querySelector('.btn-move-down');
+    if (upBtn) upBtn.addEventListener('click', () => moveNurse(idx, idx - 1));
+    if (downBtn) downBtn.addEventListener('click', () => moveNurse(idx, idx + 1));
 
     // Tag toggle
     item.querySelectorAll('.tag').forEach(tagBtn => {
@@ -638,12 +814,7 @@ function renderNurseList() {
       e.preventDefault();
       item.classList.remove('drag-over');
       const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
-      const toIdx = idx;
-      if (fromIdx === toIdx) return;
-      const moved = state.nurses.splice(fromIdx, 1)[0];
-      state.nurses.splice(toIdx, 0, moved);
-      saveState();
-      renderNurseList();
+      moveNurse(fromIdx, idx);
     });
   });
 }
@@ -879,21 +1050,11 @@ function renderStep2() {
     saveState();
   });
 
-  // Toggles
-  bindToggle('tog-no-consec-d', r.noConsecD, v => {
-    state.rules.noConsecD = v;
-    saveState();
-  });
-  bindToggle('tog-mandatory-s', r.mandatoryS, v => {
-    state.rules.mandatoryS = v;
-    saveState();
-  });
+  // Toggles (the structural constraints — S after N, forward-only rotation,
+  // no consecutive D — are always enforced by the solver and no longer have
+  // placebo switches here).
   bindToggle('tog-min-gap', r.minGap11h, v => {
     state.rules.minGap11h = v;
-    saveState();
-  });
-  bindToggle('tog-forward-only', r.forwardOnly, v => {
-    state.rules.forwardOnly = v;
     saveState();
   });
   bindToggle('tog-min-r-week', r.minRPerWeek > 0, v => {
@@ -908,6 +1069,10 @@ function renderStep2() {
   });
   bindToggle('tog-reperibile-notturno', r.reperibileNotturno, v => {
     state.rules.reperibileNotturno = v;
+    saveState();
+  });
+  bindToggle('tog-reperibile-diurno', r.reperibileDiurnoFestivo, v => {
+    state.rules.reperibileDiurnoFestivo = v;
     saveState();
   });
   bindToggle('tog-consente-2d', r.consente2DiurniConsecutivi, v => {
@@ -1025,7 +1190,7 @@ function renderPrevMonthStatus() {
   let html =
     '<div class="mt-2 p-3 bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-lg max-h-48 overflow-y-auto">';
   html +=
-    '<p class="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-2">📊 Scostamento ore rispetto alla media del mese precedente:</p>';
+    '<p class="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-2">📊 Riporto ore: scostamento dal monte ore del mese precedente (chi è sotto recupera questo mese):</p>';
   html += '<div class="grid grid-cols-2 sm:grid-cols-3 gap-1">';
   for (let n = 0; n < activeNurses.length; n++) {
     const name = activeNurses[n].name;
@@ -1038,7 +1203,7 @@ function renderPrevMonthStatus() {
           ? 'text-blue-600 dark:text-blue-400'
           : 'text-gray-500 dark:text-slate-400';
     const sign = d > 0 ? '+' : '';
-    const label = d > 0 ? '(meno ore prossimo mese)' : d < 0 ? '(più ore prossimo mese)' : '';
+    const label = d > 0 ? '(meno ore questo mese)' : d < 0 ? '(recupera ore questo mese)' : '';
     html += `<div class="text-xs"><span class="font-medium">${escHtml(name)}:</span> <span class="${color}">${sign}${d}h</span> <span class="text-gray-400 text-[10px]">${label}</span></div>`;
   }
   html += '</div></div>';
@@ -1167,6 +1332,7 @@ function resetGeneratedResults() {
   state.solutions = [];
   state.selectedSolution = 0;
   state.reperibili = {};
+  state.reperibiliDiurni = {};
   state.solverMethod = null;
   state.solverDiagnostics = [];
   state.solverProgress = { percent: 0, message: '' };
@@ -1442,12 +1608,20 @@ function importPrevMonthData(scheduleData) {
 
   state.previousMonthSchedule = schedule;
   state.previousMonthHours = hours;
+  // Remember which month the imported roster belongs to (the month before the
+  // one being planned at import time) so the carryover baseline stays correct
+  // even if the user later changes the planning month.
+  state.previousMonthPeriod = {
+    month: state.month === 0 ? 11 : state.month - 1,
+    year: state.month === 0 ? state.year - 1 : state.year,
+  };
   saveState();
 }
 
 function clearPrevMonth() {
   state.previousMonthSchedule = null;
   state.previousMonthHours = null;
+  state.previousMonthPeriod = null;
   saveState();
   renderPrevMonthStatus();
 }
@@ -1500,29 +1674,39 @@ function formatCsv(rows) {
 // Previous month hour deltas
 // ---------------------------------------------------------------------------
 
+// Cap on the per-nurse monthly hour carryover: keeps individual targets
+// reachable even when a nurse (or the whole roster) ended far from the monte
+// ore (e.g. structurally capped profiles like solo_notti).
+const HOUR_CARRYOVER_CAP = 24;
+
 /**
  * Compute per-nurse hour deltas from the previous month schedule.
- * Returns an object mapping nurse name → delta (actual - imported-month average).
- * Positive delta means nurse worked MORE than the roster average
- * (should work less next month). Negative delta means nurse worked LESS
- * than average (should work more next month).
- *
- * Using deviations from the imported month average keeps the compensation
- * zero-sum, so the next month rebalances only relative inequities instead of
- * shifting the whole roster above/below the new month's achievable total hours.
+ * Returns an object mapping nurse name → delta (actual - previous month's
+ * contractual monte ore). Positive delta means the nurse exceeded the monthly
+ * target (works less next month); negative delta means the nurse fell short
+ * and must RECOVER the missing hours next month ("tornaconto mensile").
+ * Deltas are clamped to ±HOUR_CARRYOVER_CAP so individual targets stay
+ * compatible with the monthly hour band.
  */
 function computePrevMonthDeltas() {
   if (!state.previousMonthSchedule || !state.previousMonthHours) return null;
   const activeNurses = state.nurses.slice(0, state.totalNurses - state.absentNurses);
   const knownHours = state.previousMonthHours.filter(h => h !== undefined && h !== null);
   if (knownHours.length === 0) return null;
-  const avgHours = knownHours.reduce((sum, h) => sum + h, 0) / knownHours.length;
+  // Baseline month: the one recorded at import time (previousMonthPeriod);
+  // fall back to "the month before the one being planned" for older states.
+  const period = state.previousMonthPeriod || {
+    month: state.month === 0 ? 11 : state.month - 1,
+    year: state.month === 0 ? state.year - 1 : state.year,
+  };
+  const prevTarget = getMonthlyTargetHours(period.year, period.month);
   const deltas = {};
   for (let n = 0; n < activeNurses.length; n++) {
     const name = activeNurses[n].name;
     const h = state.previousMonthHours[n];
     if (h !== undefined && h !== null) {
-      deltas[name] = Math.round((h - avgHours) * 10) / 10;
+      const raw = Math.round((h - prevTarget) * 10) / 10;
+      deltas[name] = Math.max(-HOUR_CARRYOVER_CAP, Math.min(HOUR_CARRYOVER_CAP, raw));
     }
   }
   return deltas;
@@ -1700,7 +1884,7 @@ function renderGenerateStep() {
     'summary-cov',
     `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`
   );
-  setEl('summary-month-hours', `${getMonthlyContractHours(state.year, state.month).toFixed(2)} ore`);
+  setEl('summary-month-hours', `${getMonthlyTargetHours(state.year, state.month).toFixed(2)} ore`);
   setEl('summary-nights', `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
   setEl('summary-prev-month', continuitySummaryLabel());
 
@@ -1743,6 +1927,92 @@ function renderGenerateStep() {
       saveState();
     };
   }
+
+  renderFeasibilityCheck();
+}
+
+// Quick demand-vs-capacity estimate shown before generating: most residual
+// violations come from mathematically incompatible parameters, not from the
+// solver — surfacing that up front saves the user a pointless run.
+function renderFeasibilityCheck() {
+  const el = document.getElementById('feasibility-check');
+  if (!el) return;
+  const r = state.rules;
+  const numDays = daysInMonth(state.year, state.month);
+  const activeCount = state.totalNurses - state.absentNurses;
+  applyFasciaOraria(r.fasciaOraria);
+
+  const minD = r.minCoverageD ?? 0;
+  // Minimum bodies per day: nights + diurni + the M/P slots the diurni don't cover.
+  const minBodiesPerDay =
+    (r.minCoverageN ?? 0) +
+    minD +
+    Math.max(0, (r.minCoverageM ?? 0) - minD) +
+    Math.max(0, (r.minCoverageP ?? 0) - minD);
+  const maxD = r.maxCoverageD ?? 0;
+  const maxBodiesPerDay =
+    (r.maxCoverageN ?? 0) +
+    maxD +
+    Math.max(0, (r.maxCoverageM ?? 0) - maxD) +
+    Math.max(0, (r.maxCoverageP ?? 0) - maxD);
+
+  // Hour-based demand vs. workforce capacity (monte ore of the whole roster).
+  const minHoursPerDay =
+    (r.minCoverageN ?? 0) * SHIFT_HOURS.N +
+    minD * SHIFT_HOURS.D +
+    Math.max(0, (r.minCoverageM ?? 0) - minD) * SHIFT_HOURS.M +
+    Math.max(0, (r.minCoverageP ?? 0) - minD) * SHIFT_HOURS.P;
+  const maxHoursPerDay =
+    (r.maxCoverageN ?? 0) * SHIFT_HOURS.N +
+    maxD * SHIFT_HOURS.D +
+    Math.max(0, (r.maxCoverageM ?? 0) - maxD) * SHIFT_HOURS.M +
+    Math.max(0, (r.maxCoverageP ?? 0) - maxD) * SHIFT_HOURS.P;
+  const demandMin = Math.round(minHoursPerDay * numDays);
+  const demandMax = Math.round(maxHoursPerDay * numDays);
+  const capacity = Math.round(activeCount * getMonthlyTargetHours(state.year, state.month));
+
+  const warnings = [];
+  // Bodies: with the weekly patterns (5 work + 2 rest ≈ 5/7, D-N-S-R-R ≈ 3/5 incl. S)
+  // roughly 68% of the roster is available on a generic day.
+  const availableBodies = Math.floor(activeCount * 0.68);
+  if (availableBodies < minBodiesPerDay) {
+    warnings.push(
+      `Organico insufficiente: servono almeno ${minBodiesPerDay} presenze al giorno ma con riposi/smonti ne sono disponibili ~${availableBodies} su ${activeCount}. Attese violazioni di copertura minima.`
+    );
+  }
+  if (capacity < demandMin) {
+    warnings.push(
+      `Monte ore insufficiente: le coperture minime richiedono ~${demandMin}h nel mese, l'organico ne offre ~${capacity}h. Ridurre i minimi o aumentare l'organico.`
+    );
+  }
+  if (capacity > demandMax) {
+    warnings.push(
+      `Organico in eccesso: anche saturando tutte le coperture massime (~${demandMax}h) restano ~${capacity - demandMax}h di margine — alcuni infermieri avranno riposi extra o resteranno sotto il monte ore.`
+    );
+  }
+  // Tag/coverage incompatibilities
+  const activeNursesFc = state.nurses.slice(0, activeCount);
+  const diurniTagged = activeNursesFc.filter(n =>
+    (n.tags || []).some(t => t === 'solo_diurni' || t === 'diurni_e_notturni' || t === 'diurni_no_notti')
+  ).length;
+  if (maxD === 0 && diurniTagged > 0) {
+    warnings.push(
+      `Copertura massima Diurno = 0 ma ${diurniTagged} infermieri hanno limitazioni con turni D (solo diurni / diurni e notturni): le loro matrici sono inapplicabili e le assenze verranno valutate 7.12 come reparto senza diurni. Alzare il massimo D o rimuovere i tag.`
+    );
+  }
+  if (r.reperibileDiurnoFestivo && (r.minCoverageN ?? 0) === 0) {
+    warnings.push(
+      `Reperibile diurno festivo attivo con copertura minima Notte = 0: nei festivi senza alcuna notte pianificata la reperibilità diurna resterà scoperta (violazione).`
+    );
+  }
+
+  if (warnings.length === 0) {
+    el.innerHTML = `<div class="p-3 bg-green-50 dark:bg-green-950 border border-green-300 dark:border-green-700 rounded-lg text-sm text-green-700 dark:text-green-400">✅ Verifica di fattibilità: vincoli e organico compatibili (fabbisogno ~${demandMin}–${demandMax}h, disponibilità ~${capacity}h).</div>`;
+  } else {
+    el.innerHTML = `<div class="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 rounded-lg text-sm text-amber-700 dark:text-amber-400">${warnings
+      .map(w => `<p class="mb-1">⚠️ ${escHtml(w)}</p>`)
+      .join('')}</div>`;
+  }
 }
 
 function startSolver() {
@@ -1759,6 +2029,9 @@ function startSolver() {
   state.solutions = [];
   state.selectedSolution = 0;
   state.solverMethod = null;
+  // Manual on-call overrides belong to the previous grid: drop them
+  state.reperibili = {};
+  state.reperibiliDiurni = {};
 
   const btn = document.getElementById('btn-generate');
   if (btn) {
@@ -1866,6 +2139,7 @@ function regenerateTurni() {
     nurses: activeNurses,
     rules: regenerationRules,
     hourDeltas: buildHourDeltas(),
+    previousMonthTail: buildPrevMonthTail(),
   };
 
   const worker = new Worker('js/solver.js');
@@ -2271,7 +2545,8 @@ function renderStep4() {
   for (let d = 0; d < numDays; d++) {
     const dow = dayOfWeek(state.year, state.month, d + 1);
     const wk = isWeekend(state.year, state.month, d + 1);
-    headerHTML += `<th class="${wk ? 'col-weekend' : ''}" title="${DOW_LABELS[dow]} ${d + 1} ${MONTHS_IT[state.month]}">
+    const fest = isFestivoItaliano(state.year, state.month, d + 1);
+    headerHTML += `<th class="${wk ? 'col-weekend' : ''} ${fest ? 'col-festivo' : ''}" title="${DOW_LABELS[dow]} ${d + 1} ${MONTHS_IT[state.month]}${fest ? ' (festivo)' : ''}">
                      <div class="text-xs leading-none">${DOW_LABELS[dow].charAt(0)}</div>
                      <div class="font-bold">${d + 1}</div>
                    </th>`;
@@ -2308,9 +2583,8 @@ function renderStep4() {
   bodyHTML += `<td class="text-xs font-semibold">COPERTURA</td>`;
   for (let d = 0; d < numDays; d++) {
     const cov = dayStats(d);
-    const min = state.rules.minCoverage;
-    const warnM = cov.M < min,
-      warnP = cov.P < min;
+    const warnM = cov.M < (state.rules.minCoverageM ?? 0),
+      warnP = cov.P < (state.rules.minCoverageP ?? 0);
     const wk = isWeekend(state.year, state.month, d + 1);
     bodyHTML += `<td class="${wk ? 'col-weekend' : ''}" title="M:${cov.M} P:${cov.P} N:${cov.N}">
       <div class="text-center leading-none">
@@ -2323,12 +2597,13 @@ function renderStep4() {
   bodyHTML += `<td class="stats-col"></td></tr>`;
 
   // Reperibile notturno row: with diurni in use the on-call is the nurse on
-  // SMONTO today, otherwise a nurse on M today with N tomorrow. Clicking a cell
-  // cycles through the eligible nurses (manual override, persisted).
+  // SMONTO today, otherwise a nurse who works the MORNING today. Shown on every
+  // day with a night scheduled. Clicking a cell cycles through the eligible
+  // nurses (manual override, persisted).
   if (state.rules.reperibileNotturno) {
     const activeNurses = state.nurses.slice(0, numNurses);
     bodyHTML += `<tr class="coverage-row">`;
-    bodyHTML += `<td class="text-xs font-semibold" title="Clicca una cella per cambiare il reperibile del giorno">REPERIBILE</td>`;
+    bodyHTML += `<td class="text-xs font-semibold" title="Clicca una cella per cambiare il reperibile del giorno">REP. NOTTE</td>`;
     for (let d = 0; d < numDays; d++) {
       const wk = isWeekend(state.year, state.month, d + 1);
       let label = '';
@@ -2336,10 +2611,10 @@ function renderStep4() {
       let cls = 'cov-ok';
       let clickable = false;
       const skipDayOne = (state.rules.maxCoverageD ?? 0) > 0 && d === 0 && !buildPrevMonthTail();
-      if (d < numDays - 1 && !skipDayOne) {
-        let nightTomorrow = false;
-        for (let n = 0; n < numNurses; n++) if (state.schedule[n][d + 1] === 'N') nightTomorrow = true;
-        if (nightTomorrow) {
+      if (!skipDayOne) {
+        let nightToday = false;
+        for (let n = 0; n < numNurses; n++) if (state.schedule[n][d] === 'N') nightToday = true;
+        if (nightToday) {
           const elig = eligibleReperibili(d);
           const chosen = reperibileForDay(d);
           if (chosen === -1) {
@@ -2355,6 +2630,40 @@ function renderStep4() {
         }
       }
       bodyHTML += `<td class="${wk ? 'col-weekend' : ''} ${clickable ? 'cursor-pointer' : ''} reperibile-cell" data-rep-d="${d}" title="${escHtml(title)}">
+        <div class="text-center ${cls}" style="font-size:8px">${label}</div>
+      </td>`;
+    }
+    bodyHTML += `<td class="stats-col"></td></tr>`;
+  }
+
+  // Reperibile diurno row: on Sundays/holidays the day on-call is a nurse
+  // working the night that same day. Clicking a cell cycles the eligible nurses.
+  if (state.rules.reperibileDiurnoFestivo) {
+    const activeNurses = state.nurses.slice(0, numNurses);
+    bodyHTML += `<tr class="coverage-row">`;
+    bodyHTML += `<td class="text-xs font-semibold" title="Reperibile diurno di domeniche e festività (chi fa la notte quel giorno)">REP. DIURNO</td>`;
+    for (let d = 0; d < numDays; d++) {
+      const wk = isWeekend(state.year, state.month, d + 1);
+      const fest = isFestivoItaliano(state.year, state.month, d + 1);
+      let label = '';
+      let title = '';
+      let cls = 'cov-ok';
+      let clickable = false;
+      if (fest) {
+        const elig = eligibleReperibiliDiurni(d);
+        const chosen = reperibileDiurnoForDay(d);
+        if (chosen === -1) {
+          label = '⚠';
+          title = 'Nessun reperibile diurno disponibile (serve un infermiere di notte)';
+          cls = 'cov-warn';
+        } else {
+          const repName = activeNurses[chosen]?.name || `Inf. ${chosen + 1}`;
+          label = escHtml(repName.split(' ')[0]);
+          title = `${repName}${elig.length > 1 ? ` — clicca per cambiare (${elig.length} idonei)` : ''}`;
+          clickable = elig.length > 1;
+        }
+      }
+      bodyHTML += `<td class="${wk ? 'col-weekend' : ''} ${fest ? 'col-festivo' : ''} ${clickable ? 'cursor-pointer' : ''} reperibile-diurno-cell" data-repd-d="${d}" title="${escHtml(title)}">
         <div class="text-center ${cls}" style="font-size:8px">${label}</div>
       </td>`;
     }
@@ -2397,12 +2706,21 @@ function renderStep4() {
     </div>
   `;
 
-  // Click on the REPERIBILE row cycles through the eligible on-call nurses
+  // Click on the REP. NOTTE row cycles through the eligible on-call nurses
   container.querySelectorAll('.reperibile-cell').forEach(cell => {
     cell.addEventListener('click', e => {
       e.stopPropagation();
       const d = parseInt(cell.dataset.repD);
       if (Number.isInteger(d)) cycleReperibile(d);
+    });
+  });
+
+  // Click on the REP. DIURNO row cycles through the eligible day on-call nurses
+  container.querySelectorAll('.reperibile-diurno-cell').forEach(cell => {
+    cell.addEventListener('click', e => {
+      e.stopPropagation();
+      const d = parseInt(cell.dataset.repdD);
+      if (Number.isInteger(d)) cycleReperibileDiurno(d);
     });
   });
 
@@ -2520,15 +2838,13 @@ function recalcNurseStats(n) {
 // ---------------------------------------------------------------------------
 // Reperibile notturno (night on-call) helpers — mirror the solver's rules:
 // with diurni in use (maxCoverageD > 0) the on-call is the nurse on SMONTO
-// today; without diurni it is a nurse on M today whose next-day shift is N.
+// today; without diurni it is a nurse who works the MORNING today.
 // ---------------------------------------------------------------------------
 
 function isReperibileEligibleUI(n, d) {
   if (!state.schedule || !state.schedule[n]) return false;
   if ((state.rules.maxCoverageD ?? 0) > 0) return state.schedule[n][d] === 'S';
-  const numDays = daysInMonth(state.year, state.month);
-  if (d >= numDays - 1) return false;
-  return state.schedule[n][d] === 'M' && state.schedule[n][d + 1] === 'N';
+  return state.schedule[n][d] === 'M';
 }
 
 function eligibleReperibili(d) {
@@ -2556,6 +2872,38 @@ function cycleReperibile(d) {
   const idx = elig.indexOf(current);
   if (!state.reperibili) state.reperibili = {};
   state.reperibili[d] = elig[(idx + 1) % elig.length];
+  saveState();
+  renderStep4();
+}
+
+// ---------------------------------------------------------------------------
+// Reperibile diurno festivo (day on-call on Sundays/holidays): the on-call is
+// a nurse working the NIGHT that same day, in every regime.
+// ---------------------------------------------------------------------------
+
+function eligibleReperibiliDiurni(d) {
+  const out = [];
+  if (!state.schedule) return out;
+  for (let n = 0; n < state.schedule.length; n++) {
+    if (state.schedule[n] && state.schedule[n][d] === 'N') out.push(n);
+  }
+  return out;
+}
+
+function reperibileDiurnoForDay(d) {
+  const elig = eligibleReperibiliDiurni(d);
+  const override = state.reperibiliDiurni ? state.reperibiliDiurni[d] : undefined;
+  if (override !== undefined && elig.includes(override)) return override;
+  return elig.length ? elig[0] : -1;
+}
+
+function cycleReperibileDiurno(d) {
+  const elig = eligibleReperibiliDiurni(d);
+  if (elig.length < 2) return;
+  const current = reperibileDiurnoForDay(d);
+  const idx = elig.indexOf(current);
+  if (!state.reperibiliDiurni) state.reperibiliDiurni = {};
+  state.reperibiliDiurni[d] = elig[(idx + 1) % elig.length];
   saveState();
   renderStep4();
 }
@@ -2664,22 +3012,35 @@ function revalidate() {
       });
   }
 
-  // Reperibile notturno: a day with nights tomorrow needs an eligible on-call
-  // (smonto today with diurni in use; M today + N tomorrow otherwise).
+  // Reperibile notturno: a day with nights needs an eligible on-call
+  // (smonto today with diurni in use; a nurse on M today otherwise).
   if (state.rules.reperibileNotturno) {
     const conDiurni = (state.rules.maxCoverageD ?? 0) > 0;
-    for (let d = 0; d < numDays - 1; d++) {
+    for (let d = 0; d < numDays; d++) {
       // Giorno 1 in modalità smonto: senza dati di continuità nessuno può avere S
       if (conDiurni && d === 0 && !buildPrevMonthTail()) continue;
-      let nightTomorrow = false;
-      for (let n = 0; n < numNurses; n++) if (state.schedule[n][d + 1] === 'N') nightTomorrow = true;
-      if (nightTomorrow && reperibileForDay(d) === -1)
+      let nightToday = false;
+      for (let n = 0; n < numNurses; n++) if (state.schedule[n][d] === 'N') nightToday = true;
+      if (nightToday && reperibileForDay(d) === -1)
         violations.push({
           day: d,
           type: 'reperibile_mancante',
           msg: conDiurni
             ? `Giorno ${d + 1}: nessun reperibile notturno (serve un infermiere in smonto)`
-            : `Giorno ${d + 1}: nessun reperibile notturno (mattina oggi + notte domani)`,
+            : `Giorno ${d + 1}: nessun reperibile notturno (serve un infermiere di mattina)`,
+        });
+    }
+  }
+
+  // Reperibile diurno festivo: every Sunday/holiday needs a nurse on N that day.
+  if (state.rules.reperibileDiurnoFestivo) {
+    for (let d = 0; d < numDays; d++) {
+      if (!isFestivoItaliano(state.year, state.month, d + 1)) continue;
+      if (reperibileDiurnoForDay(d) === -1)
+        violations.push({
+          day: d,
+          type: 'reperibile_diurno_mancante',
+          msg: `Giorno ${d + 1} (festivo): nessun reperibile diurno (serve un infermiere di notte)`,
         });
     }
   }

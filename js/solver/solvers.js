@@ -121,106 +121,112 @@ async function solve(config, numSolutions, timeBudget, untilZeroViolations, solv
 
       console.log(`[Solver] === Solution ${i + 1}/${numSolutions} (seed=${seed}) ===`);
 
-      // Night-only manual mode: cover nights + fixed nurses, leave M/P blank
-      if (solverChoice === 'night_only' && !solved) {
-        progress(pctBase, `${batchLabel}Solo notti: copertura notturna (mattine/pomeriggi manuali)…`);
-        const nightOnlyStart = Date.now();
-        const result = solveNightOnly(config);
-        const nightOnlyElapsed = (Date.now() - nightOnlyStart) / 1000;
-        console.log(
-          `[Solver] Night-only solution: score=${result.score}, violations=${result.violations.length}, elapsed=${nightOnlyElapsed.toFixed(2)}s`
-        );
-        batchSolutions.push({ ...result, solverMethod: 'night_only' });
-        solved = true;
-      }
-
-      // Night-first Pattern Beam planner
-      if (solverChoice === 'night_first_pattern' && !solved) {
-        progress(pctBase, `${batchLabel}Night-first Pattern Beam: soluzione ${i + 1}/${numSolutions}…`);
-        const nightFirstStart = Date.now();
-        const result = solveNightFirstPattern(config, perSolutionBudgetSec);
-        const nightFirstElapsed = (Date.now() - nightFirstStart) / 1000;
-        console.log(
-          `[Solver] Night-first Pattern Beam solution: score=${result.score}, violations=${result.violations.length}, elapsed=${nightFirstElapsed.toFixed(2)}s`
-        );
-        batchSolutions.push({ ...result, solverMethod: 'night_first_pattern' });
-        solved = true;
-      }
-
-      // Pattern Beam planner
-      if (solverChoice === 'pattern' && !solved) {
-        progress(pctBase, `${batchLabel}Pattern Beam: soluzione ${i + 1}/${numSolutions}…`);
-        const patternStart = Date.now();
-        const result = solvePattern(config, perSolutionBudgetSec);
-        const patternElapsed = (Date.now() - patternStart) / 1000;
-        console.log(
-          `[Solver] Pattern Beam solution: score=${result.score}, violations=${result.violations.length}, elapsed=${patternElapsed.toFixed(2)}s`
-        );
-        batchSolutions.push({ ...result, solverMethod: 'pattern' });
-        solved = true;
-      }
-
-      // 'auto': portfolio — run the night-first Pattern Beam, the plain Pattern Beam
-      // and the heuristic on a split budget, keep the best schedule (fewer hard
-      // violations first, then total score). Each planner dominates on different
-      // rosters: night-first on D/N-heavy ERs, the plain beam on M/P/N cyclic
-      // rosters, the heuristic on small or unusual instances.
-      if (solverChoice === 'auto' && !solved) {
-        progress(pctBase, `${batchLabel}Auto (portfolio pattern + euristica): soluzione ${i + 1}/${numSolutions}…`);
-        const autoStart = Date.now();
-        const candidates = [];
-        {
-          const result = solveNightFirstPattern(config, perSolutionBudgetSec * 0.4);
-          candidates.push({
-            ...result,
-            solverMethod: 'night_first_pattern',
-            _score: computeScore(result.schedule, ctx),
-          });
+      // Each solution runs under its own seeded RNG so multi-solution batches
+      // are genuinely diverse AND reproducible (the seed used to be log-only).
+      const generateOne = () => {
+        // Night-only manual mode: cover nights + fixed nurses, leave M/P blank
+        if (solverChoice === 'night_only' && !solved) {
+          progress(pctBase, `${batchLabel}Solo notti: copertura notturna (mattine/pomeriggi manuali)…`);
+          const nightOnlyStart = Date.now();
+          const result = solveNightOnly(config);
+          const nightOnlyElapsed = (Date.now() - nightOnlyStart) / 1000;
+          console.log(
+            `[Solver] Night-only solution: score=${result.score}, violations=${result.violations.length}, elapsed=${nightOnlyElapsed.toFixed(2)}s`
+          );
+          batchSolutions.push({ ...result, solverMethod: 'night_only' });
+          solved = true;
         }
-        {
-          const result = solvePattern(config, perSolutionBudgetSec * 0.3);
-          candidates.push({ ...result, solverMethod: 'pattern', _score: computeScore(result.schedule, ctx) });
-        }
-        {
-          const improved = localSearch(construct(ctx), ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec * 0.3);
-          const hScore = computeScore(improved, ctx);
-          candidates.push({
-            schedule: improved,
-            violations: collectViolations(improved, ctx),
-            stats: computeStats(improved, ctx),
-            score: hScore.total,
-            solverMethod: 'fallback',
-            _score: hScore,
-          });
-        }
-        candidates.sort((a, b) => a._score.hard - b._score.hard || a._score.total - b._score.total);
-        const bestCandidate = candidates[0];
-        const elapsed = (Date.now() - autoStart) / 1000;
-        console.log(
-          `[Solver] Auto portfolio (${elapsed.toFixed(1)}s): ` +
-            candidates
-              .map(c => `${c.solverMethod} hard=${c._score.hard} total=${Math.round(c._score.total)}`)
-              .join(' | ')
-        );
-        delete bestCandidate._score;
-        batchSolutions.push(bestCandidate);
-        solved = true;
-      }
 
-      // Heuristic (greedy + simulated annealing) — used for 'fallback' and any
-      // unrecognised choice (including legacy 'milp'/'glpk' values saved in localStorage).
-      if (!solved) {
-        progress(pctBase, `${batchLabel}Euristica: soluzione ${i + 1}/${numSolutions}…`);
-        const schedule = construct(ctx);
-        const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec);
-        const violations = collectViolations(improved, ctx);
-        const stats = computeStats(improved, ctx);
-        const score = computeScore(improved, ctx);
-        console.log(
-          `[Solver] Heuristic solution: score=${score.total} (hard=${score.hard}, soft=${score.soft}), violations=${violations.length}`
-        );
-        batchSolutions.push({ schedule: improved, violations, stats, score: score.total, solverMethod: 'fallback' });
-      }
+        // Night-first Pattern Beam planner
+        if (solverChoice === 'night_first_pattern' && !solved) {
+          progress(pctBase, `${batchLabel}Night-first Pattern Beam: soluzione ${i + 1}/${numSolutions}…`);
+          const nightFirstStart = Date.now();
+          const result = solveNightFirstPattern(config, perSolutionBudgetSec);
+          const nightFirstElapsed = (Date.now() - nightFirstStart) / 1000;
+          console.log(
+            `[Solver] Night-first Pattern Beam solution: score=${result.score}, violations=${result.violations.length}, elapsed=${nightFirstElapsed.toFixed(2)}s`
+          );
+          batchSolutions.push({ ...result, solverMethod: 'night_first_pattern' });
+          solved = true;
+        }
+
+        // Pattern Beam planner
+        if (solverChoice === 'pattern' && !solved) {
+          progress(pctBase, `${batchLabel}Pattern Beam: soluzione ${i + 1}/${numSolutions}…`);
+          const patternStart = Date.now();
+          const result = solvePattern(config, perSolutionBudgetSec);
+          const patternElapsed = (Date.now() - patternStart) / 1000;
+          console.log(
+            `[Solver] Pattern Beam solution: score=${result.score}, violations=${result.violations.length}, elapsed=${patternElapsed.toFixed(2)}s`
+          );
+          batchSolutions.push({ ...result, solverMethod: 'pattern' });
+          solved = true;
+        }
+
+        // 'auto': portfolio — run the night-first Pattern Beam, the plain Pattern Beam
+        // and the heuristic on a split budget, keep the best schedule (fewer hard
+        // violations first, then total score). Each planner dominates on different
+        // rosters: night-first on D/N-heavy ERs, the plain beam on M/P/N cyclic
+        // rosters, the heuristic on small or unusual instances.
+        if (solverChoice === 'auto' && !solved) {
+          progress(pctBase, `${batchLabel}Auto (portfolio pattern + euristica): soluzione ${i + 1}/${numSolutions}…`);
+          const autoStart = Date.now();
+          const candidates = [];
+          {
+            const result = solveNightFirstPattern(config, perSolutionBudgetSec * 0.4);
+            candidates.push({
+              ...result,
+              solverMethod: 'night_first_pattern',
+              _score: computeScore(result.schedule, ctx),
+            });
+          }
+          {
+            const result = solvePattern(config, perSolutionBudgetSec * 0.3);
+            candidates.push({ ...result, solverMethod: 'pattern', _score: computeScore(result.schedule, ctx) });
+          }
+          {
+            const improved = localSearch(construct(ctx), ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec * 0.3);
+            const hScore = computeScore(improved, ctx);
+            candidates.push({
+              schedule: improved,
+              violations: collectViolations(improved, ctx),
+              stats: computeStats(improved, ctx),
+              score: hScore.total,
+              solverMethod: 'fallback',
+              _score: hScore,
+            });
+          }
+          candidates.sort((a, b) => a._score.hard - b._score.hard || a._score.total - b._score.total);
+          const bestCandidate = candidates[0];
+          const elapsed = (Date.now() - autoStart) / 1000;
+          console.log(
+            `[Solver] Auto portfolio (${elapsed.toFixed(1)}s): ` +
+              candidates
+                .map(c => `${c.solverMethod} hard=${c._score.hard} total=${Math.round(c._score.total)}`)
+                .join(' | ')
+          );
+          delete bestCandidate._score;
+          batchSolutions.push(bestCandidate);
+          solved = true;
+        }
+
+        // Heuristic (greedy + simulated annealing) — used for 'fallback' and any
+        // unrecognised choice (including legacy 'milp'/'glpk' values saved in localStorage).
+        if (!solved) {
+          progress(pctBase, `${batchLabel}Euristica: soluzione ${i + 1}/${numSolutions}…`);
+          const schedule = construct(ctx);
+          const improved = localSearch(schedule, ctx, LOCAL_SEARCH_ITERS, perSolutionBudgetSec);
+          const violations = collectViolations(improved, ctx);
+          const stats = computeStats(improved, ctx);
+          const score = computeScore(improved, ctx);
+          console.log(
+            `[Solver] Heuristic solution: score=${score.total} (hard=${score.hard}, soft=${score.soft}), violations=${violations.length}`
+          );
+          batchSolutions.push({ schedule: improved, violations, stats, score: score.total, solverMethod: 'fallback' });
+        }
+      };
+
+      withSeededRandom(seed * 2654435761 + 97, generateOne);
     }
   }
 

@@ -288,25 +288,26 @@ describe('fascia oraria automatica', () => {
 });
 
 describe('reperibile notturno', () => {
-  it('senza diurni: segnala reperibile_mancante quando nessuno ha M oggi e N domani', () => {
+  it('senza diurni: segnala reperibile_mancante quando nessuno ha la mattina nel giorno con notte', () => {
     const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true, maxCoverageD: 0 } }));
     const schedule = emptySchedule(bctx);
-    schedule[0][5] = 'P'; // pomeriggio, non vale come mattina
     schedule[0][6] = 'N';
     schedule[0][7] = 'S';
     schedule[0][8] = 'R';
+    schedule[1][6] = 'P'; // pomeriggio, non vale come mattina
     const violations = ctx.collectViolations(schedule, bctx);
-    assert.ok(violations.some(v => v.type === 'reperibile_mancante' && v.day === 5));
+    assert.ok(violations.some(v => v.type === 'reperibile_mancante' && v.day === 6));
     assert.ok(ctx.computeScore(schedule, bctx).hard > 0);
   });
 
-  it('senza diurni: soddisfatto da un infermiere con M oggi e N domani', () => {
+  it('senza diurni: soddisfatto da un infermiere con M nel giorno della notte (nessun requisito su domani)', () => {
     const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true, maxCoverageD: 0 } }));
     const schedule = emptySchedule(bctx);
-    schedule[0][5] = 'M';
     schedule[0][6] = 'N';
     schedule[0][7] = 'S';
     schedule[0][8] = 'R';
+    // n1 fa la mattina il giorno della notte e NON ha alcuna notte domani.
+    schedule[1][6] = 'M';
     const violations = ctx.collectViolations(schedule, bctx);
     assert.ok(!violations.some(v => v.type === 'reperibile_mancante'));
   });
@@ -314,26 +315,145 @@ describe('reperibile notturno', () => {
   it('con diurni: il reperibile è chi è in smonto oggi', () => {
     const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true, maxCoverageD: 4 } }));
     const schedule = emptySchedule(bctx);
-    // Notte di n0 il giorno 5: smonto il 6. Notte di n1 il giorno 7 → il giorno 6
-    // ha "notti domani" e n0 è in smonto → reperibile coperto.
+    // n0: N il 5, S il 6, R il 7 — n2: N il 6, S il 7 — n1: N il 7.
     schedule[0][5] = 'N';
     schedule[0][6] = 'S';
     schedule[0][7] = 'R';
-    schedule[1][6] = 'D';
+    schedule[2][6] = 'N';
+    schedule[2][7] = 'S';
+    schedule[2][8] = 'R';
     schedule[1][7] = 'N';
     schedule[1][8] = 'S';
     schedule[1][9] = 'R';
     const violations = ctx.collectViolations(schedule, bctx);
+    // Giorno 6 (notte di n2): n0 è in smonto → coperto.
     assert.ok(!violations.some(v => v.type === 'reperibile_mancante' && v.day === 6));
-    // Il giorno 4 ha "notte domani" (n0 il 5) ma nessuno in smonto → violazione.
-    assert.ok(violations.some(v => v.type === 'reperibile_mancante' && v.day === 4));
+    // Giorno 7 (notte di n1): n2 è in smonto → coperto.
+    assert.ok(!violations.some(v => v.type === 'reperibile_mancante' && v.day === 7));
+    // Giorno 5 (notte di n0): nessuno in smonto → violazione.
+    assert.ok(violations.some(v => v.type === 'reperibile_mancante' && v.day === 5));
   });
 
-  it('non richiede nulla nei giorni senza notti il giorno dopo', () => {
+  it('non richiede nulla nei giorni senza notti', () => {
     const bctx = ctx.buildContext(makeConfig({ rules: { reperibileNotturno: true } }));
     const schedule = emptySchedule(bctx); // nessuna notte in tutto il mese
     const violations = ctx.collectViolations(schedule, bctx);
     assert.ok(!violations.some(v => v.type === 'reperibile_mancante'));
+  });
+});
+
+describe('reperibile diurno festivo', () => {
+  it('segnala reperibile_diurno_mancante nelle domeniche senza notte', () => {
+    // Aprile 2026: le domeniche cadono il 5, 12, 19, 26 (giorni 1-based).
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileDiurnoFestivo: true } }));
+    const schedule = emptySchedule(bctx); // nessuna notte
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(violations.some(v => v.type === 'reperibile_diurno_mancante' && v.day === 4));
+    assert.ok(ctx.computeScore(schedule, bctx).hard > 0);
+  });
+
+  it('soddisfatto da un infermiere con la notte nel giorno festivo', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileDiurnoFestivo: true } }));
+    const schedule = emptySchedule(bctx);
+    // Copre tutte le domeniche di aprile 2026 (5, 12, 19, 26 → indici 4, 11, 18, 25),
+    // Pasquetta (6 aprile → indice 5) e la Liberazione (25 aprile → indice 24).
+    for (const d of [4, 5, 11, 18, 24, 25]) {
+      schedule[0][d] = 'N';
+    }
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(!violations.some(v => v.type === 'reperibile_diurno_mancante'));
+  });
+
+  it('non richiede nulla nei giorni feriali senza notte', () => {
+    const bctx = ctx.buildContext(makeConfig({ rules: { reperibileDiurnoFestivo: true } }));
+    const schedule = emptySchedule(bctx);
+    const violations = ctx.collectViolations(schedule, bctx);
+    // Giorno 2 aprile 2026 (giovedì, indice 1): feriale → nessuna violazione.
+    assert.ok(!violations.some(v => v.type === 'reperibile_diurno_mancante' && v.day === 1));
+  });
+
+  it('calcola correttamente Pasquetta e le feste fisse', () => {
+    // Pasqua 2026: 5 aprile → Pasquetta 6 aprile 2026.
+    const p2026 = ctx.easterMonday(2026);
+    assert.equal(p2026.month, 3);
+    assert.equal(p2026.day, 6);
+    // Pasqua 2027: 28 marzo → Pasquetta 29 marzo 2027.
+    const p2027 = ctx.easterMonday(2027);
+    assert.equal(p2027.month, 2);
+    assert.equal(p2027.day, 29);
+    assert.equal(ctx.isFestivoItaliano(2026, 11, 25), true); // Natale
+    assert.equal(ctx.isFestivoItaliano(2026, 7, 15), true); // Ferragosto
+    assert.equal(ctx.isFestivoItaliano(2026, 3, 6), true); // Pasquetta 2026
+    assert.equal(ctx.isFestivoItaliano(2026, 3, 7), false); // martedì dopo Pasquetta
+    assert.equal(ctx.isFestivoItaliano(2026, 3, 5), true); // domenica di Pasqua
+  });
+});
+
+describe('esenzioni riposi per le matrici rigide', () => {
+  it('la coppia R-R del ciclo 5+2 in una settimana parziale di confine non è un eccesso', () => {
+    // Giugno 2026: 1/6 è lunedì → ultima settimana parziale = 29-30 (2 giorni).
+    const bctx = ctx.buildContext(
+      makeConfig({
+        month: 5,
+        year: 2026,
+        numNurses: 1,
+        nurseOverrides: { 0: { tags: ['mattine_e_pomeriggi'] } },
+        rules: { minRPerWeek: 2, maxCoverageM: 1, maxCoverageP: 1 },
+      })
+    );
+    // Ciclo M-M-M-P-P-R-R con fase che porta la coppia R-R sul 29-30 giugno.
+    const cycle = ['M', 'M', 'M', 'P', 'P', 'R', 'R'];
+    const offset = (5 - (28 % 7) + 7) % 7;
+    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => cycle[(idx + offset) % cycle.length])];
+    assert.equal(schedule[0][28], 'R');
+    assert.equal(schedule[0][29], 'R');
+    const violations = ctx.collectViolations(schedule, bctx);
+    assert.ok(!violations.some(v => v.type === 'troppi_riposi_settimana'));
+    assert.ok(!violations.some(v => v.type === 'mp_cycle_5_2'));
+  });
+
+  it('la matrice 5+2 resta validata anche dopo un giorno di assenza', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 1,
+        nurseOverrides: { 0: { tags: ['mattine_e_pomeriggi'] } },
+        rules: { minRPerWeek: 0, maxCoverageM: 5, maxCoverageP: 5 },
+      })
+    );
+    const cycle = ['M', 'M', 'M', 'P', 'P', 'R', 'R'];
+    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => cycle[idx % cycle.length])];
+    schedule[0][9] = 'L104'; // absence interrupts the cycle on day 10
+    // The cycle resumes with a free phase: no violation from the absence alone.
+    const cleanViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'mp_cycle_5_2');
+    assert.equal(cleanViolations.length, 0, `violazioni inattese: ${cleanViolations.map(v => v.msg).join('; ')}`);
+    // A real deviation AFTER the absence is still caught.
+    const broken = schedule[0].slice();
+    broken[20] = broken[20] === 'R' ? 'M' : 'R';
+    const brokenViolations = ctx.collectViolations([broken], bctx).filter(v => v.type === 'mp_cycle_5_2');
+    assert.ok(brokenViolations.length > 0, 'la deviazione dopo l assenza deve essere segnalata');
+  });
+});
+
+describe('withSeededRandom', () => {
+  it('è deterministico per seed e ripristina Math.random', () => {
+    const original = Math.random;
+    const a = ctx.withSeededRandom(42, () => [Math.random(), Math.random(), Math.random()]);
+    const b = ctx.withSeededRandom(42, () => [Math.random(), Math.random(), Math.random()]);
+    const c = ctx.withSeededRandom(43, () => [Math.random(), Math.random(), Math.random()]);
+    assert.deepEqual(a, b);
+    assert.notDeepEqual(a, c);
+    assert.equal(Math.random, original);
+    for (const v of a) assert.ok(v >= 0 && v < 1);
+  });
+
+  it('ripristina Math.random anche se la funzione lancia', () => {
+    const original = Math.random;
+    assert.throws(() =>
+      ctx.withSeededRandom(7, () => {
+        throw new Error('boom');
+      })
+    );
+    assert.equal(Math.random, original);
   });
 });
 
