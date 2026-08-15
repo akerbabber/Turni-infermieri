@@ -412,6 +412,66 @@ describe('esenzioni riposi per le matrici rigide', () => {
     assert.ok(!violations.some(v => v.type === 'mp_cycle_5_2'));
   });
 
+  it('le riparazioni di copertura non convertono MAI i riposi della matrice 5+2 (niente 6 lavoro + 1 riposo)', () => {
+    // n0 segue la matrice rigida, n1 è un jolly tutto a riposo; il minimo M=2 è
+    // irraggiungibile nei giorni di riposo di n0: la riparazione deve promuovere
+    // n1, non mangiare i riposi del ciclo di n0.
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 2,
+        nurseOverrides: { 0: { tags: ['mattine_e_pomeriggi'] } },
+        rules: {
+          minCoverageM: 2,
+          maxCoverageM: 3,
+          minCoverageP: 0,
+          maxCoverageP: 3,
+          maxCoverageD: 0,
+          maxCoverageN: 0,
+          minRPerWeek: 2,
+        },
+      })
+    );
+    const cycle = ['M', 'M', 'M', 'P', 'P', 'R', 'R'];
+    const mpRow = Array.from({ length: bctx.numDays }, (_, idx) => cycle[idx % cycle.length]);
+    const schedule = [mpRow.slice(), new Array(bctx.numDays).fill('R')];
+    const repaired = ctx.localSearch(schedule, bctx, 0);
+    assert.equal(
+      repaired[0].join('|'),
+      mpRow.join('|'),
+      'la riga della matrice 5+2 deve restare intatta dopo le riparazioni'
+    );
+  });
+
+  it('i due riposi della matrice 5+2 devono restare attaccati dentro il mese', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 1,
+        nurseOverrides: { 0: { tags: ['mattine_e_pomeriggi'] } },
+        rules: { minRPerWeek: 0, maxCoverageM: 5, maxCoverageP: 5 },
+      })
+    );
+    const cycle = ['M', 'M', 'M', 'P', 'P', 'R', 'R'];
+    // Fase con R singolo il giorno 1 (l'altro R "sarebbe" a fine mese precedente):
+    // senza dati di continuità va segnalata.
+    const offset = 6;
+    const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => cycle[(idx + offset) % cycle.length])];
+    assert.equal(schedule[0][0], 'R');
+    assert.notEqual(schedule[0][1], 'R');
+    const violations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'mp_cycle_5_2');
+    assert.ok(violations.length > 0, 'R singolo a inizio mese senza continuità deve essere segnalato');
+
+    // Con la continuità che dimostra l'R a fine mese precedente, è lecito.
+    const cfgTail = makeConfig({
+      numNurses: 1,
+      nurseOverrides: { 0: { tags: ['mattine_e_pomeriggi'] } },
+      rules: { minRPerWeek: 0, maxCoverageM: 5, maxCoverageP: 5 },
+      previousMonthTail: [['P', 'P', 'R']],
+    });
+    const bctxTail = ctx.buildContext(cfgTail);
+    const okViolations = ctx.collectViolations(schedule, bctxTail).filter(v => v.type === 'mp_cycle_5_2');
+    assert.equal(okViolations.length, 0, 'R singolo a inizio mese CON continuità R è lecito');
+  });
+
   it('la matrice 5+2 resta validata anche dopo un giorno di assenza', () => {
     const bctx = ctx.buildContext(
       makeConfig({

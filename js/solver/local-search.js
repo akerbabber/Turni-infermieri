@@ -611,10 +611,11 @@ function repairDayCoverage(schedule, ctx) {
   function canPromoteRest(n, d, shiftType, relaxWeeklyRest) {
     if (repaired[n][d] !== 'R' || pinned[n][d]) return false;
     if (isMandatoryNightRestDay(repaired, ctx, n, d)) return false;
-    // Rigid-matrix M/P nurses are normally untouchable, but the daily MINIMUM
-    // coverage outranks the matrix: the relaxed (absolute) pass may promote
-    // their rests too — the residual mp_cycle_5_2 mismatch stays visible.
-    if (!relaxWeeklyRest && isMPCycleLimitedNurse(nurseProps[n])) return false;
+    // Rigid-matrix M/P nurses are NEVER promoted, not even by the relaxed
+    // (absolute-minimum) pass: eating one of their two weekly rests would turn
+    // the mandatory 5+2 cycle into 6 work + 1 rest. Residual coverage deficits
+    // stay visible as coverage violations instead.
+    if (isMPCycleLimitedNurse(nurseProps[n])) return false;
     if (!relaxWeeklyRest && !hasSpareWeeklyRest(n, d)) return false;
     // Shift-aware tag check: e.g. solo_diurni/diurni_e_notturni may take D but not
     // M/P, while no_diurni may take M/P but not D.
@@ -970,6 +971,10 @@ function repairWeeklyRestDeficits(schedule, ctx) {
     changed = false;
     const currentScore = computeScore(repaired, ctx);
     outer: for (let n = 0; n < numNurses; n++) {
+      // Rigid-matrix M/P nurses are never repaired here: every full week of the
+      // 5+2 cycle already carries its two rests, and partial boundary weeks are
+      // exempt from the weekly minimum by design (see computeScore).
+      if (isMPCycleLimitedNurse(nurseProps[n])) continue;
       for (const weekDays of weekDaysList) {
         const need = requiredRest(weekDays.length, minRPerWeek);
         if (countWeekRest(repaired, n, weekDays) >= need) continue;
@@ -1054,8 +1059,11 @@ function repairWeeklyRestDeficits(schedule, ctx) {
           for (let o = 0; o < numNurses; o++) {
             // The donor only needs some rest in this week — the score check decides
             // whether the exchange is a net improvement (window extension can bring
-            // additional rest days in from the adjacent weeks).
+            // additional rest days in from the adjacent weeks). Rigid-matrix M/P
+            // nurses never donate: swapping their window would eat the R-R pair
+            // of the mandatory 5+2 cycle.
             if (o === n || countWeekRest(repaired, o, weekDays) === 0) continue;
+            if (isMPCycleLimitedNurse(nurseProps[o])) continue;
 
             // Extend the window left past S / mandatory-R cells (block started
             // earlier) and one extra day past a leading N (its lead-in shifts).

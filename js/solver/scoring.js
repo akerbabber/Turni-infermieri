@@ -270,15 +270,28 @@ function isAllowedMPCycleShift(shift) {
   return shift === 'M' || shift === 'P' || shift === 'R';
 }
 
-function getMPCyclePlan(schedule, nurseIdx, numDays, props) {
+// Last shift of the previous month for a nurse (from the continuity tail), or null.
+function getPrevTailShift(ctx, n) {
+  const tail = ctx.prevTail && ctx.prevTail[n];
+  return tail && tail.length > 0 ? tail[tail.length - 1] : null;
+}
+
+function getMPCyclePlan(schedule, nurseIdx, numDays, props, prevShift) {
   const row = schedule[nurseIdx];
   const basePatterns = getAllowedMPCyclePatterns(props);
-  // At month start the nurse may be mid-cycle (phase offset): allow any suffix
-  // of a pattern as the first segment so rest days can be staggered between
-  // nurses while every full cycle stays a rigid 5-work + 2-rest week.
+  // At month start the nurse may be mid-cycle (phase offset): allow suffixes of
+  // a pattern as the first segment so rest days can be staggered between nurses
+  // while every full cycle stays a rigid 5-work + 2-rest week. The two rests
+  // must stay ADJACENT inside the month: a suffix starting with the lone second
+  // R is allowed only when the previous month actually ended with the first R
+  // (prevShift === 'R', from the continuity data).
   const phasePatterns = [];
   for (const pattern of basePatterns) {
-    for (let cut = 1; cut < pattern.length; cut++) phasePatterns.push(pattern.slice(cut));
+    for (let cut = 1; cut < pattern.length; cut++) {
+      const suffix = pattern.slice(cut);
+      if (suffix[0] === 'R' && suffix.length === 1 && prevShift !== 'R') continue;
+      phasePatterns.push(suffix);
+    }
   }
   const memo = new Map();
 
@@ -294,6 +307,17 @@ function getMPCyclePlan(schedule, nurseIdx, numDays, props) {
       blockLen++;
     }
     if (blockLen === 0) return null;
+    // Month-end truncation that splits the R-R pair (the month closes on the
+    // first R with the second one falling into the next month) counts as a
+    // mismatch: the two weekly rests must stay adjacent inside the month.
+    if (
+      startDay + blockLen === numDays &&
+      blockLen < pattern.length &&
+      pattern[blockLen] === 'R' &&
+      pattern[blockLen - 1] === 'R'
+    ) {
+      mismatch++;
+    }
     return { blockLen, mismatch };
   }
 
@@ -567,7 +591,7 @@ function computeScore(schedule, ctx) {
       if (hasForbiddenExtraNightRest(schedule, ctx, n, d)) hard++;
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
-      hard += getMPCyclePlan(schedule, n, numDays, nurseProps[n]).mismatch;
+      hard += getMPCyclePlan(schedule, n, numDays, nurseProps[n], getPrevTailShift(ctx, n)).mismatch;
     }
   }
 
@@ -1004,7 +1028,7 @@ function collectViolations(schedule, ctx) {
         });
     }
     if (isMPCycleLimitedNurse(nurseProps[n])) {
-      const plan = getMPCyclePlan(schedule, n, numDays, nurseProps[n]);
+      const plan = getMPCyclePlan(schedule, n, numDays, nurseProps[n], getPrevTailShift(ctx, n));
       for (const segment of plan.segments) {
         if (segment.mismatch > 0) {
           violations.push({

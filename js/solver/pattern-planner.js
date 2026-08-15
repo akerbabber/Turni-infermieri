@@ -759,7 +759,7 @@ function patternRowHardCost(row, ctx, n) {
     if (hasForbiddenExtraNightRest(tmpSchedule, ctx, n, d)) hard += 30;
   }
   if (isMPCycleLimitedNurse(props)) {
-    hard += getMPCyclePlan(tmpSchedule, n, ctx.numDays, props).mismatch * 40;
+    hard += getMPCyclePlan(tmpSchedule, n, ctx.numDays, props, getPrevTailShift(ctx, n)).mismatch * 40;
   }
   return hard;
 }

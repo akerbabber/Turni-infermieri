@@ -480,7 +480,25 @@ function construct(ctx) {
   mpLimited.forEach((n, mpIdx) => {
     const patterns = getAllowedMPCyclePatterns(nurseProps[n]);
     const cycleLen = patterns[0].length;
-    const phaseCut = mpLimited.length > 1 ? Math.floor((mpIdx * cycleLen) / mpLimited.length) % cycleLen : 0;
+    // Allowed phase offsets: the R-R pair must stay adjacent INSIDE the month —
+    // no lone second R on day 1 (unless the previous month really ended with the
+    // first R) and no lone first R on the last day of the month.
+    const prevShift = getPrevTailShift(ctx, n);
+    const allowedCuts = [];
+    for (let cut = 0; cut < cycleLen; cut++) {
+      if (cut === cycleLen - 1 && prevShift !== 'R') continue;
+      if ((cut + numDays - 1) % cycleLen === cycleLen - 2) continue;
+      allowedCuts.push(cut);
+    }
+    let phaseCut = 0;
+    if (allowedCuts.length > 0) {
+      phaseCut =
+        mpLimited.length > 1
+          ? allowedCuts[Math.floor((mpIdx * allowedCuts.length) / mpLimited.length) % allowedCuts.length]
+          : allowedCuts.includes(0)
+            ? 0
+            : allowedCuts[0];
+    }
     let firstBlock = phaseCut > 0;
     for (let startDay = 0; startDay < numDays; ) {
       let bestPattern = null;

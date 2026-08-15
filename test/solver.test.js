@@ -170,11 +170,13 @@ const MP_CYCLE_PATTERNS = [
 
 function assertMatchesMPCycle(row, messagePrefix, patterns = MP_CYCLE_PATTERNS) {
   const memo = new Map();
-  // The first segment may be any suffix of a pattern (phase offset at month
-  // start), mirroring getMPCyclePlan in js/solver/scoring.js.
+  // The first segment may be a suffix of a pattern (phase offset at month
+  // start), mirroring getMPCyclePlan in js/solver/scoring.js. The R-R pair
+  // must stay adjacent inside the month: no lone second R on day 1 and no
+  // lone first R on the last day.
   const phasePatterns = [];
   for (const pattern of patterns) {
-    for (let cut = 1; cut < pattern.length; cut++) phasePatterns.push(pattern.slice(cut));
+    for (let cut = 1; cut < pattern.length - 1; cut++) phasePatterns.push(pattern.slice(cut));
   }
 
   function matches(start) {
@@ -184,7 +186,9 @@ function assertMatchesMPCycle(row, messagePrefix, patterns = MP_CYCLE_PATTERNS) 
     for (const pattern of candidates) {
       const blockLen = Math.min(pattern.length, row.length - start);
       const ok = row.slice(start, start + blockLen).every((shift, idx) => shift === pattern[idx]);
-      if (ok && matches(start + blockLen)) {
+      // Reject month-end truncation that splits the R-R pair.
+      const splitsRestPair = blockLen < pattern.length && pattern[blockLen] === 'R' && pattern[blockLen - 1] === 'R';
+      if (ok && !splitsRestPair && matches(start + blockLen)) {
         memo.set(start, true);
         return true;
       }
@@ -1362,10 +1366,11 @@ describe('construct', () => {
       },
     });
     const bctx = ctx.buildContext(config);
-    // Month starts mid-cycle (phase offset: P-P-R-R tail) then repeats the
-    // rigid 7-day 5-work + 2-rest cycle.
+    // Month starts mid-cycle (phase offset: M-P-P-R-R tail) then repeats the
+    // rigid 7-day 5-work + 2-rest cycle. The offset keeps the R-R pair intact
+    // at both month edges.
     const cycle = ['M', 'M', 'M', 'P', 'P', 'R', 'R'];
-    const offset = 3;
+    const offset = 2;
     const schedule = [Array.from({ length: bctx.numDays }, (_, idx) => cycle[(idx + offset) % cycle.length])];
 
     const mpViolations = ctx.collectViolations(schedule, bctx).filter(v => v.type === 'mp_cycle_5_2');

@@ -51,6 +51,7 @@ const solverSharedGlobals = {
   collectViolations: 'writable',
   computeStats: 'writable',
   keepsNightLeadIns: 'writable',
+  getPrevTailShift: 'writable',
   MAX_CONSECUTIVE_REST: 'writable',
   hasNightOnDay: 'writable',
   findReperibile: 'writable',
