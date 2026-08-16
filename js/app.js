@@ -47,6 +47,61 @@ const FASCIA_PRESETS = {
   '7-10': { M: 7.2, P: 7.2, D: 12.2, N: 10.2, S: 0, R: 0, F: 7.12, MA: 7.12, L104: 7.12, PR: 7.12, MT: 7.12 },
 };
 const MONTHLY_HOURS_PER_WEEKDAY = 7.12;
+// Shift start/end times per fascia (duplicated from js/solver/constants.js —
+// the Worker cannot share code with the main thread). Used for the dynamic
+// coverage-card headers in Step 2.
+const FASCIA_SHIFT_START = {
+  standard: { M: 8, P: 14, D: 8, N: 20 },
+  '7-10': { M: 7, P: 14, D: 8, N: 21 },
+};
+const FASCIA_SHIFT_END = {
+  standard: { M: 14.2, P: 20.2, D: 20.2, N: 8.2 },
+  '7-10': { M: 14.2, P: 21.2, D: 20.2, N: 7.2 },
+};
+
+// 08:00 / 14:12 style label from a decimal hour value (14.2 = 14h12')
+function formatShiftTime(value) {
+  const h = Math.floor(value);
+  const m = Math.round((value - h) * 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// 7h12' style duration label from a decimal hour value (7.2 = 7h12')
+function formatShiftDuration(value) {
+  const h = Math.floor(value);
+  const m = Math.round((value - h) * 60);
+  return m > 0 ? `${h}h${String(m).padStart(2, '0')}'` : `${h}h`;
+}
+
+// Update the Step 2 coverage-card headers (and any fascia summary) so the
+// displayed shift times/durations always match the ACTIVE fascia: extended
+// 7-14:12 / 14-21:12 / 21-7:12 in pure M/P/N wards, standard with 12h12'
+// diurni/notti in mixed wards.
+function updateFasciaHeaders() {
+  const fascia = resolveFasciaOraria(state.rules.fasciaOraria);
+  const starts = FASCIA_SHIFT_START[fascia];
+  const ends = FASCIA_SHIFT_END[fascia];
+  const hours = FASCIA_PRESETS[fascia];
+  for (const [shift, id] of [
+    ['M', 'cov-hours-m'],
+    ['P', 'cov-hours-p'],
+    ['D', 'cov-hours-d'],
+    ['N', 'cov-hours-n'],
+  ]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.textContent = `${formatShiftTime(starts[shift])}–${formatShiftTime(ends[shift])} · ${formatShiftDuration(hours[shift])}`;
+  }
+}
+
+// Short human label of the active fascia for the Genera summary
+function fasciaSummaryLabel() {
+  const fascia = resolveFasciaOraria(state.rules.fasciaOraria);
+  return fascia === '7-10'
+    ? `Estesa (M/P 7h12' · N 10h12' · assenze ${FASCIA_PRESETS['7-10'].F})`
+    : `Standard (M/P 6h12' · D/N 12h12' · assenze ${FASCIA_PRESETS.standard.F})`;
+}
+
 // 'auto' picks the fascia from the diurni usage: schedules WITH diurni
 // (maxCoverageD > 0) use standard hours (M/P 6.2, N 12.2, assenze 6.12),
 // schedules WITHOUT diurni use the extended ones (M/P 7.2, N 10.2, assenze 7.12).
@@ -1090,6 +1145,7 @@ function renderStep2() {
     state.rules.maxCoverageD = v;
     // In fascia 'auto' the shift hours follow the diurni usage
     applyFasciaOraria(state.rules.fasciaOraria);
+    updateFasciaHeaders();
     saveState();
   });
 
@@ -1168,6 +1224,7 @@ function renderStep2() {
     radio.onchange = () => {
       state.rules.fasciaOraria = radio.value;
       applyFasciaOraria(radio.value);
+      updateFasciaHeaders();
       saveState();
     };
   });
@@ -1177,6 +1234,9 @@ function renderStep2() {
 
   // Previous month status
   renderPrevMonthStatus();
+
+  // Coverage-card headers follow the active fascia oraria
+  updateFasciaHeaders();
 }
 
 function bindRange(inputId, labelId, value, onChange) {
@@ -1966,6 +2026,7 @@ function renderGenerateStep() {
     `M:${state.rules.minCoverageM}–${state.rules.maxCoverageM} | P:${state.rules.minCoverageP}–${state.rules.maxCoverageP} | D:${state.rules.minCoverageD}–${state.rules.maxCoverageD} | N:${state.rules.minCoverageN}–${state.rules.maxCoverageN}`
   );
   setEl('summary-month-hours', `${getMonthlyTargetHours(state.year, state.month).toFixed(2)} ore`);
+  setEl('summary-fascia', fasciaSummaryLabel());
   setEl('summary-nights', `${state.rules.targetNights} (max ${state.rules.hardMaxNights})`);
   setEl('summary-prev-month', continuitySummaryLabel());
 

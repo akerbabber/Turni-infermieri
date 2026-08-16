@@ -575,6 +575,45 @@ describe('esenzioni riposi per le matrici rigide', () => {
   });
 });
 
+describe('saturazione ore: turni extra, non riposi extra', () => {
+  // Aprile 2026: settimana 2 = giorni 6-12 (indici 5-11).
+  function buildRow(numDays, restIdx) {
+    const row = new Array(numDays).fill('M');
+    for (const i of restIdx) row[i] = 'R';
+    return row;
+  }
+
+  it('chi è sotto il monte ore perde il riposo extra tollerato (convertito in turno)', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 1,
+        rules: { minRPerWeek: 2, minCoverageM: 0, maxCoverageM: 10, minCoverageP: 0, maxCoverageP: 10 },
+      })
+    );
+    // 11 riposi → ~118h, ben sotto il monte ore di aprile (156.64): la settimana
+    // con 3 riposi (7, 8 e 10) deve essere riportata al minimo di 2.
+    const schedule = [buildRow(bctx.numDays, [0, 1, 7, 8, 10, 14, 15, 21, 22, 27, 28])];
+    const repaired = ctx.repairRestExcess(schedule, bctx);
+    const week2Rests = [5, 6, 7, 8, 9, 10, 11].filter(d => repaired[0][d] === 'R').length;
+    assert.equal(week2Rests, 2, 'il riposo extra di chi è in difetto ore deve diventare un turno');
+  });
+
+  it('chi è già al monte ore mantiene il riposo extra tollerato', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 1,
+        rules: { minRPerWeek: 2, minCoverageM: 0, maxCoverageM: 10, minCoverageP: 0, maxCoverageP: 10 },
+      })
+    );
+    // Solo 3 riposi → ~167h, sopra il monte ore: il terzo riposo della settimana
+    // resta tollerato (soft), nessuna conversione.
+    const schedule = [buildRow(bctx.numDays, [7, 8, 10])];
+    const repaired = ctx.repairRestExcess(schedule, bctx);
+    const week2Rests = [5, 6, 7, 8, 9, 10, 11].filter(d => repaired[0][d] === 'R').length;
+    assert.equal(week2Rests, 3);
+  });
+});
+
 describe('withSeededRandom', () => {
   it('è deterministico per seed e ripristina Math.random', () => {
     const original = Math.random;

@@ -1205,11 +1205,15 @@ function repairRestExcess(schedule, ctx) {
   const { numDays, numNurses, nurseProps, minRPerWeek, weekDaysList, weekOf, maxCovM, maxCovP, maxCovD, pinned } = ctx;
   const repaired = deepCopy(schedule);
 
-  function weekAllowed(wDays) {
-    // One extra rest above the weekly minimum is tolerated (soft), two are hard:
-    // the repair brings weeks back under the hard cap and, when it can do so at
-    // no cost, down to the minimum via the score-guided acceptance.
-    return requiredRest(wDays.length, minRPerWeek) + 1;
+  function weekAllowed(wDays, n) {
+    // One extra rest above the weekly minimum is tolerated (soft), two are hard.
+    // The tolerance applies ONLY to nurses already at their monthly hour target:
+    // whoever is below the monte ore must be handed extra SHIFTS, never extra
+    // rest days, until their hours saturate ("turni extra, non riposi extra").
+    const base = requiredRest(wDays.length, minRPerWeek);
+    const target = ctx.monthlyTargetHours + (ctx.hourDeltas ? ctx.hourDeltas[n] || 0 : 0);
+    if (nurseHours(repaired, n, ctx.numDays) < target - EQUITY_THRESHOLD_HOURS) return base;
+    return base + 1;
   }
 
   function runLenAt(n, d) {
@@ -1250,7 +1254,7 @@ function repairRestExcess(schedule, ctx) {
       if (o === n || pinned[o][d]) continue;
       const shift = repaired[o][d];
       if (shift !== 'M' && shift !== 'P' && shift !== 'D') continue;
-      if (countWeekRest(repaired, o, wDays) >= weekAllowed(wDays)) continue;
+      if (countWeekRest(repaired, o, wDays) >= weekAllowed(wDays, o)) continue;
       if (!canRepairShiftChange(repaired, ctx, o, d, 'R')) continue;
       if (!canRepairShiftChange(repaired, ctx, n, d, shift)) continue;
       if (
@@ -1289,9 +1293,10 @@ function repairRestExcess(schedule, ctx) {
     //    rest day inside the longest consecutive run.
     if (minRPerWeek > 0) {
       for (const wDays of weekDaysList) {
-        const allowed = weekAllowed(wDays);
         let guard = wDays.length;
-        while (countDiscretionaryWeekRest(n, wDays) > allowed && guard-- > 0) {
+        // Recomputed each pass: once the nurse's hours saturate, the tolerated
+        // extra rest comes back and the conversions stop.
+        while (countDiscretionaryWeekRest(n, wDays) > weekAllowed(wDays, n) && guard-- > 0) {
           const days = wDays.filter(d => fixableRestDay(n, d)).sort((a, b) => runLenAt(n, b) - runLenAt(n, a));
           let progressed = false;
           for (const d of days) {

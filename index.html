@@ -330,7 +330,9 @@
 
             <!-- Mattina -->
             <div class="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-              <h4 class="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-2">☀️ Mattina (M) 08:00–14:12</h4>
+              <h4 class="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-2">
+                ☀️ Mattina (M) <span id="cov-hours-m">08:00–14:12</span>
+              </h4>
               <div class="mb-3">
                 <div class="flex justify-between items-center mb-1">
                   <label class="text-sm font-medium" data-tooltip="Numero minimo di infermieri per slot mattina">
@@ -354,7 +356,7 @@
             <!-- Pomeriggio -->
             <div class="mb-4 p-3 bg-amber-50 dark:bg-amber-950 rounded-lg">
               <h4 class="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-2">
-                🌤️ Pomeriggio (P) 14:00–20:12
+                🌤️ Pomeriggio (P) <span id="cov-hours-p">14:00–20:12</span>
               </h4>
               <div class="mb-3">
                 <div class="flex justify-between items-center mb-1">
@@ -378,7 +380,9 @@
 
             <!-- Diurno -->
             <div class="mb-4 p-3 bg-purple-50 dark:bg-purple-950 rounded-lg">
-              <h4 class="text-sm font-semibold text-purple-700 dark:text-purple-300 mb-2">🌞 Diurno (D) 08:00–20:12</h4>
+              <h4 class="text-sm font-semibold text-purple-700 dark:text-purple-300 mb-2">
+                🌞 Diurno (D) <span id="cov-hours-d">08:00–20:12</span>
+              </h4>
               <div class="mb-3">
                 <div class="flex justify-between items-center mb-1">
                   <label
@@ -408,7 +412,9 @@
 
             <!-- Notte -->
             <div class="p-3 bg-slate-100 dark:bg-slate-800 rounded-lg">
-              <h4 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">🌙 Notte (N) 20:00–08:12</h4>
+              <h4 class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                🌙 Notte (N) <span id="cov-hours-n">20:00–08:12</span>
+              </h4>
               <div class="mb-3">
                 <div class="flex justify-between items-center mb-1">
                   <label class="text-sm font-medium" data-tooltip="Numero minimo di infermieri per slot notte">
@@ -839,6 +845,8 @@
               <span id="summary-cov" class="font-medium">—</span>
               <span class="text-gray-500 dark:text-slate-400">Monte ore teorico:</span>
               <span id="summary-month-hours" class="font-medium">—</span>
+              <span class="text-gray-500 dark:text-slate-400">Fascia oraria:</span>
+              <span id="summary-fascia" class="font-medium">—</span>
               <span class="text-gray-500 dark:text-slate-400">Notti target:</span>
               <span id="summary-nights" class="font-medium">—</span>
               <span class="text-gray-500 dark:text-slate-400">Continuità mese prec.:</span>
