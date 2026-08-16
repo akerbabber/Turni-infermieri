@@ -478,6 +478,11 @@ td.violation-cell {
   color: #5b21b6;
   border-color: #c4b5fd;
 }
+.tag.tag-desiderate {
+  background: #ccfbf1;
+  color: #115e59;
+  border-color: #5eead4;
+}
 .tag.tag-ferie {
   background: #d1fae5;
   color: #065f46;
@@ -556,10 +561,55 @@ html.dark .tag.tag-no_diurni {
   color: #c4b5fd;
   border-color: #7c3aed;
 }
+html.dark .tag.tag-desiderate {
+  background: #134e4a;
+  color: #5eead4;
+  border-color: #14b8a6;
+}
 html.dark .tag.tag-ferie {
   background: #064e3b;
   color: #6ee7b7;
   border-color: #10b981;
+}
+
+/* ---------- Desiderate (requested days) mini-grid ---------- */
+.desiderata-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  cursor: pointer;
+  padding: 1px 0;
+  line-height: 1.1;
+}
+.desiderata-cell:hover {
+  border-color: #14b8a6;
+  box-shadow: 0 0 0 1px #14b8a6;
+}
+.desiderata-cell.desiderata-weekend {
+  background: var(--weekend-bg);
+}
+.desiderata-cell .desiderata-day {
+  font-size: 8px;
+  color: var(--text-muted);
+}
+.desiderata-cell .desiderata-shift {
+  font-size: 11px;
+  font-weight: 700;
+}
+.desiderata-cell.has-wish {
+  border-color: #14b8a6;
+}
+
+/* Marker on results-grid cells that were requested (desiderate) */
+.shift-cell.desiderata-mark {
+  outline: 2px dashed #14b8a6;
+  outline-offset: 1px;
 }
 html.dark .tag.tag-malattia {
   background: #7f1d1d;

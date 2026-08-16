@@ -389,6 +389,87 @@ describe('reperibile diurno festivo', () => {
   });
 });
 
+describe('desiderate (giorni richiesti)', () => {
+  it('un riposo desiderato viene bloccato nella griglia', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 2,
+        nurseOverrides: { 0: { tags: ['desiderate'], desiderate: { '2026-04-10': 'R', '2026-04-15': 'M' } } },
+      })
+    );
+    assert.equal(bctx.pinned[0][9], 'R');
+    assert.equal(bctx.pinned[0][14], 'M');
+    assert.equal(bctx.pinned[1][9], null);
+  });
+
+  it('una notte desiderata porta con sé la coda S-R (e il secondo R per i D/N)', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 2,
+        nurseOverrides: {
+          0: { tags: ['desiderate'], desiderate: { '2026-04-10': 'N' } },
+          1: { tags: ['desiderate', 'diurni_e_notturni'], desiderate: { '2026-04-10': 'N' } },
+        },
+      })
+    );
+    assert.equal(bctx.pinned[0][9], 'N');
+    assert.equal(bctx.pinned[0][10], 'S');
+    assert.equal(bctx.pinned[0][11], 'R');
+    assert.equal(bctx.pinned[0][12], null);
+    // diurni_e_notturni: anche il secondo R della matrice N-S-R-R
+    assert.equal(bctx.pinned[1][12], 'R');
+  });
+
+  it('le desiderate incompatibili con i tag vengono ignorate', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 1,
+        nurseOverrides: { 0: { tags: ['desiderate', 'no_notti'], desiderate: { '2026-04-10': 'N' } } },
+      })
+    );
+    assert.equal(bctx.pinned[0][9], null);
+  });
+
+  it('le assenze hanno la precedenza sulle desiderate', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 1,
+        nurseOverrides: {
+          0: {
+            tags: ['desiderate', 'ferie'],
+            absencePeriods: { ferie: { start: '2026-04-08', end: '2026-04-12' } },
+            desiderate: { '2026-04-10': 'M' },
+          },
+        },
+      })
+    );
+    assert.equal(bctx.pinned[0][9], 'F');
+  });
+
+  it('senza il flag attivo la mappa desiderate viene ignorata', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 1,
+        nurseOverrides: { 0: { tags: [], desiderate: { '2026-04-10': 'R' } } },
+      })
+    );
+    assert.equal(bctx.pinned[0][9], null);
+  });
+
+  it('il solver rispetta le desiderate nella griglia generata', () => {
+    const bctx = ctx.buildContext(
+      makeConfig({
+        numNurses: 4,
+        nurseOverrides: { 0: { tags: ['desiderate'], desiderate: { '2026-04-10': 'R', '2026-04-20': 'P' } } },
+        rules: { minCoverageM: 1, maxCoverageM: 2, minCoverageP: 1, maxCoverageP: 2, minRPerWeek: 2 },
+      })
+    );
+    const schedule = ctx.localSearch(ctx.construct(bctx), bctx, 0);
+    assert.equal(schedule[0][9], 'R');
+    assert.equal(schedule[0][19], 'P');
+  });
+});
+
 describe('esenzioni riposi per le matrici rigide', () => {
   it('la coppia R-R del ciclo 5+2 in una settimana parziale di confine non è un eccesso', () => {
     // Giugno 2026: 1/6 è lunedì → ultima settimana parziale = 29-30 (2 giorni).

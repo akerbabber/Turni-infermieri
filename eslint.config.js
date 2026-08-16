@@ -39,6 +39,7 @@ const solverSharedGlobals = {
   // context.js
   buildContext: 'writable',
   getAbsenceShift: 'writable',
+  getDesiderataShift: 'writable',
   // scoring.js
   transitionOk: 'writable',
   dayCoverage: 'writable',

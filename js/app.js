@@ -292,6 +292,9 @@ function normalizeNurse(nurse, index) {
     tags: Array.isArray(nurse?.tags) ? nurse.tags.filter(Boolean) : [],
     absencePeriods,
     previousMonthTail,
+    // Desiderate: requested day assignments for a specific month, keyed by ISO
+    // date ('YYYY-MM-DD' → shift code M/P/D/N/R). Honored as pinned cells.
+    desiderate: nurse?.desiderate && typeof nurse.desiderate === 'object' ? { ...nurse.desiderate } : {},
   };
 }
 
@@ -631,6 +634,44 @@ function moveNurse(fromIdx, toIdx) {
   renderStep4();
 }
 
+// ---------------------------------------------------------------------------
+// Desiderate (requested days) helpers
+// ---------------------------------------------------------------------------
+
+function desiderataDateKey(year, month, day1Based) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day1Based).padStart(2, '0')}`;
+}
+
+// Shifts this nurse may request as desiderata, given their limitation tags.
+// R (requested rest) is always available; the cycle order is the click order.
+function desiderataAllowedShifts(nurse) {
+  const tags = nurse.tags || [];
+  const has = t => tags.includes(t);
+  if (has('solo_diurni')) return ['R', 'D'];
+  if (has('solo_notti')) return ['R', 'N'];
+  if (has('diurni_e_notturni')) return ['R', 'D', 'N'];
+  if (has('solo_mattine')) return ['R', 'M'];
+  const out = ['R', 'M', 'P'];
+  const noDiurni = has('no_diurni') || has('mattine_e_pomeriggi') || has('quattro_mattine_venerdi_notte');
+  const noNotti = has('no_notti') || has('diurni_no_notti') || has('mattine_e_pomeriggi');
+  if (!noDiurni) out.push('D');
+  if (!noNotti) out.push('N');
+  return out;
+}
+
+function cycleDesiderata(nurseIdx, dateKey) {
+  const nurse = state.nurses[nurseIdx];
+  if (!nurse) return;
+  if (!nurse.desiderate) nurse.desiderate = {};
+  const options = [''].concat(desiderataAllowedShifts(nurse));
+  const current = nurse.desiderate[dateKey] || '';
+  const next = options[(options.indexOf(current) + 1) % options.length];
+  if (next) nurse.desiderate[dateKey] = next;
+  else delete nurse.desiderate[dateKey];
+  saveState();
+  renderNurseList();
+}
+
 function renderNurseList() {
   const container = document.getElementById('nurse-list');
   if (!container) return;
@@ -673,6 +714,7 @@ function renderNurseList() {
       { key: 'no_notti', label: 'No notti', cls: 'tag-no_notti', isAbsence: false },
       { key: 'diurni_no_notti', label: 'Sì diurni, no notti', cls: 'tag-diurni_no_notti', isAbsence: false },
       { key: 'no_diurni', label: 'No diurni 12h', cls: 'tag-no_diurni', isAbsence: false },
+      { key: 'desiderate', label: 'Desiderate', cls: 'tag-desiderate', isAbsence: false },
       { key: 'ferie', label: 'Ferie', cls: 'tag-ferie', isAbsence: true },
       { key: 'malattia', label: 'Malattia', cls: 'tag-malattia', isAbsence: true },
       { key: '104', label: '104', cls: 'tag-104', isAbsence: true },
@@ -713,6 +755,35 @@ function renderNurseList() {
       `;
       });
 
+    // Desiderate mini-grid: one clickable cell per day of the selected month,
+    // cycling through the shifts this nurse may actually request.
+    let desiderateHTML = '';
+    if (nurse.tags.includes('desiderate')) {
+      const numDays = daysInMonth(state.year, state.month);
+      if (!nurse.desiderate) nurse.desiderate = {};
+      let cells = '';
+      for (let day = 1; day <= numDays; day++) {
+        const dateKey = desiderataDateKey(state.year, state.month, day);
+        const wish = nurse.desiderate[dateKey] || '';
+        const wk = isWeekend(state.year, state.month, day);
+        const dow = DOW_LABELS[dayOfWeek(state.year, state.month, day)];
+        cells += `<button class="desiderata-cell ${wk ? 'desiderata-weekend' : ''} ${wish ? 'has-wish' : ''}"
+                  data-nurse="${idx}" data-date="${dateKey}"
+                  title="${dow} ${day} — ${wish ? SHIFT_LABELS[wish] : 'nessuna desiderata (clicca per scegliere)'}">
+                  <span class="desiderata-day">${day}</span><span class="desiderata-shift ${wish ? SHIFT_COLORS[wish] || '' : ''}">${wish || '·'}</span>
+                </button>`;
+      }
+      desiderateHTML = `
+        <div class="desiderate-grid mt-2 p-2 bg-gray-50 dark:bg-slate-800 rounded-lg text-xs">
+          <div class="font-semibold text-teal-700 dark:text-teal-300 mb-1">
+            🌟 Desiderate — ${MONTHS_IT[state.month]} ${state.year}
+            <span class="font-normal text-gray-400">clicca un giorno per scegliere il turno richiesto (R = riposo); il turno verrà garantito nella griglia</span>
+          </div>
+          <div class="flex flex-wrap gap-1">${cells}</div>
+        </div>
+      `;
+    }
+
     item.innerHTML = `
       <div class="flex items-center gap-2 w-full">
         <span class="drag-handle" title="Trascina per riordinare">⠿</span>
@@ -729,6 +800,7 @@ function renderNurseList() {
         <div class="flex flex-wrap gap-1">${tagsHTML}</div>
       </div>
       ${absencePeriodsHTML}
+      ${desiderateHTML}
     `;
 
     container.appendChild(item);
@@ -751,6 +823,15 @@ function renderNurseList() {
     const downBtn = item.querySelector('.btn-move-down');
     if (upBtn) upBtn.addEventListener('click', () => moveNurse(idx, idx - 1));
     if (downBtn) downBtn.addEventListener('click', () => moveNurse(idx, idx + 1));
+
+    // Desiderata grid cells: click cycles the requested shift for that day
+    item.querySelectorAll('.desiderata-cell').forEach(cell => {
+      cell.addEventListener('click', e => {
+        e.stopPropagation();
+        const nIdx = parseInt(cell.dataset.nurse);
+        if (Number.isInteger(nIdx) && cell.dataset.date) cycleDesiderata(nIdx, cell.dataset.date);
+      });
+    });
 
     // Tag toggle
     item.querySelectorAll('.tag').forEach(tagBtn => {
@@ -2560,16 +2641,21 @@ function renderStep4() {
     bodyHTML += `<tr>`;
     bodyHTML += `<td class="text-xs font-medium truncate" title="${escHtml(activeNurses[n].name)}">${escHtml(activeNurses[n].name)}</td>`;
 
+    const nurseWishes =
+      activeNurses[n].tags && activeNurses[n].tags.includes('desiderate') ? activeNurses[n].desiderate || {} : null;
     for (let d = 0; d < numDays; d++) {
       const shift = state.schedule[n][d] || '';
       const wk = isWeekend(state.year, state.month, d + 1);
       const vio = vioMap.has(`${n},${d}`);
+      const wish = nurseWishes ? nurseWishes[desiderataDateKey(state.year, state.month, d + 1)] : null;
       const lockedShift = getLockedManualShift(n, d);
       const lockAttrs = lockedShift
         ? ` aria-readonly="true" title="Turno fisso non modificabile" aria-label="Turno ${SHIFT_LABELS[shift]} fisso non modificabile"`
-        : '';
+        : wish
+          ? ` title="Desiderata: ${SHIFT_LABELS[wish]}"`
+          : '';
       bodyHTML += `<td class="${wk ? 'col-weekend' : ''} ${vio ? 'violation-cell' : ''}" data-n="${n}" data-d="${d}">
-                     <span class="shift-cell ${SHIFT_COLORS[shift] || 'shift-empty'} ${lockedShift ? 'opacity-80' : ''}"
+                     <span class="shift-cell ${SHIFT_COLORS[shift] || 'shift-empty'} ${lockedShift ? 'opacity-80' : ''} ${wish ? 'desiderata-mark' : ''}"
                             data-n="${n}" data-d="${d}"${lockAttrs}>${shift}</span>
                    </td>`;
     }

@@ -173,6 +173,40 @@ function buildContext(config) {
     }
   }
 
+  // Desiderate (requested days): pin the requested shift on each free cell.
+  // Requested nights bring their mandatory recovery tail along (S, R and the
+  // second R for the rigid diurni_e_notturni matrix). Requests incompatible
+  // with the nurse's limitation tags are ignored.
+  for (let n = 0; n < numNurses; n++) {
+    const nurse = nurses[n];
+    if (!nurse.tags.includes('desiderate') || !nurse.desiderate) continue;
+    for (let d = 0; d < numDays; d++) {
+      if (pinned[n][d]) continue;
+      const wish = getDesiderataShift(nurse, d + 1, year, month);
+      if (!wish) continue;
+      // Tag compatibility: isRepairShiftAllowed covers M/P/D/R; a requested
+      // night is valid for every profile that may work nights.
+      const wishAllowed =
+        wish === 'R' ||
+        (wish === 'N'
+          ? !(
+              nurseProps[n].noNotti ||
+              nurseProps[n].diurniNoNotti ||
+              nurseProps[n].mattineEPomeriggi ||
+              nurseProps[n].soloMattine ||
+              nurseProps[n].soloDiurni
+            )
+          : isRepairShiftAllowed(nurseProps[n], wish));
+      if (!wishAllowed) continue;
+      pinned[n][d] = wish;
+      if (wish === 'N') {
+        if (d + 1 < numDays && !pinned[n][d + 1]) pinned[n][d + 1] = 'S';
+        if (d + 2 < numDays && !pinned[n][d + 2]) pinned[n][d + 2] = 'R';
+        if (nurseProps[n].diurniENotturni && d + 3 < numDays && !pinned[n][d + 3]) pinned[n][d + 3] = 'R';
+      }
+    }
+  }
+
   // Precompute week day-lists
   const weekDaysList = Array.from({ length: numWeeks }, () => []);
   for (let d = 0; d < numDays; d++) weekDaysList[weekOf(d)].push(d);
@@ -217,6 +251,15 @@ function buildContext(config) {
     hourDeltas: hourDeltas || null,
     prevTail,
   };
+}
+
+// Requested shift for a day from the nurse's desiderate map
+// ({ 'YYYY-MM-DD': 'M'|'P'|'D'|'N'|'R' }), or null.
+function getDesiderataShift(nurse, day1Based, year, month) {
+  if (!nurse.desiderate) return null;
+  const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day1Based).padStart(2, '0')}`;
+  const wish = nurse.desiderate[key];
+  return wish === 'M' || wish === 'P' || wish === 'D' || wish === 'N' || wish === 'R' ? wish : null;
 }
 
 function getAbsenceShift(nurse, day1Based, year, month) {

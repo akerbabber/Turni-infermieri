@@ -757,6 +757,7 @@ function construct(ctx) {
         while (rest < need) {
           let converted = false;
           for (const d of wDays) {
+            if (pinned[n][d]) continue;
             const s = schedule[n][d];
             if (s !== 'M' && s !== 'P') continue;
             const cov = dayCoverage(schedule, d, numNurses);
@@ -774,6 +775,7 @@ function construct(ctx) {
           // BUG #5 fix: also try converting D → R if M/P conversion failed
           if (!converted && !nurseProps[n].noDiurni && !nurseProps[n].mattineEPomeriggi) {
             for (const d of wDays) {
+              if (pinned[n][d]) continue;
               const s = schedule[n][d];
               if (s !== 'D') continue;
               const cov = dayCoverage(schedule, d, numNurses);
@@ -799,6 +801,7 @@ function construct(ctx) {
   for (let n = 0; n < numNurses; n++) {
     if (!nurseProps[n].noDiurni) continue;
     for (let d = 0; d < numDays; d++) {
+      if (pinned[n][d]) continue;
       if (!isForbiddenRestrictedNoDiurniRestDay(schedule, ctx, n, d)) continue;
       const bestShift = chooseBestMPShift(n, d);
       if (bestShift) schedule[n][d] = bestShift;
@@ -849,6 +852,7 @@ function construct(ctx) {
       let swaps = Math.floor(Math.abs(diff) / 2);
       for (const d of shuffle([...srcDays])) {
         if (swaps <= 0) break;
+        if (pinned[n][d]) continue;
         const cov = dayCoverage(schedule, d, numNurses);
         const srcCov = srcShift === 'M' ? cov.M : cov.P;
         const dstCov = newShift === 'M' ? cov.M : cov.P;
@@ -905,7 +909,7 @@ function construct(ctx) {
     for (let n = 0; n < numNurses; n++) {
       for (let d = 1; d < numDays - 1; d++) {
         if (schedule[n][d - 1] !== 'D' || schedule[n][d] !== 'D') continue;
-        if (schedule[n][d + 1] === 'R') continue;
+        if (schedule[n][d + 1] === 'R' || pinned[n][d + 1]) continue;
         const s = schedule[n][d + 1];
         if (s === 'M' || s === 'P') {
           const cov = dayCoverage(schedule, d + 1, numNurses);
@@ -959,8 +963,10 @@ function trySwapMP(schedule, n, srcDays, dstDays, mid, srcIsM, ctx) {
   const { numDays, numNurses, minCovM, maxCovM, minCovP, maxCovP } = ctx;
   for (const sDay of srcDays) {
     if (sDay >= mid) continue;
+    if (ctx.pinned[n][sDay]) continue;
     for (const dDay of dstDays) {
       if (dDay < mid) continue;
+      if (ctx.pinned[n][dDay]) continue;
       const newSrc = srcIsM ? 'P' : 'M';
       const newDst = srcIsM ? 'M' : 'P';
       const prevS = sDay > 0 ? schedule[n][sDay - 1] : null;
